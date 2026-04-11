@@ -1,4 +1,10 @@
+---
+tags: [design, feature/bar-17, status/done]
+---
+
 # BAR-17 실시간 대시보드 Design Document
+
+> **관련 문서**: [[../../01-plan/features/bar-17-dashboard.plan|Plan]] | [[bar-17-dashboard.analysis|Analysis]] | [[../../04-report/bar-17-dashboard.report|Report]]
 
 > **Summary**: Next.js 15 + ShadCN UI + Lightweight Charts 기반 실시간 트레이딩 대시보드 상세 설계
 >

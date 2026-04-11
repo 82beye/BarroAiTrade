@@ -1,4 +1,10 @@
+---
+tags: [report, feature/bar-17, status/done]
+---
+
 # BAR-17 PDCA Completion Report
+
+> **관련 문서**: [[../01-plan/features/bar-17-dashboard.plan|Plan]] | [[../02-design/features/bar-17-dashboard.design|Design]] | [[../03-analysis/bar-17-dashboard.analysis|Analysis]]
 
 > **Feature**: BAR-17 실시간 대시보드 (Next.js 15)
 > **Date**: 2026-04-11

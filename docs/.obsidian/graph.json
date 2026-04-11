@@ -1,0 +1,26 @@
+{
+  "collapse-filter": false,
+  "search": "",
+  "showTags": true,
+  "showAttachments": false,
+  "hideUnresolved": false,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    { "query": "tag:#plan", "color": { "a": 1, "rgb": 3066993 } },
+    { "query": "tag:#design", "color": { "a": 1, "rgb": 3447003 } },
+    { "query": "tag:#analysis", "color": { "a": 1, "rgb": 15105570 } },
+    { "query": "tag:#report", "color": { "a": 1, "rgb": 5763719 } },
+    { "query": "tag:#paperclip", "color": { "a": 1, "rgb": 15548997 } }
+  ],
+  "collapse-display": false,
+  "showArrow": true,
+  "textFadeMultiplier": 0,
+  "nodeSizeMultiplier": 1,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": true,
+  "centerStrength": 0.5,
+  "repelStrength": 10,
+  "linkStrength": 1,
+  "linkDistance": 250
+}

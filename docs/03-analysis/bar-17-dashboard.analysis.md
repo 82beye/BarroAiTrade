@@ -1,4 +1,10 @@
+---
+tags: [analysis, feature/bar-17, status/done]
+---
+
 # BAR-17 Gap Analysis Report
+
+> **관련 문서**: [[../01-plan/features/bar-17-dashboard.plan|Plan]] | [[../02-design/features/bar-17-dashboard.design|Design]] | [[../04-report/bar-17-dashboard.report|Report]]
 
 - **Match Rate**: 77%
 - **Date**: 2026-04-11

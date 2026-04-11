@@ -1,4 +1,10 @@
+---
+tags: [deployment, infrastructure]
+---
+
 # BarroAiTrade 배포 가이드
+
+> [[README|← 홈으로]]
 
 ## 시스템 요구사항
 

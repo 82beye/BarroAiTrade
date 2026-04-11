@@ -1,4 +1,10 @@
+---
+tags: [plan, feature/bar-17, status/done]
+---
+
 # BAR-17 실시간 대시보드 Planning Document
+
+> **관련 문서**: [[bar-17-dashboard.design|Design]] | [[../../03-analysis/bar-17-dashboard.analysis|Analysis]] | [[../../04-report/bar-17-dashboard.report|Report]]
 
 > **Summary**: Next.js 15 기반 실시간 트레이딩 대시보드 구현 (WebSocket + 차트 + 컴포넌트 시스템)
 >
