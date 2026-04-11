@@ -1,0 +1,25 @@
+# BarroAiTrade — Backend (FastAPI)
+FROM python:3.11-slim
+
+# 시스템 의존성
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 의존성 먼저 설치 (캐시 레이어 최적화)
+COPY backend/requirements.txt ./backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt
+
+# 소스 복사
+COPY backend/ ./backend/
+COPY .env.local .env.local 2>/dev/null || true
+
+# 헬스체크
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/api/status || exit 1
+
+EXPOSE 8000
+
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]

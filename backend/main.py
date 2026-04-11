@@ -3,17 +3,15 @@ BarroAiTrade Backend — FastAPI 앱 진입점
 """
 from __future__ import annotations
 
-import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.websocket import websocket_endpoint
+from backend.core.monitoring.logger import setup_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+setup_logging(json_format=os.getenv("LOG_JSON", "false").lower() == "true")
 
 app = FastAPI(
     title="BarroAiTrade API",
@@ -46,4 +44,10 @@ async def health():
 
 @app.on_event("startup")
 async def startup() -> None:
+    import logging
+    from backend.core.monitoring.telegram_bot import telegram
+
     logging.getLogger(__name__).info("BarroAiTrade 백엔드 시작")
+    mode = os.getenv("TRADING_MODE", "simulation")
+    market = os.getenv("TRADING_MARKET", "stock")
+    await telegram.notify_system_start(mode, market)
