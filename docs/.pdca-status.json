@@ -18,8 +18,8 @@
   "primaryFeature": "bar-17-dashboard",
   "features": {
     "bar-17-dashboard": {
-      "phase": "do",
-      "phaseNumber": 3,
+      "phase": "completed",
+      "phaseNumber": 6,
       "matchRate": null,
       "iterationCount": 0,
       "requirements": [
