@@ -29,10 +29,14 @@ class AppState:
         self.error_message: str = ""
 
         self.positions: Dict[str, Any] = {}
-        self.watchlist: List[Dict[str, Any]] = []
+        self.watchlist: List[str] = []
         self.market_condition: Optional[Dict[str, Any]] = None
         self.config: Optional[Dict[str, Any]] = None
         self.risk_status: Optional[Dict[str, Any]] = None
+        self.trading_config: Optional[Dict[str, Any]] = None
+
+        # 마켓 게이트웨이 (API 레이어에서 사용)
+        self.market_gateway: Optional[Any] = None
 
         # 리스크 엔진 및 컴플라이언스 (매매 엔진 초기화 시 주입)
         self.risk_engine: Optional["RiskEngine"] = None

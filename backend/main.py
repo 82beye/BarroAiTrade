@@ -30,9 +30,21 @@ app.add_middleware(
 # ── REST 라우터 등록 ─────────────────────────────────────────────────────────
 from backend.api.routes.signals import router as signals_router
 from backend.api.routes.risk import router as risk_router
+from backend.api.routes.market import router as market_router
+from backend.api.routes.trading import router as trading_router
+from backend.api.routes.positions import router as positions_router
+from backend.api.routes.watchlist import router as watchlist_router
+from backend.api.routes.config import router as config_router
+from backend.api.routes.reports import router as reports_router
 
 app.include_router(signals_router, prefix="/api")
 app.include_router(risk_router, prefix="/api")
+app.include_router(market_router, prefix="/api")
+app.include_router(trading_router, prefix="/api")
+app.include_router(positions_router, prefix="/api")
+app.include_router(watchlist_router, prefix="/api")
+app.include_router(config_router, prefix="/api")
+app.include_router(reports_router, prefix="/api")
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
 app.add_api_websocket_route("/ws/realtime", websocket_endpoint)
