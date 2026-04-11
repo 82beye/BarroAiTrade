@@ -2,6 +2,8 @@
 매매 API 라우터
 
 엔드포인트:
+  POST /api/trading/start                    - 매매 시스템 시작
+  POST /api/trading/stop                     - 매매 시스템 중지
   POST /api/trading/order                    - 주문 실행
   DELETE /api/trading/order/:order_id        - 주문 취소
   GET /api/trading/order/:order_id           - 주문 상태 조회
@@ -11,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Path, Body, HTTPException
+from fastapi import APIRouter, Path, Body, HTTPException, Query
 
 from backend.core.gateway.base import MarketGateway
 from backend.models.position import Order, OrderSide, OrderType
@@ -20,6 +22,51 @@ from backend.core.state import app_state
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+@router.post("/trading/start")
+async def start_trading(
+    mode: str = Query("simulation", description="매매 모드: simulation | live"),
+    market: str = Query("stock", description="마켓: stock | crypto"),
+) -> dict:
+    """매매 시스템 시작"""
+    if app_state.trading_state == "running":
+        return {"success": False, "message": "이미 실행 중", "state": app_state.trading_state}
+
+    try:
+        from backend.core.orchestrator import orchestrator
+        await orchestrator.start(mode=mode, market=market)
+        logger.info("매매 시스템 시작: mode=%s, market=%s", mode, market)
+        return {
+            "success": True,
+            "message": f"매매 시스템 시작 ({mode}/{market})",
+            "state": app_state.trading_state,
+        }
+    except Exception as e:
+        logger.error("매매 시스템 시작 실패: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/trading/stop")
+async def stop_trading(
+    reason: str = Query("수동 중지", description="중지 사유"),
+) -> dict:
+    """매매 시스템 중지"""
+    if app_state.trading_state not in ("running", "error"):
+        return {"success": False, "message": "실행 중이 아님", "state": app_state.trading_state}
+
+    try:
+        from backend.core.orchestrator import orchestrator
+        await orchestrator.stop(reason=reason)
+        logger.info("매매 시스템 중지: %s", reason)
+        return {
+            "success": True,
+            "message": "매매 시스템 중지 완료",
+            "state": app_state.trading_state,
+        }
+    except Exception as e:
+        logger.error("매매 시스템 중지 실패: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _get_gateway() -> MarketGateway:

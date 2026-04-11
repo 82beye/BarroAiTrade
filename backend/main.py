@@ -68,6 +68,14 @@ async def startup() -> None:
     log = logging.getLogger(__name__)
     log.info("BarroAiTrade 백엔드 시작")
 
+    # DB 초기화
+    try:
+        from backend.db.database import init_db
+        await init_db()
+        log.info("DB 초기화 완료")
+    except Exception as e:
+        log.warning("DB 초기화 실패 (인메모리 모드로 동작): %s", e)
+
     # RiskEngine 및 ComplianceService 초기화
     app_state.risk_engine = RiskEngine(limits=RiskLimits())
     app_state.compliance = ComplianceService()

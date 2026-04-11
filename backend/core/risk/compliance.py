@@ -51,7 +51,22 @@ class ComplianceService:
         if len(self._audit_log) > 5000:
             self._audit_log = self._audit_log[-5000:]
         logger.info("[AUDIT] %s", entry)
-        # TODO: DB 저장 구현 (Phase 1 백엔드 엔지니어)
+        # DB 영속화
+        try:
+            from backend.db.repositories.audit_repo import audit_repo
+            await audit_repo.insert(
+                event_type=event_type,
+                symbol=symbol,
+                market_type=market_type,
+                quantity=quantity,
+                price=price,
+                pnl=pnl,
+                strategy_id=strategy_id,
+                metadata=metadata,
+                created_at=entry["created_at"],
+            )
+        except Exception as db_err:
+            logger.debug("감사 로그 DB 저장 실패 (무시): %s", db_err)
 
     async def log_risk_event(
         self,
