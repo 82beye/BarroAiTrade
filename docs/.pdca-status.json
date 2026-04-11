@@ -1,0 +1,302 @@
+{
+  "version": "2.0",
+  "lastUpdated": "2026-04-11T01:40:23.880Z",
+  "activeFeatures": [
+    "bar-17-dashboard",
+    "gateway",
+    "backend",
+    "core",
+    "risk",
+    "api",
+    "frontend",
+    "trading",
+    "markets",
+    "positions"
+  ],
+  "primaryFeature": "bar-17-dashboard",
+  "features": {
+    "bar-17-dashboard": {
+      "phase": "design",
+      "phaseNumber": 2,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": ["FR-01", "FR-02", "FR-03", "FR-04", "FR-05", "FR-06", "FR-07", "FR-08", "FR-09", "FR-10"],
+      "documents": {
+        "plan": "docs/01-plan/features/bar-17-dashboard.plan.md",
+        "design": "docs/02-design/features/bar-17-dashboard.design.md"
+      },
+      "timestamps": {
+        "started": "2026-04-11T10:00:00.000Z",
+        "lastUpdated": "2026-04-11T10:30:00.000Z"
+      },
+      "lastFile": "docs/02-design/features/bar-17-dashboard.design.md"
+    },
+    "gateway": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T01:35:02.437Z",
+        "lastUpdated": "2026-04-11T01:35:02.437Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/gateway/base.py"
+    },
+    "backend": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T01:35:08.910Z",
+        "lastUpdated": "2026-04-11T01:36:30.054Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/main.py"
+    },
+    "core": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T01:35:49.362Z",
+        "lastUpdated": "2026-04-11T01:35:49.362Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/state.py"
+    },
+    "risk": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T01:36:02.007Z",
+        "lastUpdated": "2026-04-11T01:36:11.448Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/risk/compliance.py"
+    },
+    "api": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T01:36:19.770Z",
+        "lastUpdated": "2026-04-11T01:36:19.770Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/api/websocket.py"
+    },
+    "frontend": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T01:38:55.961Z",
+        "lastUpdated": "2026-04-11T01:39:45.839Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/hooks/useWebSocket.ts"
+    },
+    "trading": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T01:40:07.705Z",
+        "lastUpdated": "2026-04-11T01:40:07.705Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/app/trading/page.tsx"
+    },
+    "markets": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T01:40:16.224Z",
+        "lastUpdated": "2026-04-11T01:40:16.224Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/app/markets/page.tsx"
+    },
+    "positions": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T01:40:23.880Z",
+        "lastUpdated": "2026-04-11T01:40:23.880Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/app/positions/page.tsx"
+    }
+  },
+  "pipeline": {
+    "currentPhase": 1,
+    "level": "Dynamic",
+    "phaseHistory": []
+  },
+  "session": {
+    "startedAt": "2026-04-11T01:23:25.516Z",
+    "onboardingCompleted": false,
+    "lastActivity": "2026-04-11T01:40:23.880Z"
+  },
+  "history": [
+    {
+      "timestamp": "2026-04-11T01:35:02.437Z",
+      "feature": "gateway",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:35:08.910Z",
+      "feature": "backend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:35:17.765Z",
+      "feature": "backend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:35:23.509Z",
+      "feature": "backend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:35:31.167Z",
+      "feature": "backend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:35:37.636Z",
+      "feature": "backend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:35:49.362Z",
+      "feature": "core",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:36:02.007Z",
+      "feature": "risk",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:36:11.448Z",
+      "feature": "risk",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:36:19.770Z",
+      "feature": "api",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:36:30.054Z",
+      "feature": "backend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:38:55.961Z",
+      "feature": "frontend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:39:02.610Z",
+      "feature": "frontend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:39:04.912Z",
+      "feature": "frontend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:39:12.930Z",
+      "feature": "frontend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:39:18.239Z",
+      "feature": "frontend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:39:21.544Z",
+      "feature": "frontend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:39:27.342Z",
+      "feature": "frontend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:39:41.966Z",
+      "feature": "frontend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:39:45.839Z",
+      "feature": "frontend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:40:07.705Z",
+      "feature": "trading",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:40:16.224Z",
+      "feature": "markets",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T01:40:23.880Z",
+      "feature": "positions",
+      "phase": "do",
+      "action": "updated"
+    }
+  ]
+}
