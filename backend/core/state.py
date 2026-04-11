@@ -7,9 +7,13 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 from fastapi import WebSocket
+
+if TYPE_CHECKING:
+    from backend.core.risk.risk_engine import RiskEngine
+    from backend.core.risk.compliance import ComplianceService
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +33,10 @@ class AppState:
         self.market_condition: Optional[Dict[str, Any]] = None
         self.config: Optional[Dict[str, Any]] = None
         self.risk_status: Optional[Dict[str, Any]] = None
+
+        # 리스크 엔진 및 컴플라이언스 (매매 엔진 초기화 시 주입)
+        self.risk_engine: Optional["RiskEngine"] = None
+        self.compliance: Optional["ComplianceService"] = None
 
         self.trading_task: Optional[asyncio.Task] = None
         self._ws_clients: Set[WebSocket] = set()
@@ -54,6 +62,14 @@ class AppState:
                 dead.add(ws)
         for ws in dead:
             self._ws_clients.discard(ws)
+
+    async def broadcast_risk_status(self) -> None:
+        """현재 리스크 상태를 모든 WebSocket 클라이언트에 전송"""
+        if self.risk_engine is None:
+            return
+        from backend.models.risk import RiskLimits
+        status = self.risk_engine.get_status(self.positions)
+        await self.broadcast("risk_status", status.model_dump(mode="json"))
 
     # ── 직렬화 헬퍼 ────────────────────────────────────────────────────────────
 

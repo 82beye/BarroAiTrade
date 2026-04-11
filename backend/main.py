@@ -29,8 +29,10 @@ app.add_middleware(
 
 # ── REST 라우터 등록 ─────────────────────────────────────────────────────────
 from backend.api.routes.signals import router as signals_router
+from backend.api.routes.risk import router as risk_router
 
 app.include_router(signals_router, prefix="/api")
+app.include_router(risk_router, prefix="/api")
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
 app.add_api_websocket_route("/ws/realtime", websocket_endpoint)
@@ -46,8 +48,19 @@ async def health():
 async def startup() -> None:
     import logging
     from backend.core.monitoring.telegram_bot import telegram
+    from backend.core.risk.risk_engine import RiskEngine
+    from backend.core.risk.compliance import ComplianceService
+    from backend.core.state import app_state
+    from backend.models.risk import RiskLimits
 
-    logging.getLogger(__name__).info("BarroAiTrade 백엔드 시작")
+    log = logging.getLogger(__name__)
+    log.info("BarroAiTrade 백엔드 시작")
+
+    # RiskEngine 및 ComplianceService 초기화
+    app_state.risk_engine = RiskEngine(limits=RiskLimits())
+    app_state.compliance = ComplianceService()
+    log.info("RiskEngine 초기화 완료 (기본 한도)")
+
     mode = os.getenv("TRADING_MODE", "simulation")
     market = os.getenv("TRADING_MARKET", "stock")
     await telegram.notify_system_start(mode, market)
