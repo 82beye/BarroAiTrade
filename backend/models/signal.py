@@ -15,13 +15,14 @@ class EntrySignal(BaseModel):
     symbol: str
     name: str
     price: float
-    signal_type: Literal["blue_line", "watermelon", "crypto_breakout"]
+    signal_type: Literal["blue_line", "watermelon", "crypto_breakout", "f_zone", "sf_zone"]
     score: float
     reason: str
     market_type: MarketType
     strategy_id: str
     timestamp: datetime
     risk_approved: bool = False
+    metadata: dict = {}
 
 
 class ExitSignal(BaseModel):
