@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-04-11T03:47:46.842Z",
+  "lastUpdated": "2026-04-12T03:52:19.525Z",
   "activeFeatures": [
     "bar-17-dashboard",
     "gateway",
@@ -18,7 +18,16 @@
     "scanner",
     "routes",
     "monitoring",
-    "scripts"
+    "scripts",
+    "watchlist",
+    "reports",
+    "settings",
+    "layout",
+    "config",
+    "db",
+    "repositories",
+    "execution",
+    "analysis"
   ],
   "primaryFeature": "bar-17-dashboard",
   "features": {
@@ -71,7 +80,7 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T01:35:08.910Z",
-        "lastUpdated": "2026-04-11T03:47:46.842Z"
+        "lastUpdated": "2026-04-12T02:36:46.069Z"
       },
       "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/main.py"
     },
@@ -84,9 +93,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T01:35:49.362Z",
-        "lastUpdated": "2026-04-11T03:47:42.591Z"
+        "lastUpdated": "2026-04-12T02:29:25.959Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/state.py"
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/orchestrator.py"
     },
     "risk": {
       "phase": "do",
@@ -97,7 +106,7 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T01:36:02.007Z",
-        "lastUpdated": "2026-04-11T03:42:42.985Z"
+        "lastUpdated": "2026-04-11T09:30:12.665Z"
       },
       "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/risk/compliance.py"
     },
@@ -123,9 +132,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T01:38:55.961Z",
-        "lastUpdated": "2026-04-11T02:20:28.559Z"
+        "lastUpdated": "2026-04-12T02:33:51.214Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/app/page.tsx"
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/next.config.js"
     },
     "trading": {
       "phase": "do",
@@ -201,9 +210,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T03:35:51.026Z",
-        "lastUpdated": "2026-04-11T03:44:14.230Z"
+        "lastUpdated": "2026-04-11T09:26:30.427Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/strategy/backtester.py"
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/strategy/stock_strategy.py"
     },
     "scanner": {
       "phase": "do",
@@ -227,9 +236,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T03:39:34.491Z",
-        "lastUpdated": "2026-04-11T03:47:35.119Z"
+        "lastUpdated": "2026-04-12T02:36:16.743Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/api/routes/reports.py"
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/api/routes/trading.py"
     },
     "monitoring": {
       "phase": "do",
@@ -240,9 +249,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T03:40:13.519Z",
-        "lastUpdated": "2026-04-11T03:40:33.931Z"
+        "lastUpdated": "2026-04-11T09:28:05.156Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/monitoring/__init__.py"
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/monitoring/report_service.py"
     },
     "scripts": {
       "phase": "do",
@@ -256,6 +265,123 @@
         "lastUpdated": "2026-04-11T03:41:48.641Z"
       },
       "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/scripts/integration_test.sh"
+    },
+    "watchlist": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T09:20:41.169Z",
+        "lastUpdated": "2026-04-11T09:23:01.243Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/app/watchlist/page.tsx"
+    },
+    "reports": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T09:21:04.147Z",
+        "lastUpdated": "2026-04-11T09:23:09.871Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/app/reports/page.tsx"
+    },
+    "settings": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T09:21:28.005Z",
+        "lastUpdated": "2026-04-11T09:22:41.176Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/app/settings/page.tsx"
+    },
+    "layout": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T09:21:40.239Z",
+        "lastUpdated": "2026-04-11T09:21:40.239Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/components/layout/app-sidebar.tsx"
+    },
+    "config": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T09:25:27.806Z",
+        "lastUpdated": "2026-04-11T09:25:27.806Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/config/settings.py"
+    },
+    "db": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T09:25:38.809Z",
+        "lastUpdated": "2026-04-11T09:25:38.809Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/db/database.py"
+    },
+    "repositories": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T09:25:50.194Z",
+        "lastUpdated": "2026-04-11T09:25:50.194Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/db/repositories/audit_repo.py"
+    },
+    "execution": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-11T09:26:49.910Z",
+        "lastUpdated": "2026-04-11T09:27:14.421Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/execution/position_manager.py"
+    },
+    "analysis": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-04-12T03:51:50.394Z",
+        "lastUpdated": "2026-04-12T03:52:19.525Z"
+      },
+      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/analysis/bar-29-backtest-validation.py"
     }
   },
   "pipeline": {
@@ -266,7 +392,7 @@
   "session": {
     "startedAt": "2026-04-11T01:23:25.516Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-04-11T03:47:46.842Z"
+    "lastActivity": "2026-04-12T03:52:19.525Z"
   },
   "history": [
     {
@@ -836,6 +962,252 @@
     {
       "timestamp": "2026-04-11T03:47:46.842Z",
       "feature": "backend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:20:41.169Z",
+      "feature": "watchlist",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:21:04.147Z",
+      "feature": "reports",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:21:28.005Z",
+      "feature": "settings",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:21:40.239Z",
+      "feature": "layout",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:21:57.292Z",
+      "feature": "reports",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:22:04.066Z",
+      "feature": "reports",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:22:07.518Z",
+      "feature": "watchlist",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:22:14.944Z",
+      "feature": "watchlist",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:22:21.389Z",
+      "feature": "settings",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:22:29.748Z",
+      "feature": "settings",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:22:33.916Z",
+      "feature": "settings",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:22:39.017Z",
+      "feature": "settings",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:22:41.176Z",
+      "feature": "settings",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:22:57.756Z",
+      "feature": "watchlist",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:23:01.243Z",
+      "feature": "watchlist",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:23:05.136Z",
+      "feature": "reports",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:23:07.502Z",
+      "feature": "reports",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:23:09.871Z",
+      "feature": "reports",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:25:27.806Z",
+      "feature": "config",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:25:38.809Z",
+      "feature": "db",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:25:50.194Z",
+      "feature": "repositories",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:25:57.722Z",
+      "feature": "strategy",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:26:30.427Z",
+      "feature": "strategy",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:26:49.910Z",
+      "feature": "execution",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:27:14.421Z",
+      "feature": "execution",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:27:33.154Z",
+      "feature": "monitoring",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:28:05.156Z",
+      "feature": "monitoring",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:28:58.196Z",
+      "feature": "core",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:30:06.052Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:30:12.665Z",
+      "feature": "risk",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-11T09:30:22.390Z",
+      "feature": "backend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-12T02:29:21.715Z",
+      "feature": "core",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-12T02:29:25.959Z",
+      "feature": "core",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-12T02:29:39.675Z",
+      "feature": "backend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-12T02:33:51.214Z",
+      "feature": "frontend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-12T02:36:04.711Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-12T02:36:16.743Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-12T02:36:40.104Z",
+      "feature": "backend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-12T02:36:46.069Z",
+      "feature": "backend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-12T03:51:50.394Z",
+      "feature": "analysis",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-04-12T03:52:19.525Z",
+      "feature": "analysis",
       "phase": "do",
       "action": "updated"
     }

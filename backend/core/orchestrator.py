@@ -191,7 +191,8 @@ class TradingOrchestrator:
                     try:
                         balance = await gateway.get_balance()
                         self._position_mgr.sync_balance(balance)
-                        app_state.risk_engine.update_total_value(balance.total_value)
+                        if app_state.risk_engine:
+                            app_state.risk_engine.update_total_value(balance.total_value)
 
                         # 현재가 업데이트
                         positions = self._position_mgr.get_positions()
@@ -318,6 +319,14 @@ class TradingOrchestrator:
         # PositionManager 초기화
         from backend.core.execution.position_manager import PositionManager
         self._position_mgr = PositionManager()
+
+        # RiskEngine 초기화
+        from backend.core.risk.risk_engine import RiskEngine
+        from backend.core.risk.compliance import ComplianceService
+        from backend.models.risk import RiskLimits
+        app_state.risk_engine = RiskEngine(limits=RiskLimits())
+        app_state.compliance = ComplianceService()
+        logger.info("RiskEngine 초기화 완료: %s", app_state.risk_engine.limits.model_dump())
 
         # AlertService 초기화
         from backend.core.monitoring.alert_service import alert_service
