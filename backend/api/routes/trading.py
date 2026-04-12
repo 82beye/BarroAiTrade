@@ -82,14 +82,14 @@ def _get_gateway() -> MarketGateway:
 
 @router.post("/trading/order")
 async def place_order(
-    order_data: dict = Body(..., example={
+    order_data: dict = Body(..., examples={"default": {"value": {
         "symbol": "005930",
         "side": "buy",
         "order_type": "limit",
         "quantity": 10,
         "price": 75000,
         "strategy_id": "manual"
-    }),
+    }}}),
 ) -> dict:
     """
     주문 실행

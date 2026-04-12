@@ -4,6 +4,8 @@ BarroAiTrade Backend — FastAPI 앱 진입점
 from __future__ import annotations
 
 import os
+import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,10 +15,44 @@ from backend.core.monitoring.logger import setup_logging
 
 setup_logging(json_format=os.getenv("LOG_JSON", "false").lower() == "true")
 
+_log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from backend.core.monitoring.telegram_bot import telegram
+    from backend.core.risk.risk_engine import RiskEngine
+    from backend.core.risk.compliance import ComplianceService
+    from backend.core.state import app_state
+    from backend.models.risk import RiskLimits
+
+    _log.info("BarroAiTrade 백엔드 시작")
+
+    # DB 초기화
+    try:
+        from backend.db.database import init_db
+        await init_db()
+        _log.info("DB 초기화 완료")
+    except Exception as e:
+        _log.warning("DB 초기화 실패 (인메모리 모드로 동작): %s", e)
+
+    # RiskEngine 및 ComplianceService 초기화
+    app_state.risk_engine = RiskEngine(limits=RiskLimits())
+    app_state.compliance = ComplianceService()
+    _log.info("RiskEngine 초기화 완료 (기본 한도)")
+
+    mode = os.getenv("TRADING_MODE", "simulation")
+    market = os.getenv("TRADING_MARKET", "stock")
+    await telegram.notify_system_start(mode, market)
+
+    yield  # 서버 실행 중
+
+
 app = FastAPI(
     title="BarroAiTrade API",
     version="0.1.0",
     description="AI 기반 멀티마켓 자동매매 플랫폼",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -56,31 +92,3 @@ async def health():
     return app_state.to_system_status()
 
 
-@app.on_event("startup")
-async def startup() -> None:
-    import logging
-    from backend.core.monitoring.telegram_bot import telegram
-    from backend.core.risk.risk_engine import RiskEngine
-    from backend.core.risk.compliance import ComplianceService
-    from backend.core.state import app_state
-    from backend.models.risk import RiskLimits
-
-    log = logging.getLogger(__name__)
-    log.info("BarroAiTrade 백엔드 시작")
-
-    # DB 초기화
-    try:
-        from backend.db.database import init_db
-        await init_db()
-        log.info("DB 초기화 완료")
-    except Exception as e:
-        log.warning("DB 초기화 실패 (인메모리 모드로 동작): %s", e)
-
-    # RiskEngine 및 ComplianceService 초기화
-    app_state.risk_engine = RiskEngine(limits=RiskLimits())
-    app_state.compliance = ComplianceService()
-    log.info("RiskEngine 초기화 완료 (기본 한도)")
-
-    mode = os.getenv("TRADING_MODE", "simulation")
-    market = os.getenv("TRADING_MARKET", "stock")
-    await telegram.notify_system_start(mode, market)
