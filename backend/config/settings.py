@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     kiwoom_base_url: str = "https://openapi.koreainvestment.com:9443"
     kiwoom_app_key: str = ""
     kiwoom_app_secret: str = ""
+    kiwoom_account_no: str = ""
     kiwoom_mock: bool = True
 
     # DB

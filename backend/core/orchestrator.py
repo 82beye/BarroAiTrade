@@ -343,6 +343,20 @@ class TradingOrchestrator:
         except Exception as e:
             logger.warning("DB 초기화 실패 (인메모리 모드): %s", e)
 
+        # KiwoomGateway 초기화
+        from backend.core.gateway.kiwoom import KiwoomGateway
+        from backend.models.config import KiwoomConfig
+        from backend.config.settings import get_settings
+        _s = get_settings()
+        kiwoom_config = KiwoomConfig(
+            app_key=_s.kiwoom_app_key,
+            app_secret=_s.kiwoom_app_secret,
+            account_no=getattr(_s, "kiwoom_account_no", ""),
+            mock=_s.kiwoom_mock,
+        )
+        app_state.market_gateway = KiwoomGateway(config=kiwoom_config)
+        logger.info("KiwoomGateway 초기화 완료: mock=%s", kiwoom_config.mock)
+
         logger.info("서브시스템 초기화 완료")
 
     async def _on_order_filled(self, result: Any) -> None:
