@@ -22,11 +22,12 @@ from backend.models.market import MarketType
 
 logger = logging.getLogger(__name__)
 
-_SYNC_INTERVAL_SEC = 10     # 잔고/포지션 동기화 주기
-_MARKET_INTERVAL_SEC = 30   # 시장 상태 업데이트 주기
-_RESCAN_INTERVAL_SEC = 3    # 신호 스캔 주기
-_EXIT_INTERVAL_SEC = 1      # 청산 조건 체크 주기
-_TASK_RESTART_DELAY = 5     # 태스크 재시작 대기
+_SYNC_INTERVAL_SEC = 10          # 잔고/포지션 동기화 주기
+_MARKET_INTERVAL_SEC = 30        # 시장 상태 업데이트 주기
+_RESCAN_INTERVAL_SEC = 3         # 신호 스캔 주기
+_EXIT_INTERVAL_SEC = 1           # 청산 조건 체크 주기
+_TASK_RESTART_DELAY = 5          # 태스크 재시작 대기
+_DAILY_SCAN_INTERVAL_SEC = 3600  # 당일 스캔 주기 (1시간)
 
 
 class TradingOrchestrator:
@@ -231,7 +232,9 @@ class TradingOrchestrator:
                 break
 
     async def _rescan_loop(self) -> None:
-        """주기적 종목 스캔 (watchlist 대상)"""
+        """주기적 종목 스캔 (watchlist 대상) + Telegram 전송"""
+        last_scan_time: Optional[float] = None
+
         while self._running:
             try:
                 gateway = app_state.market_gateway
@@ -241,6 +244,21 @@ class TradingOrchestrator:
                         "symbols": app_state.watchlist,
                         "timestamp": datetime.now().isoformat(),
                     })
+
+                    # 첫 실행 또는 1시간 경과 시 스캔 + Telegram 전송
+                    now = asyncio.get_event_loop().time()
+                    if last_scan_time is None or (now - last_scan_time) >= _DAILY_SCAN_INTERVAL_SEC:
+                        logger.info("당일 분석 스캔 시작: %d종목", len(app_state.watchlist))
+                        try:
+                            from backend.core.scanner import SignalScanner
+                            scanner = SignalScanner(gateway)
+                            signals = await scanner.scan(app_state.watchlist)
+                            last_scan_time = now
+                            logger.info("당일 분석 스캔 완료: %d개 신호", len(signals))
+                            if self._alert:
+                                await self._alert.on_daily_scan_result(signals)
+                        except Exception as scan_err:
+                            logger.error("당일 분석 스캔 실패: %s", scan_err)
 
                 await asyncio.sleep(_RESCAN_INTERVAL_SEC)
             except asyncio.CancelledError:

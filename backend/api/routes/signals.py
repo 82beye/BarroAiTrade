@@ -15,28 +15,10 @@ from fastapi import APIRouter, Query, HTTPException
 from backend.core.scanner import SignalScanner
 from backend.models.signal import EntrySignal
 from backend.models.market import MarketType
-from backend.core.gateway.base import MarketGateway
+from backend.core.state import app_state
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# ── 게이트웨이 주입 (현재 mock) ─────────────────────────────────────────────────
-# TODO: 실제 마켓 게이트웨이(키움, Binance 등) 연동 시 여기서 초기화
-scanner: Optional[SignalScanner] = None
-
-
-async def _get_scanner(market_type: MarketType = MarketType.STOCK) -> SignalScanner:
-    """스캐너 인스턴스 반환 (lazy initialization)"""
-    global scanner
-    if scanner is None:
-        # TODO: gateway 주입
-        # gateway = get_market_gateway(market_type)
-        # scanner = SignalScanner(gateway)
-        raise HTTPException(
-            status_code=503,
-            detail="마켓 게이트웨이 미초기화 - 설정 필요"
-        )
-    return scanner
 
 
 @router.get("/signals/scan")
@@ -69,23 +51,28 @@ async def scan_signals(
     """
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
 
-    try:
-        mt = MarketType.CRYPTO if market_type.lower() == "crypto" else MarketType.STOCK
-        # scanner_instance = await _get_scanner(mt)
-        # signals = await scanner_instance.scan(symbol_list)
-
-        # TODO: 게이트웨이 연동 후 주석 제거
+    gateway = app_state.market_gateway
+    if gateway is None:
         logger.warning("신호 스캐닝 API: 게이트웨이 미초기화 - 임시 응답 반환")
-
         return {
             "market_type": market_type,
             "scanned_count": len(symbol_list),
             "signal_count": 0,
             "signals": [],
             "status": "not_ready",
-            "message": "마켓 게이트웨이 초기화 대기 중"
+            "message": "마켓 게이트웨이 초기화 대기 중",
         }
 
+    try:
+        scanner = SignalScanner(gateway)
+        signals = await scanner.scan(symbol_list)
+        return {
+            "market_type": market_type,
+            "scanned_count": len(symbol_list),
+            "signal_count": len(signals),
+            "signals": [s.model_dump(mode="json") for s in signals],
+            "status": "ok",
+        }
     except Exception as e:
         logger.error("신호 스캔 실패: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

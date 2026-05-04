@@ -92,6 +92,31 @@ class AlertService:
             f"대상: {', '.join(symbols)}\n사유: {reason}",
         )
 
+    # ── 분석 종목 알림 ────────────────────────────────────────────────────────
+
+    async def on_daily_scan_result(self, signals: list) -> None:
+        """당일 스캔 결과 전송"""
+        SIGNAL_TYPE_KR = {
+            "blue_line": "파란점선",
+            "watermelon": "수박",
+            "f_zone": "F존",
+            "sf_zone": "SF존",
+            "crypto_breakout": "돌파",
+        }
+        if not signals:
+            await self._send(AlertLevel.INFO, "당일 분석 종목", "스캔 완료 — 신호 없음")
+            return
+
+        lines = [f"📊 당일 분석 종목 ({len(signals)}개)"]
+        for i, sig in enumerate(signals, 1):
+            signal_kr = SIGNAL_TYPE_KR.get(sig.signal_type, sig.signal_type)
+            lines.append(
+                f"{'①②③④⑤⑥⑦⑧⑨⑩'[i-1] if i <= 10 else str(i)} "
+                f"{sig.name} ({sig.symbol}) | {signal_kr} | 점수: {sig.score:.1f} | {sig.price:,.0f}원"
+            )
+
+        await self._send(AlertLevel.INFO, "", "\n".join(lines))
+
     # ── 시스템 알림 ───────────────────────────────────────────────────────────
 
     async def on_error(self, component: str, error: str) -> None:
