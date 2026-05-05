@@ -12,6 +12,7 @@ tags: [index, report]
 
 | 피처 | 문서 | 날짜 | 상태 |
 |------|------|------|------|
+| BAR-42 통합 환경변수 스키마 (Phase 0, Match 98%) | [[bar-42-config-settings.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-41 모델 호환 어댑터 (Phase 0, Match 96%) | [[bar-41-model-adapter.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-40 sub_repo 모노레포 흡수 (Phase 0, Match 95%) | [[bar-40-monorepo-absorption.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-17 실시간 대시보드 | [[bar-17-dashboard.report\|보기]] | 2026-04-11 | ✅ 완료 |
