@@ -137,6 +137,25 @@ class AlertService:
         body = f"사유: {reason}" if reason else ""
         await self._send(AlertLevel.INFO, "BarroAiTrade 중지", body)
 
+    async def on_daily_report(self, report: dict) -> None:
+        """일일 P&L 리포트 Telegram 전송"""
+        summary = report.get("summary", {})
+        date_str = report.get("date", "")
+        total_trades = summary.get("total_trades", 0)
+        if total_trades == 0:
+            await self._send(AlertLevel.INFO, f"일일 리포트 ({date_str})", "오늘 매매 없음")
+            return
+        win_rate = summary.get("win_rate_pct", 0.0)
+        total_pnl = summary.get("total_pnl", 0.0)
+        pnl_pct = summary.get("total_pnl_pct", 0.0)
+        level = AlertLevel.SUCCESS if total_pnl >= 0 else AlertLevel.WARNING
+        body = (
+            f"총 매매: {total_trades}건\n"
+            f"승률: {win_rate:.1f}%\n"
+            f"손익: {total_pnl:+,.0f}원 ({pnl_pct:+.2%})"
+        )
+        await self._send(level, f"일일 리포트 ({date_str})", body)
+
     # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────
 
     async def _send(self, level: AlertLevel, title: str, body: str = "") -> None:

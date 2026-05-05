@@ -68,6 +68,7 @@ class TradingOrchestrator:
             ("sync", self._sync_loop),
             ("market", self._market_loop),
             ("rescan", self._rescan_loop),
+            ("daily_report", self._daily_report_loop),
         ]
 
         for name, coro_fn in task_defs:
@@ -267,6 +268,38 @@ class TradingOrchestrator:
                 logger.error("rescan 오류: %s", e)
                 await asyncio.sleep(3)
 
+    async def _daily_report_loop(self) -> None:
+        """매일 15:00 이후 일일 P&L 리포트 자동 전송"""
+        _REPORT_HOUR = 15
+        _REPORT_MINUTE = 5  # 15:05 전송 (장 마감 후 5분 대기)
+        _CHECK_INTERVAL_SEC = 60  # 1분마다 시간 확인
+        last_report_date: Optional[date] = None
+
+        while self._running:
+            try:
+                now = datetime.now()
+                today = now.date()
+                if (
+                    now.hour >= _REPORT_HOUR
+                    and now.minute >= _REPORT_MINUTE
+                    and last_report_date != today
+                    and self._report
+                    and self._position_mgr
+                ):
+                    trades = self._position_mgr.get_trade_history()
+                    report = self._report.build_daily_report(trades, today)
+                    if self._alert:
+                        await self._alert.on_daily_report(report)
+                    last_report_date = today
+                    logger.info("일일 리포트 전송 완료: %s", today.isoformat())
+
+                await asyncio.sleep(_CHECK_INTERVAL_SEC)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("일일 리포트 오류: %s", e)
+                await asyncio.sleep(60)
+
     # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────
 
     async def _supervised_task(self, name: str, coro_fn) -> None:
@@ -338,11 +371,18 @@ class TradingOrchestrator:
         from backend.core.execution.position_manager import PositionManager
         self._position_mgr = PositionManager()
 
-        # RiskEngine 초기화
+        # RiskEngine 초기화 (simulation 모드 → Phase 1 보수적 파라미터 적용)
         from backend.core.risk.risk_engine import RiskEngine
         from backend.core.risk.compliance import ComplianceService
         from backend.models.risk import RiskLimits
-        app_state.risk_engine = RiskEngine(limits=RiskLimits())
+        if mode == "simulation":
+            from backend.config.phase1_config import PHASE1_RISK_LIMITS, PHASE1_WATCHLIST
+            risk_limits = RiskLimits(**PHASE1_RISK_LIMITS)
+            app_state.watchlist = list(PHASE1_WATCHLIST)
+            logger.info("Phase 1 모의투자 파라미터 적용 — 관심종목 %d개 로드", len(app_state.watchlist))
+        else:
+            risk_limits = RiskLimits()
+        app_state.risk_engine = RiskEngine(limits=risk_limits)
         app_state.compliance = ComplianceService()
         logger.info("RiskEngine 초기화 완료: %s", app_state.risk_engine.limits.model_dump())
 
