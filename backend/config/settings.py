@@ -3,46 +3,83 @@ Settings — pydantic-settings 기반 애플리케이션 설정
 
 .env 파일과 환경변수를 병합하여 타입 안전한 설정 객체를 제공.
 민감 정보(API 키, 토큰)는 환경변수로만 관리.
+
+BAR-42 확장 (Phase 0): NXT/Postgres/Redis/뉴스/테마/JWT 그룹 placeholder 추가.
+모든 신규 필드는 Optional 또는 default 값을 가지므로 환경변수 미주입 시
+`Settings()` 가 무에러로 인스턴스화된다 (동작 변화 없음).
 """
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 from typing import Literal, Optional
 
 try:
+    from pydantic import Field, SecretStr
     from pydantic_settings import BaseSettings, SettingsConfigDict
+
     _PYDANTIC_SETTINGS = True
-except ImportError:
-    from pydantic import BaseModel as BaseSettings
+except ImportError:  # pragma: no cover — fallback when pydantic-settings 미설치
+    from pydantic import BaseModel as BaseSettings  # type: ignore
+    from pydantic import Field  # type: ignore
+
+    SecretStr = str  # type: ignore
     _PYDANTIC_SETTINGS = False
 
 
 class Settings(BaseSettings):
-    # 매매 기본 설정
+    # === Trading 기본 (기존) ===
     trading_mode: Literal["simulation", "live"] = "simulation"
     trading_market: Literal["stock", "crypto"] = "stock"
     scan_interval_sec: int = 3
 
-    # 키움 API (모의투자 기본)
+    # === Kiwoom API (기존, BAR-67 에서 SecretStr 일괄 변환 예정) ===
     kiwoom_base_url: str = "https://openapi.koreainvestment.com:9443"
     kiwoom_app_key: str = ""
-    kiwoom_app_secret: str = ""
+    kiwoom_app_secret: str = ""  # TODO(BAR-67): SecretStr
     kiwoom_account_no: str = ""
     kiwoom_mock: bool = True
 
-    # DB
+    # === DB (기존 + Postgres 신규, BAR-56) ===
     db_path: str = "data/barro_trade.db"
+    postgres_url: Optional[SecretStr] = None
+    postgres_pool_size: int = 5
+    pgvector_enabled: bool = False
 
-    # Telegram
-    telegram_bot_token: str = ""
+    # === NXT (신규, BAR-53) ===
+    nxt_enabled: bool = False
+    nxt_base_url: Optional[str] = None
+    nxt_app_key: Optional[str] = None
+    nxt_app_secret: Optional[SecretStr] = None
+
+    # === Redis (신규, BAR-57) ===
+    redis_url: Optional[str] = None
+    redis_streams_enabled: bool = False
+
+    # === 뉴스/공시 (신규, BAR-57) ===
+    dart_api_key: Optional[SecretStr] = None
+    rss_feed_urls: list[str] = Field(default_factory=list)
+    news_polling_interval_sec: int = 60
+
+    # === 테마 (신규, BAR-58/59) ===
+    theme_embedding_model: str = "ko-sbert"
+    theme_vector_db_url: Optional[str] = None
+    theme_classifier_threshold: float = 0.65
+
+    # === 보안 (신규, BAR-67/68) ===
+    jwt_secret: Optional[SecretStr] = None
+    jwt_access_ttl_sec: int = 3600
+    jwt_refresh_ttl_sec: int = 604800
+    mfa_issuer: str = "BarroAiTrade"
+
+    # === Telegram (기존, BAR-67 에서 SecretStr 일괄 변환 예정) ===
+    telegram_bot_token: str = ""  # TODO(BAR-67): SecretStr
     telegram_chat_id: str = ""
 
-    # 로깅
+    # === 로깅 (기존) ===
     log_json: bool = False
     log_level: str = "INFO"
 
-    # 서버
+    # === 서버 (기존) ===
     host: str = "0.0.0.0"
     port: int = 8000
 
