@@ -25,5 +25,13 @@ test-config: ## BAR-42 통합 환경변수 스키마 단위 테스트
 		--cov=backend.config.settings --cov-report=term-missing
 	@echo "[BAR-42] tests OK"
 
+test-monitoring: ## BAR-43 모니터링 인프라 단위 테스트
+	@echo "[BAR-43] Running pytest backend/tests/monitoring/..."
+	@$(PYTHON) -m pytest backend/tests/monitoring/ -v \
+		--cov=backend.core.monitoring.metrics \
+		--cov=backend.api.routes.metrics \
+		--cov-report=term-missing
+	@echo "[BAR-43] tests OK"
+
 test: ## 전체 backend 단위 테스트 (legacy + config)
 	@$(PYTHON) -m pytest backend/tests/ -v

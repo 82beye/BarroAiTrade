@@ -72,6 +72,7 @@ from backend.api.routes.positions import router as positions_router
 from backend.api.routes.watchlist import router as watchlist_router
 from backend.api.routes.config import router as config_router
 from backend.api.routes.reports import router as reports_router
+from backend.api.routes.metrics import router as metrics_router  # BAR-43
 
 app.include_router(signals_router, prefix="/api")
 app.include_router(risk_router, prefix="/api")
@@ -81,6 +82,8 @@ app.include_router(positions_router, prefix="/api")
 app.include_router(watchlist_router, prefix="/api")
 app.include_router(config_router, prefix="/api")
 app.include_router(reports_router, prefix="/api")
+# BAR-43: /metrics (Prometheus exposition) — 단, prefix 없음 (Prometheus 표준 경로)
+app.include_router(metrics_router)
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
 app.add_api_websocket_route("/ws/realtime", websocket_endpoint)
