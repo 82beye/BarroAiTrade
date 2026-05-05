@@ -12,3 +12,9 @@ legacy-scalping: ## BAR-40 dry-run smoke test (legacy_scalping import 검증)
 	@echo "[BAR-40] Running legacy_scalping dry-run..."
 	@DRY_RUN=1 $(PYTHON) -m backend.legacy_scalping.main
 	@echo "[BAR-40] dry-run OK"
+
+test-legacy: ## BAR-41 어댑터 + legacy_scalping 단위 테스트
+	@echo "[BAR-41] Running pytest backend/tests/legacy_scalping/..."
+	@$(PYTHON) -m pytest backend/tests/legacy_scalping/ -v \
+		--cov=backend.legacy_scalping._adapter --cov-report=term-missing
+	@echo "[BAR-41] tests OK"

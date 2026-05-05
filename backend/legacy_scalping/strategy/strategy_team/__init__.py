@@ -17,6 +17,8 @@
   # → params를 IntradayFilter, EntrySignalGenerator에 주입
 """
 
-from strategy.strategy_team.coordinator import StrategyCoordinator, StrategyParams
-
-__all__ = ["StrategyCoordinator", "StrategyParams"]
+# BAR-41 패치: ai-trade 의 옛 절대 import 는 namespace 격리와 충돌해 비활성화.
+# 깊은 경로 사용:
+#   from backend.legacy_scalping.strategy.strategy_team.coordinator import (
+#       StrategyCoordinator, StrategyParams,
+#   )

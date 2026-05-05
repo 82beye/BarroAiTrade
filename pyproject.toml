@@ -1,0 +1,22 @@
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["backend.legacy_scalping"]
+omit = [
+    "backend/legacy_scalping/main.py",
+    "backend/legacy_scalping/scripts/*",
+    "backend/legacy_scalping/test_*.py",
+    "backend/legacy_scalping/__main__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]

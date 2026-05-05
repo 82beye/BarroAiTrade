@@ -10,3 +10,7 @@ aiosqlite>=0.20.0
 python-dotenv>=1.0.0
 python-telegram-bot>=21.0
 PyYAML>=6.0
+
+# BAR-41: 단위 테스트 (tests/legacy_scalping/ 시동)
+pytest>=8.0
+pytest-cov>=5.0

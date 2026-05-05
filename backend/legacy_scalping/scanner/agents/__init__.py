@@ -9,6 +9,8 @@ Coordinator가 가중 합산하여 최종 상승 예측 순위를 산출
     python main.py --predict --top 30     # 상위 30종목
 """
 
-from scanner.agents.coordinator import PredictionCoordinator
-
-__all__ = ["PredictionCoordinator"]
+# BAR-41 패치: ai-trade 의 옛 절대 import 는 namespace 격리와 충돌해 비활성화.
+# 깊은 경로 사용:
+#   from backend.legacy_scalping.scanner.agents.coordinator import (
+#       PredictionCoordinator,
+#   )
