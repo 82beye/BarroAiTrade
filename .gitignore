@@ -41,3 +41,10 @@ coverage/
 
 # bkit internal
 .bkit/
+
+# BAR-40: legacy_scalping (ai-trade 흡수) — OHLCV 캐시 144MB 등 차단
+backend/legacy_scalping/data/ohlcv_cache/
+backend/legacy_scalping/.venv/
+backend/legacy_scalping/**/__pycache__/
+backend/legacy_scalping/**/*.pyc
+backend/legacy_scalping/**/*.log

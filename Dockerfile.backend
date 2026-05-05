@@ -13,6 +13,9 @@ COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
 # 소스 복사
+# Note: backend/legacy_scalping/ (BAR-40, ai-trade 흡수) 도 함께 포함됨.
+#       Legacy 의 추가 의존성(flask/matplotlib/reportlab) 은 BAR-41/43 시점에
+#       backend/legacy_scalping/requirements.txt 에서 별도 설치 검토.
 COPY backend/ ./backend/
 # Note: .env.local is provided via docker-compose env_file directive
 

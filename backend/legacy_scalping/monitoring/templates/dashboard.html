@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-Trade Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d28;
+    --border: #2a2d3a;
+    --text: #e0e0e0;
+    --muted: #888;
+    --green: #00c853;
+    --red: #ff1744;
+    --blue: #448aff;
+    --yellow: #ffd600;
+    --orange: #ff9100;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, 'Pretendard', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--card);
+  }
+  .header h1 { font-size: 18px; font-weight: 700; }
+  .header h1 span { color: var(--blue); }
+  .header-right { display: flex; align-items: center; gap: 16px; font-size: 13px; color: var(--muted); }
+  .mode-badge {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .mode-simulation { background: var(--yellow); color: #000; }
+  .mode-live { background: var(--red); color: #fff; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+  .dot-ok { background: var(--green); animation: pulse 2s infinite; }
+  .dot-err { background: var(--red); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .stale-banner {
+    display: none;
+    background: #3e2a00;
+    color: var(--yellow);
+    text-align: center;
+    padding: 8px;
+    font-size: 13px;
+  }
+
+  /* Cards */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    padding: 20px 24px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .card-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .card-value { font-size: 28px; font-weight: 700; }
+  .card-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .positive { color: var(--green); }
+  .negative { color: var(--red); }
+
+  /* Tables */
+  .section {
+    padding: 0 24px 20px;
+  }
+  .section-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title .count {
+    background: var(--border);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  thead th {
+    text-align: left;
+    padding: 10px 12px;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody tr:hover { background: rgba(255,255,255,0.03); }
+  .mono { font-family: 'SF Mono', 'Menlo', monospace; }
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .tag-buy { background: rgba(0,200,83,0.15); color: var(--green); }
+  .tag-sell { background: rgba(255,23,68,0.15); color: var(--red); }
+  .tag-scalp { background: rgba(68,138,255,0.15); color: var(--blue); }
+  .tag-regular { background: rgba(255,255,255,0.08); color: var(--muted); }
+
+  /* Progress bar for PnL */
+  .pnl-bar {
+    width: 80px;
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    display: inline-block;
+    vertical-align: middle;
+    margin-left: 6px;
+  }
+  .pnl-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s;
+  }
+
+  /* Log section */
+  .log-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: 'SF Mono', 'Menlo', monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+  .log-box .log-error { color: var(--red); }
+  .log-box .log-warn { color: var(--orange); }
+  .log-box .log-info-key { color: var(--green); }
+
+  .empty-msg {
+    text-align: center;
+    color: var(--muted);
+    padding: 30px;
+    font-size: 14px;
+  }
+  .market-badge {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .market-NORMAL { background: rgba(0,200,83,0.15); color: var(--green); }
+  .market-CAUTION { background: rgba(255,209,0,0.2); color: var(--yellow); }
+  .market-WARNING { background: rgba(255,145,0,0.2); color: var(--orange); }
+  .market-EXTREME { background: rgba(255,23,68,0.2); color: var(--red); }
+
+  @media (max-width: 768px) {
+    .cards { grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 12px; }
+    .card-value { font-size: 22px; }
+    .section { padding: 0 12px 16px; }
+    table { font-size: 12px; }
+    thead th, tbody td { padding: 8px 6px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>AI-Trade</span> Dashboard</h1>
+  <div class="header-right">
+    <span id="market-badge" class="market-badge"></span>
+    <span id="mode-badge" class="mode-badge"></span>
+    <span><span id="status-dot" class="dot dot-ok"></span><span id="status-text">연결 중...</span></span>
+    <span id="clock"></span>
+  </div>
+</div>
+
+<div id="stale-banner" class="stale-banner">
+  데이터가 오래되었습니다. 트레이딩 시스템 확인 필요
+</div>
+
+<!-- Summary Cards -->
+<div class="cards">
+  <div class="card">
+    <div class="card-label">총 평가금액</div>
+    <div class="card-value" id="total-equity">-</div>
+  </div>
+  <div class="card">
+    <div class="card-label">당일 손익</div>
+    <div class="card-value" id="daily-pnl">-</div>
+    <div class="card-sub" id="daily-pnl-pct"></div>
+  </div>
+  <div class="card">
+    <div class="card-label">보유 종목</div>
+    <div class="card-value" id="open-positions">-</div>
+  </div>
+  <div class="card">
+    <div class="card-label">거래 횟수</div>
+    <div class="card-value" id="total-trades">-</div>
+    <div class="card-sub" id="last-update"></div>
+  </div>
+</div>
+
+<!-- Positions -->
+<div class="section">
+  <div class="section-title">
+    보유 포지션 <span class="count" id="pos-count">0</span>
+  </div>
+  <table id="pos-table">
+    <thead>
+      <tr>
+        <th>종목</th>
+        <th>전략</th>
+        <th style="text-align:right">수량</th>
+        <th style="text-align:right">매수가</th>
+        <th style="text-align:right">현재가</th>
+        <th style="text-align:right">수익률</th>
+        <th style="text-align:right">평가금액</th>
+        <th>TP/SL</th>
+        <th>진입시간</th>
+      </tr>
+    </thead>
+    <tbody id="pos-body"></tbody>
+  </table>
+  <div id="pos-empty" class="empty-msg" style="display:none">보유 종목 없음</div>
+</div>
+
+<!-- Trades -->
+<div class="section">
+  <div class="section-title">
+    오늘 매매 내역 <span class="count" id="trade-count">0</span>
+  </div>
+  <table id="trade-table">
+    <thead>
+      <tr>
+        <th>시간</th>
+        <th>구분</th>
+        <th>종목</th>
+        <th style="text-align:right">수량</th>
+        <th style="text-align:right">가격</th>
+        <th style="text-align:right">수익률</th>
+        <th>청산사유</th>
+        <th style="text-align:right">누적손익</th>
+      </tr>
+    </thead>
+    <tbody id="trade-body"></tbody>
+  </table>
+  <div id="trade-empty" class="empty-msg" style="display:none">오늘 매매 내역 없음</div>
+</div>
+
+<!-- Logs -->
+<div class="section">
+  <div class="section-title">시스템 로그</div>
+  <div class="log-box" id="log-box"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function fmt(n) {
+  if (n === undefined || n === null) return '-';
+  return Number(n).toLocaleString('ko-KR');
+}
+
+function fmtPct(n) {
+  if (n === undefined || n === null) return '-';
+  const v = Number(n);
+  const sign = v > 0 ? '+' : '';
+  return sign + v.toFixed(2) + '%';
+}
+
+function pnlClass(n) {
+  return n > 0 ? 'positive' : n < 0 ? 'negative' : '';
+}
+
+function timeOnly(iso) {
+  if (!iso) return '';
+  const t = iso.split('T')[1];
+  return t ? t.substring(0, 8) : iso;
+}
+
+function updateClock() {
+  $('clock').textContent = new Date().toLocaleTimeString('ko-KR');
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ─── Status ───
+async function fetchStatus() {
+  try {
+    const res = await fetch('/api/status');
+    const d = await res.json();
+
+    if (d.error || !d.system_running) {
+      $('status-dot').className = 'dot dot-err';
+      $('status-text').textContent = '시스템 중지';
+      $('stale-banner').style.display = 'block';
+      return;
+    }
+
+    // Stale check (>120s)
+    const age = (Date.now() - new Date(d.timestamp).getTime()) / 1000;
+    if (age > 120) {
+      $('stale-banner').style.display = 'block';
+      $('stale-banner').textContent = `데이터 ${Math.floor(age)}초 전 갱신 — 동기화 대기 중`;
+    } else {
+      $('stale-banner').style.display = 'none';
+    }
+
+    $('status-dot').className = 'dot dot-ok';
+    $('status-text').textContent = '정상 운영';
+
+    // Mode
+    const mode = d.mode || 'simulation';
+    $('mode-badge').textContent = mode === 'live' ? 'LIVE' : 'SIM';
+    $('mode-badge').className = 'mode-badge mode-' + mode;
+
+    // Market
+    const mc = d.market_condition || 'UNKNOWN';
+    $('market-badge').textContent = mc;
+    $('market-badge').className = 'market-badge market-' + mc;
+
+    // Cards
+    $('total-equity').textContent = fmt(d.total_equity) + '원';
+    const pnl = d.daily_pnl || 0;
+    $('daily-pnl').textContent = (pnl >= 0 ? '+' : '') + fmt(pnl) + '원';
+    $('daily-pnl').className = 'card-value ' + pnlClass(pnl);
+    $('daily-pnl-pct').textContent = fmtPct(d.daily_pnl_pct);
+    $('daily-pnl-pct').className = 'card-sub ' + pnlClass(d.daily_pnl_pct);
+    $('open-positions').textContent = d.open_positions || 0;
+    $('total-trades').textContent = d.total_trades || 0;
+    $('last-update').textContent = '갱신: ' + timeOnly(d.timestamp);
+
+    // Positions
+    const positions = d.positions || [];
+    $('pos-count').textContent = positions.length;
+    const tbody = $('pos-body');
+
+    if (positions.length === 0) {
+      tbody.innerHTML = '';
+      $('pos-empty').style.display = 'block';
+      $('pos-table').querySelector('thead').style.display = 'none';
+    } else {
+      $('pos-empty').style.display = 'none';
+      $('pos-table').querySelector('thead').style.display = '';
+      tbody.innerHTML = positions.map(p => {
+        const cls = pnlClass(p.pnl_pct);
+        const eval_amt = p.current_price * p.qty;
+        const stTag = p.strategy_type === 'scalping'
+          ? '<span class="tag tag-scalp">스캘핑</span>'
+          : '<span class="tag tag-regular">일반</span>';
+        const tpsl = p.scalp_tp_pct
+          ? `+${p.scalp_tp_pct}% / ${p.scalp_sl_pct}%`
+          : '-';
+        const barW = Math.min(Math.abs(p.pnl_pct) * 10, 100);
+        const barColor = p.pnl_pct >= 0 ? 'var(--green)' : 'var(--red)';
+        return `<tr>
+          <td><strong>[${p.code}]</strong> ${p.name}</td>
+          <td>${stTag}</td>
+          <td style="text-align:right" class="mono">${fmt(p.qty)}</td>
+          <td style="text-align:right" class="mono">${fmt(p.entry_price)}</td>
+          <td style="text-align:right" class="mono">${fmt(p.current_price)}</td>
+          <td style="text-align:right" class="${cls} mono">
+            ${fmtPct(p.pnl_pct)}
+            <div class="pnl-bar"><div class="pnl-bar-fill" style="width:${barW}%;background:${barColor}"></div></div>
+          </td>
+          <td style="text-align:right" class="mono">${fmt(eval_amt)}원</td>
+          <td class="mono">${tpsl}</td>
+          <td class="mono">${timeOnly(p.entry_time)}</td>
+        </tr>`;
+      }).join('');
+    }
+  } catch (e) {
+    $('status-dot').className = 'dot dot-err';
+    $('status-text').textContent = '연결 실패';
+  }
+}
+
+// ─── Trades ───
+async function fetchTrades() {
+  try {
+    const res = await fetch('/api/trades');
+    const trades = await res.json();
+    $('trade-count').textContent = trades.length;
+    const tbody = $('trade-body');
+
+    if (trades.length === 0) {
+      tbody.innerHTML = '';
+      $('trade-empty').style.display = 'block';
+      $('trade-table').querySelector('thead').style.display = 'none';
+    } else {
+      $('trade-empty').style.display = 'none';
+      $('trade-table').querySelector('thead').style.display = '';
+      tbody.innerHTML = trades.map(t => {
+        const isBuy = t.action === 'BUY';
+        const actionTag = isBuy
+          ? '<span class="tag tag-buy">매수</span>'
+          : '<span class="tag tag-sell">매도</span>';
+        const pnl = t.pnl_pct || 0;
+        const cls = isBuy ? '' : pnlClass(pnl);
+        return `<tr>
+          <td class="mono">${timeOnly(t.timestamp)}</td>
+          <td>${actionTag}</td>
+          <td><strong>[${t.code}]</strong> ${t.name || ''}</td>
+          <td style="text-align:right" class="mono">${fmt(t.qty)}</td>
+          <td style="text-align:right" class="mono">${fmt(t.price)}</td>
+          <td style="text-align:right" class="mono ${cls}">${isBuy ? '-' : fmtPct(pnl)}</td>
+          <td>${t.exit_type || (isBuy ? t.reason || '' : '')}</td>
+          <td style="text-align:right" class="mono ${pnlClass(t.daily_pnl_pct)}">${t.daily_pnl_pct !== undefined ? fmtPct(t.daily_pnl_pct) : ''}</td>
+        </tr>`;
+      }).join('');
+    }
+  } catch (e) {}
+}
+
+// ─── Logs ───
+async function fetchLogs() {
+  try {
+    const res = await fetch('/api/logs');
+    const lines = await res.json();
+    const box = $('log-box');
+    box.innerHTML = lines.map(ln => {
+      let cls = '';
+      if (ln.includes('ERROR')) cls = 'log-error';
+      else if (ln.includes('WARNING')) cls = 'log-warn';
+      else if (ln.includes('매수') || ln.includes('매도') || ln.includes('익절') || ln.includes('완료')) cls = 'log-info-key';
+      return `<div class="${cls}">${ln.replace(/</g,'&lt;')}</div>`;
+    }).join('');
+    box.scrollTop = box.scrollHeight;
+  } catch (e) {}
+}
+
+// ─── Init ───
+function refresh() {
+  fetchStatus();
+  fetchTrades();
+  fetchLogs();
+}
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>
