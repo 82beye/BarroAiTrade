@@ -1,7 +1,7 @@
 # BarroAiTrade Makefile
 # Reference: docs/01-plan/MASTER-EXECUTION-PLAN-v1.md
 
-.PHONY: help legacy-scalping
+.PHONY: help legacy-scalping test-legacy test-config test
 
 help: ## 사용 가능한 타겟 출력
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -18,3 +18,12 @@ test-legacy: ## BAR-41 어댑터 + legacy_scalping 단위 테스트
 	@$(PYTHON) -m pytest backend/tests/legacy_scalping/ -v \
 		--cov=backend.legacy_scalping._adapter --cov-report=term-missing
 	@echo "[BAR-41] tests OK"
+
+test-config: ## BAR-42 통합 환경변수 스키마 단위 테스트
+	@echo "[BAR-42] Running pytest backend/tests/config/..."
+	@$(PYTHON) -m pytest backend/tests/config/ -v \
+		--cov=backend.config.settings --cov-report=term-missing
+	@echo "[BAR-42] tests OK"
+
+test: ## 전체 backend 단위 테스트 (legacy + config)
+	@$(PYTHON) -m pytest backend/tests/ -v
