@@ -12,6 +12,7 @@ tags: [index, analysis]
 
 | 피처 | 문서 | GAP율 | 날짜 | 상태 |
 |------|------|-------|------|------|
+| BAR-40 sub_repo 모노레포 흡수 (Phase 0) | [[bar-40-monorepo-absorption.analysis\|보기]] | 95% | 2026-05-06 | 🚧 진행 |
 | BAR-17 실시간 대시보드 | [[bar-17-dashboard.analysis\|보기]] | 90%+ | 2026-04-11 | ✅ 완료 |
 
 ---
