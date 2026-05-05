@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ai-trade.start</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/beye82/Workspace/ai-trade/scripts/start_simulation.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/beye82/Workspace/ai-trade</string>
+
+    <key>StartCalendarInterval</key>
+    <array>
+        <!-- 월~금 08:20 시작 -->
+        <dict>
+            <key>Hour</key><integer>8</integer>
+            <key>Minute</key><integer>20</integer>
+            <key>Weekday</key><integer>1</integer>
+        </dict>
+        <dict>
+            <key>Hour</key><integer>8</integer>
+            <key>Minute</key><integer>20</integer>
+            <key>Weekday</key><integer>2</integer>
+        </dict>
+        <dict>
+            <key>Hour</key><integer>8</integer>
+            <key>Minute</key><integer>20</integer>
+            <key>Weekday</key><integer>3</integer>
+        </dict>
+        <dict>
+            <key>Hour</key><integer>8</integer>
+            <key>Minute</key><integer>20</integer>
+            <key>Weekday</key><integer>4</integer>
+        </dict>
+        <dict>
+            <key>Hour</key><integer>8</integer>
+            <key>Minute</key><integer>20</integer>
+            <key>Weekday</key><integer>5</integer>
+        </dict>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/Users/beye82/Workspace/ai-trade/logs/launchd-start.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/beye82/Workspace/ai-trade/logs/launchd-start.log</string>
+</dict>
+</plist>

@@ -1,0 +1,9 @@
+# 주식단테 데이트레이딩 시스템 의존성
+httpx>=0.27.0          # 비동기 HTTP 클라이언트 (키움 REST API)
+pandas>=2.1.0          # 데이터 분석 (지표 계산)
+numpy>=1.26.0          # 수치 계산
+pyyaml>=6.0            # 설정 파일 파싱
+python-dotenv>=1.0.0   # 환경변수 로드 (.env)
+flask>=3.0             # 실시간 웹 대시보드
+matplotlib>=3.8.0      # PDF 리포트 차트 생성
+reportlab>=4.0.0       # PDF 리포트 생성

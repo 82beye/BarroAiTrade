@@ -1,0 +1,394 @@
+# =============================================================================
+# 주식단테 수박지표 당일매매 시스템 설정
+# =============================================================================
+
+# 실행 모드: simulation (모의투자) / live (실거래)
+mode: simulation
+
+# -----------------------------------------------------------------------------
+# 키움 REST API 설정
+# -----------------------------------------------------------------------------
+kiwoom:
+  base_url: "https://api.kiwoom.com"
+  sim_base_url: "https://mockapi.kiwoom.com"
+  app_key: "${KIWOOM_APP_KEY}"
+  app_secret: "${KIWOOM_APP_SECRET}"
+  account_no: "${KIWOOM_ACCOUNT_NO}"
+  # API 호출 제한: 초당 5회, 분당 100회
+  rate_limit:
+    per_second: 5
+    per_minute: 100
+
+# -----------------------------------------------------------------------------
+# 지표 파라미터 (파란점선 + 수박지표)
+# -----------------------------------------------------------------------------
+indicators:
+  blue_dotted_line:
+    lookback_period: 20         # 모의투자 테스트용 (원래 224)
+    atr_period: 14              # 모의투자 테스트용 (원래 224)
+    multiplier: 2.0             # 변동성 승수 (α)
+    # 파란점선 = highest(high, lookback) - ATR(atr_period) * 2.0
+
+  watermelon:
+    volume_avg_period: 15       # 모의투자 테스트용 (원래 20)
+    volume_spike_ratio: 2.5     # 거래량 폭증 배수 (β) - 평균 대비
+    atr_period: 14              # 캔들 변동폭 비교용 ATR
+    price_move_ratio: 1.5       # 변동성 확장 계수 (γ)
+    ma224_buffer: 1.1           # 바닥권 판단 (MA * 1.1 이하)
+
+  ma224:
+    period: 20                  # 모의투자 테스트용 (원래 224)
+
+  ma112:
+    period: 10                  # 모의투자 테스트용 (원래 112)
+
+# -----------------------------------------------------------------------------
+# 스캐너 설정
+# -----------------------------------------------------------------------------
+scanner:
+  markets:
+    - "KOSPI"
+    - "KOSDAQ"
+  # 제외 조건
+  exclude:
+    min_price: 1000             # 1,000원 미만 제외 (동전주)
+    max_price: 0                # 0 = 상한 없음 (제한 해제)
+    min_volume: 100000          # 일평균 거래량 10만주 미만 제외
+    exclude_etf: true           # ETF 제외
+    exclude_etn: true           # ETN 제외
+    exclude_spac: true          # SPAC 제외
+    exclude_managed: true       # 관리종목 제외
+    exclude_suspended: true     # 거래정지 제외
+  # 파란점선 돌파 임박 범위
+  breakout_proximity:
+    lower_pct: 0.98             # 파란점선의 98% 이상
+    upper_pct: 1.02             # 파란점선의 102% 이하
+  max_watchlist: 20             # 최대 감시 종목 수
+  # OHLCV 캐시 디렉토리 (--update-cache로 생성, 스캔 시 자동 로드)
+  cache_dir: "./data/ohlcv_cache"
+  # 종목당 조회 일봉 개수 (역매공파 MA448에 500+ 필요)
+  ohlcv_count: 500
+
+# -----------------------------------------------------------------------------
+# 역매공파 실시간 검색기
+# -----------------------------------------------------------------------------
+realtime_screener:
+  enabled: true
+  scan_interval_minutes: 1          # 자동 재스캔 주기 (분)
+  rescan_on_position_close: true  # 포지션 종료 시 재스캔
+  max_candidates: 15              # 최대 후보 종목 수
+  min_avg_trade_value: 3000000000 # 5일 평균 거래대금 최소 (30억)
+  min_close_vs_open_pct: 7.0      # 5봉 이내 시가대비종가 최소 (%)
+
+# -----------------------------------------------------------------------------
+# 팀 에이전트 상승 예측
+# -----------------------------------------------------------------------------
+prediction:
+  top_n: 20                       # 상위 N종목 예측
+  min_consensus_agents: 2         # 최소 합의 에이전트 수 (2=소수합의 이상)
+  agent_weights:                  # 에이전트별 가중치 (합계 1.0)
+    momentum: 0.25                # 모멘텀: 추세 연속성
+    volume: 0.20                  # 거래량: 가격에 선행
+    technical: 0.20               # 기술적: 셋업 확인
+    breakout: 0.15                # 돌파: 임박 확인
+    timing: 0.20                  # 타이밍: 진입 적합 시점
+
+# -----------------------------------------------------------------------------
+# 당일 주도주 분석기
+# -----------------------------------------------------------------------------
+leading_stocks:
+  top_n: 20                       # 상위 N종목 표시
+  min_trade_value: 1000000000     # 최소 당일 거래대금 (10억)
+  min_change_pct: 2.0             # 최소 상승률 (%)
+  volume_avg_period: 20           # 거래량/거래대금 평균 비교 기간
+  max_api_calls: 200              # 스캔당 최대 API 호출수 (1706→200 제한)
+  score_weights:                  # 종합 점수 가중치 (합계 100)
+    change_pct: 30                # 상승률 (30점)
+    trade_value: 30               # 거래대금 (30점)
+    volume_ratio: 20              # 거래량 급증 (20점)
+    open_strength: 20             # 시가대비 강도 (20점)
+
+# -----------------------------------------------------------------------------
+# 매매 전략 설정 (당일 매매 전용)
+# -----------------------------------------------------------------------------
+strategy:
+  # 일반 매매(역매공파/파란점선) 활성화 여부
+  # false: 스캘핑 전용 모드 (일반 매매 태스크 미생성)
+  # true: 역매공파 + 파란점선 + 스캘핑 모두 가동
+  # TODO: lookback 224 복원 + TP/SL 재설계 + 백테스트 후 true로 전환
+  regular_trading_enabled: false
+
+  entry:
+    # 매수 조건
+    breakout_confirm: true      # 파란점선 돌파 확인 (현재가 > blue_line)
+    volume_threshold: 3.0       # 당일 거래량 > 20일 평균 × 3.0
+    positive_candle: true       # 양봉 확인 (현재가 > 시가)
+    # 매수 시간 제한
+    entry_start: "09:05"        # 장 시작 후 5분 대기 (09:00 노이즈 회피)
+    entry_end: "14:30"          # 14:30 이후 신규 매수 금지
+    max_breakout_pct: 7.0       # 파란점선 돌파율 +7% 초과 시 과열 진입 차단
+    
+  # 장중 진입 필터 (매수 신호 추가 검증)
+  intraday_filter:
+    cooldown_minutes: 10            # 손절 후 동일종목 재진입 대기 (분)
+    tp_cooldown_minutes: 15         # 익절 후 동일종목 재진입 대기 (분) - 고점 추격 방지
+    max_entries_per_stock: 3        # 종목당 일일 최대 매수 횟수
+    trend_check_enabled: true       # 하락추세 매수 차단
+    max_bb_excess_pct: 8.0          # BB(20) 돌파율 상한 (% 초과 시 과열 차단)
+    loss_reduce_threshold: -2.0     # 일일 손실 이 이하일 때 경고
+
+  exit:
+    # 익절 설정
+    take_profit_1:
+      pct: 5.0                  # +5% 도달 시
+      sell_ratio: 0.5           # 보유량의 50% 매도
+    take_profit_2:
+      pct: 6.0                  # +6% 도달 시 (기존 +8% → 강제청산 방지)
+      sell_ratio: 1.0           # 나머지 전량 매도
+    # 손절 설정
+    stop_loss:
+      pct: -3.5                 # -3.5% 도달 시 전량 매도
+    # 브레이크이븐 스톱: 1차 익절 후 잔량이 매입가 근처로 하락 시 보호 매도
+    breakeven_buffer_pct: 0.3   # 매입가 + 0.3% 이하 시 전량 매도
+    # 강제 청산
+    force_liquidation:
+      time: "14:50"             # 14:50 시장가 전량 매도
+      cancel_pending: true      # 미체결 주문 전량 취소
+      pre_liquidation_time: "14:30"  # 14:30 사전 청산 (소폭 손실 종목)
+      pre_liquidation_pnl_range: [-5.0, 1.5]  # PnL -5%~+1.5% 범위 정리 (장마감 큰 손실 방지)
+
+  # 스캘핑 전략 (10명 전문가 에이전트 기반)
+  # 2026-04-01 튜닝: 3일간 1분봉 MFE/MAE 분석 기반
+  # 핵심 발견: MFE 평균 +9.3% 도달 가능하나 MAE가 먼저 도달(62%)
+  #   → SL 확대 + 트레일링 조기 활성화 + 진입 직후 확인 캔들 필터
+  scalping:
+    enabled: true
+    poll_interval_seconds: 30       # 스캔 주기
+    entry_end: "14:00"              # 14:00까지 매매 (데이터 수집 우선)
+    min_score: 50                   # 50점 (매매 빈도 확대, 2026-04-09)
+    required_timing: "즉시"         # "즉시" 타이밍만 진입
+    max_per_stock_pct: 5.0          # 종목당 비중
+    top_n: 10                       # 분석 대상
+    min_consensus: "소수합의"       # 소수합의 유지 (데이터 수집 우선)
+    max_slippage_pct: 2.0           # 슬리피지 허용
+
+    # ── ka00198 초고속 주도주 스캔 ──
+    use_fast_rank: true             # true: ka00198 (1~2초), false: 기존 200회 호출 (168초)
+    fast_rank_qry_tp: "2"           # "1"=1분, "2"=10분, "3"=1시간, "4"=당일누적, "5"=30초
+
+    # ── 진입 구간 필터 ──
+    # MFE/MAE 분석: MFE +2.0% 이상 도달률 77%, MAE -2.0% 이하 69%
+    # → TP 높여서 R:R 유지하면서 SL 확대 (초반 변동성 흡수)
+    # 핵심: 트레일링(activation 1.0%, trail -0.8%)이 주 익절 수단
+    entry_zone:
+      min_change_pct: 5.0           # +5% 미만 진입 차단
+      max_change_pct: 30.0          # +30% 초과 진입 차단
+      # 구간별 TP/SL 오버라이드
+      # 전략: 트레일링이 주 익절 수단, TP는 보조 (MFE +2.0% 도달률 77%)
+      mid:                          # +5~15% (주력 구간)
+        tp_pct: 3.5                 # MFE +3% 도달률 77%
+        sl_pct: -1.5                # [Case 2] -3.0→-1.5% (시간별 SL이 초기 방어)
+      late:                         # +15~30% (고위험 구간)
+        tp_pct: 2.5                 # MFE +2.5% 도달률 77%
+        sl_pct: -1.5                # [Case 2] -2.0→-1.5% (통일)
+
+    # ── 거래대금 필터 (시간대별, 슬리피지 방지) ──
+    # 2026-04-09: 매매 빈도 확대 — 중소형주 진입 허용
+    min_trade_value: 3000000000     # 기본 30억 (09:00~09:30)
+    min_trade_value_morning: 5000000000    # 오전장 50억 (09:30~11:00)
+    min_trade_value_afternoon: 10000000000 # 오후장 100억 (12:00~14:00)
+
+    # ── 시간대별 전략 ──
+    time_windows:
+      golden_start: "09:00"        # 골든타임 시작
+      golden_end: "09:30"          # 골든타임 종료
+      morning_end: "11:30"         # 오전장 종료 (11:00→11:30 확대)
+      dead_zone_end: "12:30"       # 데드존 (11:30~12:30, 1시간으로 축소)
+      afternoon_end: "14:00"       # 14:00까지 매매 (데이터 수집 우선)
+
+    # ── 진입 확인 필터 (1분봉 MFE/MAE 분석 기반) ──
+    # 승리 종목 1분봉: open→close 양봉 또는 소폭 음봉 (-0.5% 이내)
+    # 패배 종목 1분봉: open→close -0.75%~-1.85% 급락
+    # → 현재 분봉이 -0.5% 이상 하락이면 진입 차단 (불리한 타이밍)
+    entry_confirmation:
+      enabled: true                 # [Case 3] 활성화 (진입 직전 1분봉 확인)
+      min_prev_candle_pct: -1.0     # -0.5→-1.0% (추후 재검토)
+      golden_time_delay_sec: 30
+
+    # ── 눌림목 진입 (Pullback Entry) ──
+    # MFE/MAE 분석: 62% 종목이 MAE 먼저 도달 (고점 진입 문제)
+    # → 급등 후 고점 대비 하락 → 양봉 반등 확인 후 진입
+    pullback_entry:
+      enabled: true
+      min_drop_pct: 2.0             # 고점 대비 최소 하락률 (%)
+      min_bounce_pct: 0.3           # 반등 확인: 양봉 최소 크기 (%)
+      min_change_after_pullback: 3.0  # 눌림목 후 최소 등락률 (%, 5%→3%)
+
+    # ── [개선#1] 거래량 확인 (반등 시 거래량 급증 필수) ──
+    volume_confirmation:
+      enabled: true
+      min_ratio: 1.5                # 직전 N분 평균 대비 최소 배수
+      window: 5                     # 비교 기간 (분)
+
+    # ── [개선#2] ATR 기반 동적 SL ──
+    dynamic_sl:
+      enabled: true
+      atr_multiplier: 2.0           # ATR × 배수 = SL
+      atr_period: 14                # ATR 계산 기간 (1분봉)
+      floor_pct: -2.0               # SL 최대 하한 (-3.0→-2.0%, 손실 제한)
+      ceil_pct: -1.2                # SL 최소 상한 (-1.5→-1.2%)
+
+    # ── [개선#4] 분할 매수 ──
+    # 스캘핑 1~2% 수익 폭에서 평균 상향 매수는 수익 희석 → 비활성화
+    # 추후 눌림목 분할(평균 하향) 방식으로 전환 검토
+    split_entry:
+      enabled: false
+      ratios: [0.3, 0.3, 0.4]
+      trigger_pcts: [0.0, 0.5, 1.0]
+
+    # ── [개선#5] 일일 매매 횟수 제한 ──
+    max_daily_trades: 5             # 일일 최대 5건 (확신 높은 종목 집중)
+
+    # ── 재진입 제한 ──
+    max_entries_per_stock: 2        # 동일종목 일일 최대 2회
+    loss_cooldown_minutes: 15       # 손절 후 동일종목 15분 대기
+
+    # ── 전일 급등주 필터 ──
+    prev_runner_cooldown_days: 0    # 쿨다운 해제
+
+    # ── 분할 매수 ──
+    initial_entry_ratio: 0.6        # 초기 투입 비율 60%
+    add_buy_enabled: true            # 추가 매수 활성화
+    add_buy_pullback_pct: -1.5       # 매수가 대비 -1.5% 눌림 시 추가 매수
+    max_add_buys: 1                  # 종목당 최대 추가 매수 횟수
+
+    # ── 일일 손실 한도 (스캘핑 전용) ──
+    daily_loss_limit_pct: -3.0      # 스캘핑 누적 -3% 시 당일 매매 종료
+
+    # ── 기본 파라미터 ──
+    default_tp_pct: 5.0             # 기본 익절 (3.5→5.0%, 대형 모멘텀 수익 포착)
+    default_sl_pct: -2.5            # -1.5→-2.5% (변동성 흡수 확대, 시간SL이 초기 방어)
+    default_hold_minutes: 20        # 기본 보유 (15→20분, 20분 후 +0.66% 양전환)
+    min_hold_seconds: 90            # 최소 보유 시간 (30→90초, 진입 직후 노이즈 손절 방지)
+
+    # ── 트레일링 스톱 (MFE/MAE 분석 기반 재조정) ──
+    # MFE 중앙값 +5.92%, 도달시간 30분 → 트레일링 조기 활성화
+    # 트레일링 청산 4건(+0.93% 평균) > TP 0건 → 트레일링 중심 전략
+    # ── 트레일링 스톱 (고도화: 5단계 변동성 비례 트레일링) ──
+    # 2026-04-07: 프로미천(+29%)/풍산홀딩스(+30%) 놓침 → trail 폭 대폭 확대
+    # 핵심: 고변동 모멘텀 종목의 자연 변동폭을 흡수할 수 있도록 trail 확대
+    trailing_stop:
+      activation_pct: 1.5           # +1.0→1.5% 도달 시 트레일링 활성화 (조기 활성 방지)
+      trail_pct: -2.5               # 기본 trail (tiers 미매칭 시 폴백, -1.0→-2.5%)
+      breakeven_pct: 0.3            # +0.3% 이하 시 본전 청산
+      # 수익 구간별 trail 폭 (above_pct 내림차순 — 높은 구간 우선 매칭)
+      # 2026-04-07: 3단계→5단계 확대, 폭 대폭 확대 (고변동 종목 수익 보호)
+      tiers:
+        - above_pct: 5.0            # 고점 수익 +5% 이상 → trail -1.0% (신규)
+          trail_pct: -1.0
+        - above_pct: 4.0            # 고점 수익 +4% 이상 → trail -1.2% (신규)
+          trail_pct: -1.2
+        - above_pct: 3.0            # 고점 수익 +3% 이상 → trail -1.5% (기존 -0.6%)
+          trail_pct: -1.5
+        - above_pct: 2.0            # 고점 수익 +2% 이상 → trail -2.0% (기존 -0.8%)
+          trail_pct: -2.0
+        - above_pct: 1.5            # 고점 수익 +1.5% 이상 → trail -2.5% (기존 +1%/-1.0%)
+          trail_pct: -2.5
+      # 변동성 비례 트레일링 (ATR 기반 동적 trail 폭)
+      volatility_scaling:
+        enabled: true
+        atr_multiplier: 2.0         # trail = max(base_trail, -ATR_1min × 배수)
+        change_pct_threshold: 15.0  # 일일 등락률 +15% 이상 시 추가 완화
+        change_pct_multiplier: 1.3  # 고모멘텀 종목 trail 폭 × 1.3
+
+    # ── [Case 2] 시간별 단계 SL (변동성 비례 확대) ──
+    # 2026-04-07: 프로미천/풍산홀딩스 조기 손절 방지 → SL 폭 ~1.5배 확대
+    # 핵심: 고정 SL 대신 변동성 비례 하한선 적용 (ATR × 2.5)
+    time_based_sl:
+      enabled: true
+      tiers:
+        - within_seconds: 120       # 진입 후 0~2분: -1.5% (기존 -1.0%)
+          sl_pct: -1.5
+        - within_seconds: 300       # 진입 후 2~5분: -2.0% (기존 -1.2%)
+          sl_pct: -2.0
+      final_sl_pct: -2.5            # 5분 이후: -2.5% (기존 -1.5%)
+      # 변동성 비례 SL (ATR 기반 동적 하한)
+      volatility_scaling:
+        enabled: true
+        atr_multiplier: 2.5         # effective_sl = max(time_sl, -ATR_1min × 배수)
+        change_pct_threshold: 15.0  # 일일 등락률 +15% 이상 시 추가 완화
+        change_pct_multiplier: 1.3  # 고모멘텀 종목 SL 폭 × 1.3
+
+# -----------------------------------------------------------------------------
+# 리스크 관리
+# -----------------------------------------------------------------------------
+risk:
+  max_positions: 5              # 동시 최대 보유 종목 수
+  max_per_stock_pct: 10.0       # 종목당 최대 비중 (총 자산 대비 %)
+  max_total_exposure_pct: 50.0  # 총 투자 비중 상한 (총 자산 대비 %)
+  # 시장 리스크 필터 (레거시 — market_condition으로 대체)
+  market_filter:
+    enabled: true
+    index_code: "101"           # 코스닥 지수 코드
+    index_ma_period: 20         # 코스닥 20일선
+    reduce_ratio: 0.5           # 하락장 시 비중 50% 축소
+  # ATR 기반 시장 상태 분석
+  market_condition:
+    enabled: true
+    atr_short_period: 5
+    atr_long_period: 20
+    thresholds:
+      caution_ratio: 1.5        # CAUTION: ATR(5)/ATR(20) >= 1.5
+      warning_ratio: 2.0        # WARNING: >= 2.0
+      extreme_ratio: 3.0        # EXTREME: >= 3.0
+    drops:
+      caution_drop_pct: -2.0    # 일변동 -2% 이하 → CAUTION
+      extreme_drop_pct: -4.0    # 일변동 -4% 이하 → EXTREME
+    sizing:                      # 포지션 크기 배율
+      normal: 1.0
+      caution: 0.5
+      warning: 0.25
+      extreme: 0.0               # 매수 중단
+    stop_loss:                   # 레벨별 손절 오버라이드 (%)
+      caution: -2.5
+      warning: -2.0
+      extreme: -1.0
+  # 미청산 포지션 전략 (전일 미청산 종목 전용)
+  carryover:
+    additional_stop_loss_pct: -5.0   # 당일 시가 기준 추가 하락 손절 (%)
+    phase1_sell_ratio: 0.5           # BB(20) 중앙선 도달 시 매도 비율 (50%)
+  # 일일 손실 한도
+  daily_loss_limit_pct: -5.0    # 당일 총 손실 -5% 시 매매 중단
+
+# -----------------------------------------------------------------------------
+# 텔레그램 알림
+# -----------------------------------------------------------------------------
+telegram:
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+  chat_id: "${TELEGRAM_CHAT_ID}"
+  notifications:
+    scan_result: true           # 스캔 결과 알림
+    entry_signal: true          # 매수 신호 알림
+    order_executed: true        # 주문 체결 알림
+    exit_signal: true           # 매도 신호 알림
+    force_liquidation: true     # 강제 청산 알림
+    daily_report: true          # 일일 리포트 알림
+    error: true                 # 오류 알림
+    position_update_interval: 5 # 포지션 업데이트 간격 (분)
+  # 공유 수신자 (스캔 결과 + 상승 예측만 전달)
+  share_chat_ids: ["1639682972"]  # @dusenme7
+  # 매매 전용 봇 (매수/매도 알림, 계좌 잔고 전용 — 미설정 시 기본 봇 사용)
+  trade_bot:
+    bot_token: "${TELEGRAM_TRADE_BOT_TOKEN}"
+    chat_id: "${TELEGRAM_TRADE_CHAT_ID}"
+
+# -----------------------------------------------------------------------------
+# 로깅
+# -----------------------------------------------------------------------------
+logging:
+  level: "INFO"
+  dir: "./logs"
+  # 매매 기록은 별도 JSONL 파일로 저장
+  trade_log: "./logs/trades.jsonl"
+  # 로그 보관 기간 (일)
+  retention_days: 90
