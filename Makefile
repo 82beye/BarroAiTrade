@@ -84,6 +84,16 @@ test-db: ## BAR-56 DB 어댑터 + Alembic + 마이그레이션 단위 테스트
 		--cov-report=term-missing
 	@echo "[BAR-56] tests OK"
 
+test-news: ## BAR-57 뉴스/공시 수집 파이프라인 단위 테스트
+	@echo "[BAR-57] Running pytest backend/tests/news/ + db/test_news_repo + db/test_alembic_0002..."
+	@$(PYTHON) -m pytest backend/tests/news/ backend/tests/db/test_news_repo.py backend/tests/db/test_alembic_0002.py -v \
+		--cov=backend.core.news \
+		--cov=backend.db.repositories.news_repo \
+		--cov=backend.models.news \
+		--cov-fail-under=70 \
+		--cov-report=term-missing
+	@echo "[BAR-57] tests OK"
+
 # === Team Agent tmux 병렬 (BAR-META-001) ============================
 team-help: ## Team Agent wrapper 도움말
 	@./scripts/team_agent.sh help
