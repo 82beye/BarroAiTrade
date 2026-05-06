@@ -38,6 +38,10 @@ npm-debug.log*
 
 # Testing
 coverage/
+.coverage
+.coverage.*
+.pytest_cache/
+htmlcov/
 
 # bkit internal
 .bkit/
