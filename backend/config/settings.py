@@ -69,6 +69,15 @@ class Settings(BaseSettings):
     news_inmemory_queue_max: int = 10_000
     news_fetch_timeout_seconds: int = 30
 
+    # === 임베딩 (BAR-58) — security 권고 ===
+    news_embedding_backend: Literal["fake", "ko_sbert", "openai"] = "fake"
+    news_embedding_model: str = "jhgan/ko-sroberta-multitask"
+    news_embedding_dim: int = 768
+    news_embedding_batch_size: int = Field(default=16, ge=1, le=64)
+    news_embedding_revision: Optional[str] = None  # 운영 시 SHA pin (CWE-494)
+    openai_api_key: Optional[SecretStr] = None      # CWE-798
+    anthropic_api_key: Optional[SecretStr] = None   # BAR-58b (CWE-798)
+
     # === 테마 (신규, BAR-58/59) ===
     theme_embedding_model: str = "ko-sbert"
     theme_vector_db_url: Optional[str] = None

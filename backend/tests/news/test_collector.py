@@ -30,13 +30,17 @@ class _FakeRepo:
         # insert_ok | insert_dup | insert_fail
         self.behavior = behavior
         self.calls = 0
+        # BAR-58: insert 반환은 Optional[int] (id) — 신규 시 1, 중복 시 None
+        self._next_id = 1
 
-    async def insert(self, item: NewsItem) -> bool:
+    async def insert(self, item: NewsItem):
         self.calls += 1
         if self.behavior == "insert_ok":
-            return True
+            id_ = self._next_id
+            self._next_id += 1
+            return id_
         if self.behavior == "insert_dup":
-            return False
+            return None
         raise RuntimeError("repo down")
 
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
@@ -21,15 +21,25 @@ logger = logging.getLogger(__name__)
 class NewsRepository:
     """뉴스 항목 CRUD."""
 
-    async def insert(self, item: NewsItem) -> bool:
-        """ON CONFLICT DO NOTHING. inserted == 1 이면 True (publish 트리거)."""
+    async def insert(self, item: NewsItem) -> Optional[int]:
+        """ON CONFLICT DO NOTHING. 반환:
+        - 신규 적재: BIGSERIAL id (Optional[int])
+        - 중복 (rowcount 0): None
+        - 실패: None
+
+        BAR-58 council: collector 가 반환 id 로 model_copy 후 publisher 에 전달.
+        """
         try:
             async with get_db() as db:
                 if db is None:
-                    return False
+                    return None
 
-                if db.engine.dialect.name == "sqlite":
-                    tags_payload: Any = json.dumps(list(item.tags), ensure_ascii=False)
+                is_sqlite = db.engine.dialect.name == "sqlite"
+
+                if is_sqlite:
+                    tags_payload: Any = json.dumps(
+                        list(item.tags), ensure_ascii=False
+                    )
                     sql = text(
                         """
                         INSERT OR IGNORE INTO news_items
@@ -49,35 +59,44 @@ class NewsRepository:
                         VALUES (:source, :source_id, :title, :body, :url,
                                 :published_at, :fetched_at, :tags)
                         ON CONFLICT (source, source_id) DO NOTHING
+                        RETURNING id
                         """
                     )
 
-                result = await db.execute(
-                    sql,
-                    {
-                        "source": item.source.value,
-                        "source_id": item.source_id,
-                        "title": item.title,
-                        "body": item.body,
-                        "url": item.url,
-                        # SQLite TEXT 컬럼이므로 ISO 8601 직렬화
-                        "published_at": (
-                            item.published_at.isoformat()
-                            if db.engine.dialect.name == "sqlite"
-                            else item.published_at
-                        ),
-                        "fetched_at": (
-                            item.fetched_at.isoformat()
-                            if db.engine.dialect.name == "sqlite"
-                            else item.fetched_at
-                        ),
-                        "tags": tags_payload,
-                    },
-                )
-                return (result.rowcount or 0) == 1
+                params = {
+                    "source": item.source.value,
+                    "source_id": item.source_id,
+                    "title": item.title,
+                    "body": item.body,
+                    "url": item.url,
+                    "published_at": (
+                        item.published_at.isoformat()
+                        if is_sqlite
+                        else item.published_at
+                    ),
+                    "fetched_at": (
+                        item.fetched_at.isoformat()
+                        if is_sqlite
+                        else item.fetched_at
+                    ),
+                    "tags": tags_payload,
+                }
+                result = await db.execute(sql, params)
+
+                if (result.rowcount or 0) != 1:
+                    return None  # 중복
+
+                if is_sqlite:
+                    # SQLite: lastrowid via raw exec
+                    res2 = await db.execute(text("SELECT last_insert_rowid() AS id"))
+                    row = res2.mappings().first()
+                    return int(row["id"]) if row else None
+                # Postgres RETURNING id
+                row = result.mappings().first()
+                return int(row["id"]) if row else None
         except Exception as exc:
             logger.error("news insert 실패: %s", exc)
-            return False
+            return None
 
     async def find_recent_by_source(
         self,
