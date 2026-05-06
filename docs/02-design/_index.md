@@ -12,7 +12,8 @@ tags: [index, design]
 
 | 피처 | 문서 | 날짜 | 상태 |
 |------|------|------|------|
-| BAR-50 ScalpingConsensus (Phase 1) | [[features/bar-50-scalping-consensus.design\|보기]] | 2026-05-06 | 🚧 진행 |
+| BAR-52 Exchange/TradingSession + MarketSessionService (Phase 2) | [[features/bar-52-market-session.design\|보기]] | 2026-05-06 | 🚧 진행 |
+| BAR-50 ScalpingConsensus (Phase 1) | [[features/bar-50-scalping-consensus.design\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-49 38스윙 신규 (Phase 1) | [[features/bar-49-swing-38.design\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-48 골드존 신규 (Phase 1) | [[features/bar-48-gold-zone.design\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-47 SF존 별도 클래스 (Phase 1) | [[features/bar-47-sf-zone-split.design\|보기]] | 2026-05-06 | ✅ 완료 |
