@@ -12,6 +12,8 @@ tags: [index, report]
 
 | 피처 | 문서 | 날짜 | 상태 |
 |------|------|------|------|
+| 🎉 **Phase 1 종합 회고** | [[PHASE-1-summary\|보기]] | 2026-05-06 | ✅ 완료 |
+| BAR-50 ScalpingConsensus (Phase 1 마지막, Match 97%) | [[bar-50-scalping-consensus.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-49 38스윙 신규 (Phase 1, Match 96%) | [[bar-49-swing-38.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-48 골드존 신규 (Phase 1, Match 96%) | [[bar-48-gold-zone.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-47 SF존 별도 클래스 (Phase 1, Match 97%) | [[bar-47-sf-zone-split.report\|보기]] | 2026-05-06 | ✅ 완료 |
