@@ -12,6 +12,9 @@ tags: [index, report]
 
 | 피처 | 문서 | 날짜 | 상태 |
 |------|------|------|------|
+| 🎉 **Phase 0 종합 회고** | [[PHASE-0-summary\|보기]] | 2026-05-06 | ✅ 완료 |
+| Phase 0 베이스라인 | [[PHASE-0-baseline-2026-05\|보기]] | 2026-05-06 | ✅ 완료 |
+| BAR-44 회귀 베이스라인 (Phase 0 종료, Match 96%) | [[bar-44-baseline.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-43 표준 로깅·메트릭 통일 (Phase 0, Match 97%) | [[bar-43-monitoring-unify.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-42 통합 환경변수 스키마 (Phase 0, Match 98%) | [[bar-42-config-settings.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-41 모델 호환 어댑터 (Phase 0, Match 96%) | [[bar-41-model-adapter.report\|보기]] | 2026-05-06 | ✅ 완료 |
