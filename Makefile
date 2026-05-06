@@ -75,6 +75,31 @@ test-router: ## BAR-55 SmartOrderRouter (SOR v1) 단위 테스트
 		--cov-report=term-missing
 	@echo "[BAR-55] tests OK"
 
+# === Team Agent tmux 병렬 (BAR-META-001) ============================
+team-help: ## Team Agent wrapper 도움말
+	@./scripts/team_agent.sh help
+
+team-start: ## Team Agent 시작 (BAR=<id> STAGE=<stage>) — 5 pane 병렬 dispatch
+	@./scripts/team_agent.sh start "$(BAR)" "$(STAGE)" --no-attach
+
+team-status: ## Team Agent 상태 (BAR=<id> STAGE=<stage>)
+	@./scripts/team_agent.sh status "$(BAR)" "$(STAGE)"
+
+team-watch: ## Team Agent 완료 대기 + COMBINED.md (BAR=<id> STAGE=<stage>)
+	@./scripts/team_agent.sh watch "$(BAR)" "$(STAGE)"
+
+team-attach: ## tmux attach -t team-<BAR>-<STAGE>
+	@tmux attach -t "team-$(BAR)-$(STAGE)"
+
+team-kill: ## Team Agent 세션 종료 (BAR=<id> STAGE=<stage>)
+	@./scripts/team_agent.sh kill "$(BAR)" "$(STAGE)"
+
+team-clean: ## Team Agent 세션+산출물 삭제 (BAR=<id> STAGE=<stage>)
+	@./scripts/team_agent.sh clean "$(BAR)" "$(STAGE)"
+
+team-ls: ## Team Agent 활성/저장 세션 목록
+	@./scripts/team_agent.sh ls
+
 baseline: ## BAR-44 베이스라인 측정 실행 (4 전략 합성 데이터)
 	@echo "[BAR-44] Running scripts/run_baseline.py..."
 	@$(PYTHON) -c "import sys; sys.path.insert(0, '.'); exec(open('scripts/run_baseline.py').read())"
