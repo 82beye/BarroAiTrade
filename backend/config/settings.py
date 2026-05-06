@@ -54,14 +54,20 @@ class Settings(BaseSettings):
     nxt_app_key: Optional[str] = None
     nxt_app_secret: Optional[SecretStr] = None
 
-    # === Redis (신규, BAR-57) ===
-    redis_url: Optional[str] = None
+    # === Redis (신규, BAR-57) — SecretStr 승격 (CWE-522) ===
+    redis_url: Optional[SecretStr] = None
     redis_streams_enabled: bool = False
 
     # === 뉴스/공시 (신규, BAR-57) ===
     dart_api_key: Optional[SecretStr] = None
     rss_feed_urls: list[str] = Field(default_factory=list)
     news_polling_interval_sec: int = 60
+    news_dedup_backend: Literal["memory", "redis"] = "memory"
+    news_stream_backend: Literal["memory", "redis"] = "memory"
+    news_dedup_ttl_hours: int = 24                 # InMemory
+    news_dedup_ttl_hours_redis: int = 72           # Redis
+    news_inmemory_queue_max: int = 10_000
+    news_fetch_timeout_seconds: int = 30
 
     # === 테마 (신규, BAR-58/59) ===
     theme_embedding_model: str = "ko-sbert"
