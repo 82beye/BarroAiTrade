@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-04-12T03:52:19.525Z",
+  "lastUpdated": "2026-05-06T10:49:01.773Z",
   "activeFeatures": [
     "bar-17-dashboard",
     "gateway",
@@ -27,7 +27,13 @@
     "db",
     "repositories",
     "execution",
-    "analysis"
+    "analysis",
+    "legacy_scalping",
+    "tests",
+    "scalping_team",
+    "strategy_team",
+    "verification_team",
+    "agents"
   ],
   "primaryFeature": "bar-17-dashboard",
   "features": {
@@ -80,9 +86,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T01:35:08.910Z",
-        "lastUpdated": "2026-04-12T02:36:46.069Z"
+        "lastUpdated": "2026-05-05T19:40:01.880Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/main.py"
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/main.py"
     },
     "core": {
       "phase": "do",
@@ -210,9 +216,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T03:35:51.026Z",
-        "lastUpdated": "2026-04-11T09:26:30.427Z"
+        "lastUpdated": "2026-05-06T10:49:01.773Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/strategy/stock_strategy.py"
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/tests/strategy/test_baseline.py"
     },
     "scanner": {
       "phase": "do",
@@ -236,9 +242,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T03:39:34.491Z",
-        "lastUpdated": "2026-04-12T02:36:16.743Z"
+        "lastUpdated": "2026-05-05T19:39:51.976Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/api/routes/trading.py"
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/api/routes/metrics.py"
     },
     "monitoring": {
       "phase": "do",
@@ -249,9 +255,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T03:40:13.519Z",
-        "lastUpdated": "2026-04-11T09:28:05.156Z"
+        "lastUpdated": "2026-05-05T19:40:34.891Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/monitoring/report_service.py"
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/tests/monitoring/test_metrics.py"
     },
     "scripts": {
       "phase": "do",
@@ -262,9 +268,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T03:40:44.877Z",
-        "lastUpdated": "2026-04-11T03:41:48.641Z"
+        "lastUpdated": "2026-05-06T10:47:48.453Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/scripts/integration_test.sh"
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/scripts/run_baseline.py"
     },
     "watchlist": {
       "phase": "do",
@@ -327,9 +333,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T09:25:27.806Z",
-        "lastUpdated": "2026-04-11T09:25:27.806Z"
+        "lastUpdated": "2026-05-05T19:25:45.061Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/config/settings.py"
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/config/settings.py"
     },
     "db": {
       "phase": "do",
@@ -382,6 +388,84 @@
         "lastUpdated": "2026-04-12T03:52:19.525Z"
       },
       "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/analysis/bar-29-backtest-validation.py"
+    },
+    "legacy_scalping": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-05-05T17:59:04.453Z",
+        "lastUpdated": "2026-05-05T19:05:16.305Z"
+      },
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/tests/legacy_scalping/test_adapter.py"
+    },
+    "tests": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-05-05T19:04:36.454Z",
+        "lastUpdated": "2026-05-05T19:04:52.393Z"
+      },
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/tests/conftest.py"
+    },
+    "scalping_team": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-05-05T19:07:22.327Z",
+        "lastUpdated": "2026-05-05T19:07:22.327Z"
+      },
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/legacy_scalping/strategy/scalping_team/__init__.py"
+    },
+    "strategy_team": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-05-05T19:07:25.130Z",
+        "lastUpdated": "2026-05-05T19:07:25.130Z"
+      },
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/legacy_scalping/strategy/strategy_team/__init__.py"
+    },
+    "verification_team": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-05-05T19:07:26.695Z",
+        "lastUpdated": "2026-05-05T19:07:26.695Z"
+      },
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/legacy_scalping/strategy/verification_team/__init__.py"
+    },
+    "agents": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-05-05T19:07:28.523Z",
+        "lastUpdated": "2026-05-05T19:07:28.523Z"
+      },
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/legacy_scalping/scanner/agents/__init__.py"
     }
   },
   "pipeline": {
@@ -392,7 +476,7 @@
   "session": {
     "startedAt": "2026-04-11T01:23:25.516Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-04-12T03:52:19.525Z"
+    "lastActivity": "2026-05-06T10:49:01.773Z"
   },
   "history": [
     {
@@ -1208,6 +1292,144 @@
     {
       "timestamp": "2026-04-12T03:52:19.525Z",
       "feature": "analysis",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T17:59:04.453Z",
+      "feature": "legacy_scalping",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:04:24.258Z",
+      "feature": "legacy_scalping",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:04:35.721Z",
+      "feature": "legacy_scalping",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:04:36.454Z",
+      "feature": "tests",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:04:37.190Z",
+      "feature": "legacy_scalping",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:04:52.393Z",
+      "feature": "tests",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:05:16.305Z",
+      "feature": "legacy_scalping",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:07:22.327Z",
+      "feature": "scalping_team",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:07:25.130Z",
+      "feature": "strategy_team",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:07:26.695Z",
+      "feature": "verification_team",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:07:28.523Z",
+      "feature": "agents",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:24:57.764Z",
+      "feature": "config",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:25:20.963Z",
+      "feature": "config",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:25:45.061Z",
+      "feature": "config",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:39:23.363Z",
+      "feature": "monitoring",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:39:25.030Z",
+      "feature": "monitoring",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:39:44.493Z",
+      "feature": "monitoring",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:39:51.976Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:40:01.880Z",
+      "feature": "backend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-05T19:40:34.891Z",
+      "feature": "monitoring",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-06T10:47:48.453Z",
+      "feature": "scripts",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-06T10:48:46.536Z",
+      "feature": "strategy",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-05-06T10:49:01.773Z",
+      "feature": "strategy",
       "phase": "do",
       "action": "updated"
     }
