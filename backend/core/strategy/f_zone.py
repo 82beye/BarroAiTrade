@@ -18,16 +18,24 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import List, Optional, Tuple
+from datetime import datetime, time as dtime
+from decimal import Decimal
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
 from backend.core.strategy.base import Strategy
 from backend.models.market import OHLCV, MarketType
+from backend.models.position import Position
 from backend.models.signal import EntrySignal
-from backend.models.strategy import AnalysisContext
+from backend.models.strategy import (
+    Account,
+    AnalysisContext,
+    ExitPlan,
+    StopLoss,
+    TakeProfitTier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -113,32 +121,16 @@ class FZoneStrategy(Strategy):
     # ── 공개 인터페이스 ────────────────────────────────────────────────────────
 
     def _analyze_v2(self, ctx: AnalysisContext) -> Optional[EntrySignal]:
-        # BAR-45: Strategy v2 진입점. AnalysisContext 에서 legacy 4-arg 풀어냄.
+        """
+        BAR-46: F존 v2 직접 구현 (BAR-45 의 `_analyze_impl` shim 제거).
+
+        AnalysisContext 의 candles 를 분석하여 F존/SF존 진입 신호 반환.
+        후속 BAR 가 ctx.theme_context / ctx.news_context 활용 가능.
+        """
         symbol = ctx.symbol
         name = ctx.name or ctx.symbol
         candles = ctx.candles
         market_type = ctx.market_type
-        return self._analyze_impl(symbol, name, candles, market_type)
-
-    def _analyze_impl(
-        self,
-        symbol: str,
-        name: str,
-        candles: List[OHLCV],
-        market_type: MarketType,
-    ) -> Optional[EntrySignal]:
-        """
-        OHLCV 캔들 데이터를 분석하여 F존/SF존 진입 신호 반환.
-
-        Args:
-            symbol: 종목 코드
-            name: 종목명
-            candles: 최신 순으로 정렬된 OHLCV 리스트 (가장 최근 캔들이 index 0)
-            market_type: STOCK 또는 CRYPTO
-
-        Returns:
-            EntrySignal 또는 None (신호 없음)
-        """
         p = self.params
 
         if len(candles) < p.min_candles:
@@ -195,6 +187,64 @@ class FZoneStrategy(Strategy):
                 "bounce_volume_ratio": round(analysis.bounce_volume_ratio, 2),
             },
         )
+
+    # ── BAR-46: F존 정책 override (Strategy v2) ────────────────────────────────
+
+    def exit_plan(self, position: Position, ctx: AnalysisContext) -> ExitPlan:
+        """F존 정책: TP1=+3% (50%) + TP2=+5% (50%) + SL=-2% + 14:50 강제 + breakeven +1.5%."""
+        avg = Decimal(str(position.avg_price))
+
+        take_profits = [
+            TakeProfitTier(
+                price=avg * Decimal("1.03"),
+                qty_pct=Decimal("0.5"),
+                condition="F존 TP1 +3%",
+            ),
+            TakeProfitTier(
+                price=avg * Decimal("1.05"),
+                qty_pct=Decimal("0.5"),
+                condition="F존 TP2 +5%",
+            ),
+        ]
+
+        # KRX 정규장 강제 청산 (14:50). crypto 는 None.
+        time_exit = dtime(14, 50) if ctx.market_type == MarketType.STOCK else None
+
+        return ExitPlan(
+            take_profits=take_profits,
+            stop_loss=StopLoss(fixed_pct=Decimal("-0.02")),
+            time_exit=time_exit,
+            breakeven_trigger=Decimal("0.015"),
+        )
+
+    def position_size(self, signal: EntrySignal, account: Account) -> Decimal:
+        """F존 강도(score) 기반 비중: ≥0.7 → 30%, 0.5~0.7 → 20%, <0.5 → 10%."""
+        if account.available <= 0:
+            return Decimal(0)
+
+        score = Decimal(str(signal.score))
+        if score >= Decimal("0.7"):
+            ratio = Decimal("0.30")
+        elif score >= Decimal("0.5"):
+            ratio = Decimal("0.20")
+        else:
+            ratio = Decimal("0.10")
+
+        max_invest = account.available * ratio
+        price = Decimal(str(signal.price))
+        if price <= 0:
+            return Decimal(0)
+        return (max_invest / price).quantize(Decimal("1"))
+
+    def health_check(self) -> dict[str, Any]:
+        """F존 health_check — params sanity + 데이터 충분성 임계값."""
+        p = self.params
+        return {
+            "strategy_id": self.STRATEGY_ID,
+            "ready": p.min_candles >= 60 and p.impulse_lookback > 0,
+            "min_candles": p.min_candles,
+            "impulse_lookback": p.impulse_lookback,
+        }
 
     # ── 내부 분석 단계 ─────────────────────────────────────────────────────────
 
