@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     openai_api_key: Optional[SecretStr] = None      # CWE-798
     anthropic_api_key: Optional[SecretStr] = None   # BAR-58b (CWE-798)
 
+    # === 테마 분류 (BAR-59) ===
+    news_theme_backend: Literal["tfidf", "cosine", "haiku", "three_tier"] = "three_tier"
+    news_theme_threshold_tfidf: float = Field(default=0.7, ge=0.0, le=1.0)
+    news_theme_threshold_cosine: float = Field(default=0.5, ge=0.0, le=2.0)
+    news_theme_labels_path: Optional[str] = None    # JSON {"테마": ["text", ...]}
+
     # === 테마 (신규, BAR-58/59) ===
     theme_embedding_model: str = "ko-sbert"
     theme_vector_db_url: Optional[str] = None
