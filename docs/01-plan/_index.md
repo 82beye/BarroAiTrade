@@ -19,7 +19,8 @@ tags: [index, plan]
 
 | 피처 | 문서 | 날짜 | 상태 |
 |------|------|------|------|
-| BAR-48 골드존 신규 (Phase 1) | [[features/bar-48-gold-zone.plan\|보기]] | 2026-05-06 | 🚧 진행 |
+| BAR-49 38스윙 신규 (Phase 1) | [[features/bar-49-swing-38.plan\|보기]] | 2026-05-06 | 🚧 진행 |
+| BAR-48 골드존 신규 (Phase 1) | [[features/bar-48-gold-zone.plan\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-47 SF존 별도 클래스 분리 (Phase 1) | [[features/bar-47-sf-zone-split.plan\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-46 F존 v2 리팩터 (Phase 1) | [[features/bar-46-f-zone-v2.plan\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-45 Strategy v2 추상 + AnalysisContext (Phase 1) | [[features/bar-45-strategy-v2.plan\|보기]] | 2026-05-06 | ✅ 완료 |
