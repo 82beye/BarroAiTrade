@@ -46,6 +46,13 @@ test-strategy: ## BAR-45 Strategy v2 ABC + 모델 단위 테스트
 		--cov-report=term-missing
 	@echo "[BAR-45] tests OK"
 
+test-market-session: ## BAR-52 MarketSessionService 단위 테스트
+	@echo "[BAR-52] Running pytest backend/tests/market_session/..."
+	@$(PYTHON) -m pytest backend/tests/market_session/ -v \
+		--cov=backend.core.market_session.service \
+		--cov-report=term-missing
+	@echo "[BAR-52] tests OK"
+
 baseline: ## BAR-44 베이스라인 측정 실행 (4 전략 합성 데이터)
 	@echo "[BAR-44] Running scripts/run_baseline.py..."
 	@$(PYTHON) -c "import sys; sys.path.insert(0, '.'); exec(open('scripts/run_baseline.py').read())"
