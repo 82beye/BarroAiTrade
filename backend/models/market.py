@@ -155,3 +155,68 @@ class GatewayStatus(str, Enum):
     OK = "ok"
     DEGRADED = "degraded"
     DOWN = "down"
+
+
+# ═════════════════════════════════════════════════════════
+# BAR-54 Composite OrderBook — KRX + NXT 호가 병합
+# ═════════════════════════════════════════════════════════
+
+
+class CompositeLevel(BaseModel):
+    """단일 가격의 통합 호가 레벨 (BAR-54).
+
+    가격 1개 + 거래소별 잔량 분해 + 합산 잔량.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    price: Decimal
+    total_qty: int
+    breakdown: dict[Exchange, int]
+
+
+class CompositeOrderBookL2(BaseModel):
+    """KRX + NXT 호가 단일 가격축 병합 (BAR-54).
+
+    bids: 가격 내림차순
+    asks: 가격 오름차순
+    venues: 머지에 참여한 거래소 frozenset
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    ts: datetime
+    bids: List[CompositeLevel]
+    asks: List[CompositeLevel]
+    venues: frozenset[Exchange]
+
+    @property
+    def best_bid(self) -> Optional[Decimal]:
+        return self.bids[0].price if self.bids else None
+
+    @property
+    def best_ask(self) -> Optional[Decimal]:
+        return self.asks[0].price if self.asks else None
+
+    @property
+    def mid_price(self) -> Optional[Decimal]:
+        if self.best_bid is None or self.best_ask is None:
+            return None
+        return (self.best_bid + self.best_ask) / Decimal(2)
+
+    @property
+    def spread(self) -> Optional[Decimal]:
+        if self.best_bid is None or self.best_ask is None:
+            return None
+        return self.best_ask - self.best_bid
+
+    def venue_breakdown(self, price: Decimal) -> dict[Exchange, int]:
+        """주어진 가격의 거래소별 잔량 분해 반환. 미발견 시 빈 dict."""
+        for level in self.bids:
+            if level.price == price:
+                return dict(level.breakdown)
+        for level in self.asks:
+            if level.price == price:
+                return dict(level.breakdown)
+        return {}
