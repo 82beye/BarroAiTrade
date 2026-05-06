@@ -12,6 +12,7 @@ tags: [index, report]
 
 | 피처 | 문서 | 날짜 | 상태 |
 |------|------|------|------|
+| BAR-47 SF존 별도 클래스 (Phase 1, Match 97%) | [[bar-47-sf-zone-split.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-46 F존 v2 리팩터 (Phase 1, Match 97%) | [[bar-46-f-zone-v2.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-45 Strategy v2 추상 + AnalysisContext (Phase 1, Match 97%) | [[bar-45-strategy-v2.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | 🎉 **Phase 0 종합 회고** | [[PHASE-0-summary\|보기]] | 2026-05-06 | ✅ 완료 |
