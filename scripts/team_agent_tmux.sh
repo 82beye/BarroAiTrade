@@ -126,25 +126,39 @@ for ((i=1; i<NUM; i++)); do
 done
 tmux select-layout -t "$SESSION:team" tiled >/dev/null
 
-# 각 pane 에 역할 디스패치
+# pane runner 스크립트 — WORK_DIR 만 PWD 로 추론, ROLE 만 인자로 (명령 짧게 → 터미널 wrap 회피)
+RUNNER="$WORK_DIR/_runner.sh"
+cat > "$RUNNER" <<'RUNNER_EOF'
+#!/usr/bin/env bash
+# team-agent pane runner — single role
+# 호출: ROLE=<role> bash _runner.sh
+# WORK_DIR=PWD, BAR_ID/STAGE 는 path 에서 추론
+set -uo pipefail
+ROLE="${ROLE:?ROLE env required}"
+WORK_DIR="$(pwd)"
+STAGE="$(basename "$WORK_DIR")"
+BAR_ID="$(basename "$(dirname "$WORK_DIR")")"
+
+prompt="$WORK_DIR/${ROLE}.prompt.md"
+output="$WORK_DIR/${ROLE}.output.md"
+status="$WORK_DIR/${ROLE}.status"
+
+echo "=== team-agent: $ROLE ($BAR_ID/$STAGE) ==="
+echo "prompt: $prompt"
+echo "--- claude --print 시작 ($(date '+%H:%M:%S')) ---"
+cat "$prompt" | claude --print --output-format text > "$output" 2>&1
+rc=$?
+echo "$rc" > "$status"
+echo "=== done rc=$rc ==="
+RUNNER_EOF
+chmod +x "$RUNNER"
+
+# 각 pane 에 cd + ROLE=... bash _runner.sh 두 줄로 분리 (line wrap 회피)
 for i in "${!ROLES[@]}"; do
   role="${ROLES[$i]}"
-  prompt_file="$WORK_DIR/${role}.prompt.md"
-  output_file="$WORK_DIR/${role}.output.md"
-  status_file="$WORK_DIR/${role}.status"
   pane="$SESSION:team.$i"
-
-  # 각 pane 에 안내 + claude CLI 실행
-  tmux send-keys -t "$pane" \
-    "echo '=== team-agent: $role ($BAR_ID/$STAGE) ==='" Enter
-  tmux send-keys -t "$pane" \
-    "echo 'prompt: $prompt_file'" Enter
-  tmux send-keys -t "$pane" \
-    "echo 'output: $output_file'" Enter
-  tmux send-keys -t "$pane" \
-    "echo '--- claude --print 시작 ($(date +%H:%M:%S)) ---'" Enter
-  tmux send-keys -t "$pane" \
-    "{ claude --print --output-format text < '$prompt_file' > '$output_file' 2>&1; rc=\$?; echo \$rc > '$status_file'; echo \"=== done rc=\$rc ===\"; }" Enter
+  tmux send-keys -t "$pane" "cd '$WORK_DIR'" Enter
+  tmux send-keys -t "$pane" "ROLE=$role bash _runner.sh" Enter
 done
 
 echo "[team-agent] session=$SESSION pane=$NUM started"
