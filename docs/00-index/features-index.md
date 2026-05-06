@@ -8,38 +8,78 @@ tags: [index, features]
 
 ---
 
-## 전체 피처 현황
+## 마스터 실행 계획
 
-| 피처 ID | 제목 | Plan | Design | Analysis | Report | 상태 |
-|---------|------|------|--------|----------|--------|------|
-| BAR-17 | 실시간 대시보드 | [[../01-plan/features/bar-17-dashboard.plan\|Plan]] | [[../02-design/features/bar-17-dashboard.design\|Design]] | [[../03-analysis/bar-17-dashboard.analysis\|Analysis]] | [[../04-report/bar-17-dashboard.report\|Report]] | ✅ 완료 |
+| 문서 | 범위 | 상태 |
+|---|---|:---:|
+| [[../01-plan/MASTER-EXECUTION-PLAN-v2\|마스터 실행 계획 v2]] | Phase 0~6 / BAR-40~79 (40 티켓) | 🟢 Active |
+| [[../01-plan/MASTER-EXECUTION-PLAN-v1\|마스터 실행 계획 v1]] | (supersede by v2) | 📦 보존 |
 
 ---
 
-## 피처 상세
+## Phase 0 — 기반 정비 ✅ 완료 (2026-05-06)
 
-### BAR-17 — 실시간 트레이딩 대시보드
+| BAR | Title | Plan | Design | Analysis | Report | Match | 상태 |
+|-----|-------|:---:|:---:|:---:|:---:|:---:|:---:|
+| **BAR-40** | sub_repo 모노레포 흡수 | [[../01-plan/features/bar-40-monorepo-absorption.plan\|P]] | [[../02-design/features/bar-40-monorepo-absorption.design\|D]] | [[../03-analysis/bar-40-monorepo-absorption.analysis\|A]] | [[../04-report/bar-40-monorepo-absorption.report\|R]] | 95% | ✅ |
+| **BAR-41** | 모델 호환 어댑터 | [[../01-plan/features/bar-41-model-adapter.plan\|P]] | [[../02-design/features/bar-41-model-adapter.design\|D]] | [[../03-analysis/bar-41-model-adapter.analysis\|A]] | [[../04-report/bar-41-model-adapter.report\|R]] | 96% | ✅ |
+| **BAR-42** | 통합 환경변수 스키마 | [[../01-plan/features/bar-42-config-settings.plan\|P]] | [[../02-design/features/bar-42-config-settings.design\|D]] | [[../03-analysis/bar-42-config-settings.analysis\|A]] | [[../04-report/bar-42-config-settings.report\|R]] | 98% | ✅ |
+| **BAR-43** | 표준 로깅·메트릭 통일 | [[../01-plan/features/bar-43-monitoring-unify.plan\|P]] | [[../02-design/features/bar-43-monitoring-unify.design\|D]] | [[../03-analysis/bar-43-monitoring-unify.analysis\|A]] | [[../04-report/bar-43-monitoring-unify.report\|R]] | 97% | ✅ |
+| **BAR-44** | 회귀 베이스라인 (종료 게이트) | [[../01-plan/features/bar-44-baseline.plan\|P]] | [[../02-design/features/bar-44-baseline.design\|D]] | [[../03-analysis/bar-44-baseline.analysis\|A]] | [[../04-report/bar-44-baseline.report\|R]] | 96% | ✅ |
 
-- **설명**: Next.js 15 기반 실시간 트레이딩 대시보드 구현 (WebSocket + 차트 + 컴포넌트 시스템)
-- **PDCA 상태**: 완료 (Check ≥ 90%)
-- **관련 문서**:
-  - [[../01-plan/features/bar-17-dashboard.plan|Plan 문서]]
-  - [[../02-design/features/bar-17-dashboard.design|Design 문서]]
-  - [[../03-analysis/bar-17-dashboard.analysis|Analysis 문서]]
-  - [[../04-report/bar-17-dashboard.report|Report 문서]]
+→ **회고**: [[../04-report/PHASE-0-summary]] | **베이스라인**: [[../04-report/PHASE-0-baseline-2026-05]]
+
+## Phase 1 — 전략 엔진 통합 ⏳ 진입 예정
+
+| BAR | Title | 의존 | 상태 |
+|-----|-------|------|------|
+| BAR-45 | Strategy v2 추상 + AnalysisContext | Phase 0 ✅ | 🔓 진입 가능 |
+| BAR-46 | F존 v2 리팩터 | BAR-45 | ⏳ |
+| BAR-47 | SF존 별도 클래스 분리 | BAR-45 | ⏳ |
+| BAR-48 | 골드존 전략 신규 포팅 | BAR-45 | ⏳ |
+| BAR-49 | 38스윙 전략 신규 포팅 | BAR-45 | ⏳ |
+| BAR-50 | ScalpingConsensusStrategy | BAR-45 | ⏳ |
+
+> v1 의 BAR-51 은 v2 에서 BAR-79 (백테스터 v2 확장, Phase 6) 로 재할당.
+
+## Phase 2~6 — 마스터 플랜 v2 참조
+
+[[../01-plan/MASTER-EXECUTION-PLAN-v2#2. v2 BAR 매트릭스 (v1 + 변경 + 신규)]]
+
+---
+
+## 이전 피처 (Phase 0 이전)
+
+| BAR | Title | Plan | Design | Analysis | Report | 상태 |
+|-----|-------|:---:|:---:|:---:|:---:|:---:|
+| BAR-17 | 실시간 대시보드 | [[../01-plan/features/bar-17-dashboard.plan\|P]] | [[../02-design/features/bar-17-dashboard.design\|D]] | [[../03-analysis/bar-17-dashboard.analysis\|A]] | [[../04-report/bar-17-dashboard.report\|R]] | ✅ |
+| BAR-23 | 프론트엔드 페이지 | [[../01-plan/features/bar-23-frontend-pages.plan\|P]] | [[../02-design/features/bar-23-frontend-pages.design\|D]] | [[../03-analysis/bar-23-frontend-pages.analysis\|A]] | [[../04-report/bar-23-frontend-pages.report\|R]] | ✅ |
+| BAR-28 | 한국 주식 시장 분석 | [[../01-plan/features/bar-28-korean-stocks.plan\|P]] | — | — | — | ✅ |
+| BAR-29 | 백테스팅 검증 리포트 | [[../01-plan/features/bar-29-backtest-validation.plan\|P]] | — | — | — | ✅ |
+
+---
+
+## 분석 자산 (Plan 입력)
+
+- [[../01-plan/analysis/BarroAiTrade_고도화_계획|BarroAiTrade × ai-trade 통합 고도화 계획]] — 마스터 플랜 v1/v2 의 *원본 입력 문서*
+- [[../01-plan/analysis/Backtest-Validation-Report|백테스팅 전략 검증 리포트]] (BAR-29)
+- [[../01-plan/analysis/Backtest-Performance-Metrics|성과 지표 데이터 (CSV)]]
+- [[../01-plan/analysis/KR-Market-Analysis-2026Q2|한국 주식 시장 분석 2026Q2]] (BAR-28)
+- [[../01-plan/analysis/System-Parameters-Initial|시스템 파라미터 초기값]]
 
 ---
 
 ## 신규 피처 추가 가이드
 
-새로운 피처가 시작될 때 아래 순서로 산출물을 생성합니다:
+새 피처는 PDCA 5 PR 패턴으로 진행:
 
-1. `01-plan/features/{feature-id}.plan.md` 생성
-2. `02-design/features/{feature-id}.design.md` 생성
-3. `03-analysis/{feature-id}.analysis.md` 생성 (구현 후)
-4. `04-report/{feature-id}.report.md` 생성 (GAP ≥ 90% 달성 후)
-5. 이 인덱스 테이블에 행 추가
+1. `/pdca plan BAR-XX` → `01-plan/features/bar-XX-{slug}.plan.md`
+2. `/pdca design BAR-XX` → `02-design/features/bar-XX-{slug}.design.md`
+3. `/pdca do BAR-XX` (구현 + 테스트)
+4. `/pdca analyze BAR-XX` → `03-analysis/bar-XX-{slug}.analysis.md` (gap-detector)
+5. `/pdca report BAR-XX` → `04-report/bar-XX-{slug}.report.md` (Match ≥ 90%)
+6. 이 인덱스 + `_index.md` 갱신
 
 ---
 
-*[[README|← 홈으로]] | 최종 업데이트: 2026-04-11*
+*[[../README|← 홈으로]] | 최종 업데이트: 2026-05-06 (Phase 0 종료)*
