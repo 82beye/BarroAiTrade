@@ -54,11 +54,18 @@ test-market-session: ## BAR-52 MarketSessionService 단위 테스트
 	@echo "[BAR-52] tests OK"
 
 test-nxt-gateway: ## BAR-53 NxtGateway 1차 단위 테스트
-	@echo "[BAR-53] Running pytest backend/tests/gateway/..."
-	@$(PYTHON) -m pytest backend/tests/gateway/ -v \
+	@echo "[BAR-53] Running pytest backend/tests/gateway/test_nxt.py..."
+	@$(PYTHON) -m pytest backend/tests/gateway/test_nxt.py -v \
 		--cov=backend.core.gateway.nxt \
 		--cov-report=term-missing
 	@echo "[BAR-53] tests OK"
+
+test-composite-orderbook: ## BAR-54 CompositeOrderBookService 단위 테스트
+	@echo "[BAR-54] Running pytest backend/tests/gateway/test_composite_orderbook.py..."
+	@$(PYTHON) -m pytest backend/tests/gateway/test_composite_orderbook.py -v \
+		--cov=backend.core.gateway.composite_orderbook \
+		--cov-report=term-missing
+	@echo "[BAR-54] tests OK"
 
 baseline: ## BAR-44 베이스라인 측정 실행 (4 전략 합성 데이터)
 	@echo "[BAR-44] Running scripts/run_baseline.py..."
