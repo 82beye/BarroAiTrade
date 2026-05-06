@@ -11,6 +11,7 @@ volumes:
   prometheus_data:
   grafana_data:
   app_logs:
+  pg_data:                 # BAR-56 — Postgres 영구 볼륨
 
 services:
   # ── 백엔드 (FastAPI) ───────────────────────────────────────────────────────
@@ -37,6 +38,33 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Postgres + pgvector (BAR-56) ─────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: barro_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-barro}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-barro}
+      POSTGRES_DB: ${POSTGRES_DB:-barro}
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - barro_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-barro} -d ${POSTGRES_DB:-barro}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # ── 프론트엔드 (Next.js) ──────────────────────────────────────────────────
   frontend:

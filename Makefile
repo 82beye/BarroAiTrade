@@ -75,6 +75,15 @@ test-router: ## BAR-55 SmartOrderRouter (SOR v1) 단위 테스트
 		--cov-report=term-missing
 	@echo "[BAR-55] tests OK"
 
+test-db: ## BAR-56 DB 어댑터 + Alembic + 마이그레이션 단위 테스트
+	@echo "[BAR-56] Running pytest backend/tests/db/..."
+	@$(PYTHON) -m pytest backend/tests/db/ -v \
+		--cov=backend.db.database \
+		--cov=backend.db._type_map \
+		--cov=backend.db.repositories.audit_repo \
+		--cov-report=term-missing
+	@echo "[BAR-56] tests OK"
+
 # === Team Agent tmux 병렬 (BAR-META-001) ============================
 team-help: ## Team Agent wrapper 도움말
 	@./scripts/team_agent.sh help
