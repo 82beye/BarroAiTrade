@@ -15,6 +15,32 @@ class MarketType(str, Enum):
     CRYPTO = "crypto"
 
 
+class Exchange(str, Enum):
+    """거래소 — KRX 본장, NXT 대체거래소, COMPOSITE 통합 뷰 (BAR-52)."""
+
+    KRX = "krx"
+    NXT = "nxt"
+    COMPOSITE = "composite"
+
+
+class TradingSession(str, Enum):
+    """거래 세션 (한국 시간 기준, BAR-52).
+
+    08:00 ─ NXT_PRE ─ 08:30 ─ KRX_PRE ─ 09:00 ─ REGULAR ─
+    15:20 ─ KRX_CLOSING_AUCTION ─ 15:30 ─ INTERLUDE ─ 15:40 ─
+    KRX_AFTER ─ 18:00 ─ NXT_AFTER ─ 20:00 ─ CLOSED
+    """
+
+    CLOSED = "closed"
+    NXT_PRE = "nxt_pre"
+    KRX_PRE = "krx_pre"
+    REGULAR = "regular"
+    KRX_CLOSING_AUCTION = "krx_closing_auction"
+    INTERLUDE = "interlude"
+    KRX_AFTER = "krx_after"
+    NXT_AFTER = "nxt_after"
+
+
 class OHLCV(BaseModel):
     symbol: str
     timestamp: datetime

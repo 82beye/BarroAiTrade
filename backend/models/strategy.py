@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from backend.models.market import MarketType, OHLCV
+from backend.models.market import MarketType, OHLCV, TradingSession
 
 
 # === AnalysisContext ===
@@ -38,7 +38,7 @@ class AnalysisContext(BaseModel):
 
     # 선택 — Phase 0 이후 BAR 가 채움
     orderbook: Any = None              # backend.models.market.OrderBook (forward ref)
-    trading_session: Any = None        # TODO(BAR-52): TradingSession enum
+    trading_session: Optional[TradingSession] = None  # BAR-52 정식 type ✅
     composite_orderbook: Any = None    # TODO(BAR-54): CompositeOrderBook
     theme_context: Any = None          # TODO(BAR-58/59): ThemeContext
     news_context: Any = None           # TODO(BAR-57): NewsContext
