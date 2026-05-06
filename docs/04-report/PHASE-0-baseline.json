@@ -1,0 +1,30 @@
+{
+  "f_zone_v1": {
+    "trades": 6,
+    "win_rate": 0.3333333333333333,
+    "total_return_pct": -0.004195748642239161,
+    "max_drawdown": 0.008052957834266381,
+    "sharpe_ratio": -4.5436
+  },
+  "blue_line_v1": {
+    "trades": 12,
+    "win_rate": 0.5833333333333334,
+    "total_return_pct": 0.018175825861586444,
+    "max_drawdown": 0.006220296774999944,
+    "sharpe_ratio": 5.3774
+  },
+  "stock_v1": {
+    "trades": 0,
+    "win_rate": 0.0,
+    "total_return_pct": 0.0,
+    "max_drawdown": 0.0,
+    "sharpe_ratio": 0.0
+  },
+  "crypto_breakout_v1": {
+    "trades": 0,
+    "win_rate": 0.0,
+    "total_return_pct": 0.0,
+    "max_drawdown": 0.0,
+    "sharpe_ratio": 0.0
+  }
+}

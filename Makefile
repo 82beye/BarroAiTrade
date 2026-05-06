@@ -33,5 +33,15 @@ test-monitoring: ## BAR-43 모니터링 인프라 단위 테스트
 		--cov-report=term-missing
 	@echo "[BAR-43] tests OK"
 
+test-baseline: ## BAR-44 베이스라인 재현성 테스트
+	@echo "[BAR-44] Running pytest backend/tests/strategy/..."
+	@$(PYTHON) -m pytest backend/tests/strategy/ -v
+	@echo "[BAR-44] tests OK"
+
+baseline: ## BAR-44 베이스라인 측정 실행 (4 전략 합성 데이터)
+	@echo "[BAR-44] Running scripts/run_baseline.py..."
+	@$(PYTHON) -c "import sys; sys.path.insert(0, '.'); exec(open('scripts/run_baseline.py').read())"
+	@echo "[BAR-44] baseline OK"
+
 test: ## 전체 backend 단위 테스트 (legacy + config)
 	@$(PYTHON) -m pytest backend/tests/ -v
