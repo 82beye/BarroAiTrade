@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # === DB (기존 + Postgres 신규, BAR-56) ===
     db_path: str = "data/barro_trade.db"
     postgres_url: Optional[SecretStr] = None
+    postgres_user: str = "barro"
+    postgres_password: SecretStr = SecretStr("barro")
+    postgres_db: str = "barro"
     postgres_pool_size: int = 5
     pgvector_enabled: bool = False
 
