@@ -46,8 +46,11 @@ htmlcov/
 # bkit internal
 .bkit/
 
-# Claude Code (worktrees, agent-memory)
-.claude/
+# Claude Code (worktrees, agent-memory) — team-agent 인프라만 추적
+.claude/*
+!.claude/team-agent/
+!.claude/team-agent/**
+.claude/team-agent/sessions/
 
 # IDE / Editor workspaces
 *.code-workspace
