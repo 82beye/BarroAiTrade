@@ -12,7 +12,8 @@ tags: [index, analysis]
 
 | 피처 | 문서 | GAP율 | 날짜 | 상태 |
 |------|------|-------|------|------|
-| BAR-47 SF존 별도 클래스 (Phase 1) | [[bar-47-sf-zone-split.analysis\|보기]] | 97% | 2026-05-06 | 🚧 진행 |
+| BAR-48 골드존 신규 (Phase 1) | [[bar-48-gold-zone.analysis\|보기]] | 96% | 2026-05-06 | 🚧 진행 |
+| BAR-47 SF존 별도 클래스 (Phase 1) | [[bar-47-sf-zone-split.analysis\|보기]] | 97% | 2026-05-06 | ✅ 완료 |
 | BAR-46 F존 v2 리팩터 (Phase 1) | [[bar-46-f-zone-v2.analysis\|보기]] | 97% | 2026-05-06 | ✅ 완료 |
 | BAR-45 Strategy v2 추상 + AnalysisContext (Phase 1) | [[bar-45-strategy-v2.analysis\|보기]] | 97% | 2026-05-06 | ✅ 완료 |
 | BAR-44 회귀 베이스라인 (Phase 0 종료) | [[bar-44-baseline.analysis\|보기]] | 96% | 2026-05-06 | ✅ 완료 |
