@@ -12,7 +12,8 @@ tags: [index, analysis]
 
 | 피처 | 문서 | GAP율 | 날짜 | 상태 |
 |------|------|-------|------|------|
-| BAR-43 표준 로깅·메트릭 통일 (Phase 0) | [[bar-43-monitoring-unify.analysis\|보기]] | 97% | 2026-05-06 | 🚧 진행 |
+| BAR-44 회귀 베이스라인 (Phase 0 종료) | [[bar-44-baseline.analysis\|보기]] | 96% | 2026-05-06 | 🚧 진행 |
+| BAR-43 표준 로깅·메트릭 통일 (Phase 0) | [[bar-43-monitoring-unify.analysis\|보기]] | 97% | 2026-05-06 | ✅ 완료 |
 | BAR-42 통합 환경변수 스키마 (Phase 0) | [[bar-42-config-settings.analysis\|보기]] | 98% | 2026-05-06 | ✅ 완료 |
 | BAR-41 모델 호환 어댑터 (Phase 0) | [[bar-41-model-adapter.analysis\|보기]] | 96% | 2026-05-06 | ✅ 완료 |
 | BAR-40 sub_repo 모노레포 흡수 (Phase 0) | [[bar-40-monorepo-absorption.analysis\|보기]] | 95% | 2026-05-06 | ✅ 완료 |
