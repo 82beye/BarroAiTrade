@@ -12,6 +12,7 @@ tags: [index, report]
 
 | 피처 | 문서 | 날짜 | 상태 |
 |------|------|------|------|
+| BAR-45 Strategy v2 추상 + AnalysisContext (Phase 1, Match 97%) | [[bar-45-strategy-v2.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | 🎉 **Phase 0 종합 회고** | [[PHASE-0-summary\|보기]] | 2026-05-06 | ✅ 완료 |
 | Phase 0 베이스라인 | [[PHASE-0-baseline-2026-05\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-44 회귀 베이스라인 (Phase 0 종료, Match 96%) | [[bar-44-baseline.report\|보기]] | 2026-05-06 | ✅ 완료 |
