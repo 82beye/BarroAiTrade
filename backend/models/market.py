@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class MarketType(str, Enum):
@@ -77,3 +78,80 @@ class MarketCondition(BaseModel):
     description: str
     market_type: MarketType
     updated_at: datetime
+
+
+# ═════════════════════════════════════════════════════════
+# BAR-53 NXT Gateway 시세 데이터 모델 — Decimal 강제, frozen
+# ═════════════════════════════════════════════════════════
+
+
+class Tick(BaseModel):
+    """체결가 / 현재가 1건 (BAR-53)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    venue: Exchange
+    ts: datetime
+    last_price: Decimal
+    last_volume: int
+
+
+class Quote(BaseModel):
+    """최우선 호가 1쌍 (BAR-53)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    venue: Exchange
+    ts: datetime
+    bid: Decimal
+    ask: Decimal
+    bid_qty: int
+    ask_qty: int
+
+
+class OrderBookL2(BaseModel):
+    """L2 호가 — 단계별 (BAR-53).
+
+    bids: 매수 호가 (가격 내림차순)
+    asks: 매도 호가 (가격 오름차순)
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    venue: Exchange
+    ts: datetime
+    bids: List[tuple[Decimal, int]]
+    asks: List[tuple[Decimal, int]]
+
+
+class Trade(BaseModel):
+    """체결 1건 (BAR-53)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    venue: Exchange
+    ts: datetime
+    price: Decimal
+    qty: int
+    side: Literal["buy", "sell"]
+
+
+class HealthStatus(BaseModel):
+    """게이트웨이 헬스 상태 (BAR-53)."""
+
+    is_healthy: bool
+    last_msg_at: Optional[datetime] = None
+    lag_seconds: Optional[float] = None
+    error: Optional[str] = None
+
+
+class GatewayStatus(str, Enum):
+    """게이트웨이 매니저 종합 상태 (BAR-53)."""
+
+    OK = "ok"
+    DEGRADED = "degraded"
+    DOWN = "down"

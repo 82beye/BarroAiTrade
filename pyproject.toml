@@ -5,6 +5,7 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
 pythonpath = ["."]
+asyncio_mode = "auto"
 
 [tool.coverage.run]
 source = ["backend.legacy_scalping"]
