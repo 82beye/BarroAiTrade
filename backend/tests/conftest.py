@@ -1,72 +1,83 @@
 """
-backend/tests 공통 fixture (BAR-41 시동).
+backend/tests 공통 fixture (BAR-45).
 
-ai-trade의 ScalpingAnalysis dataclass 와 dict 형태 시그널의 sample 데이터.
-Reference: backend/legacy_scalping/strategy/scalping_team/base_agent.py:57
+BAR-45: AnalysisContext / OHLCV / Position / EntrySignal sample.
+BAR-41 의 ScalpingAnalysis fixture 는 backend/tests/legacy_scalping/conftest.py 로 분리
+(무거운 pandas/numpy 의존 격리).
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
-from backend.legacy_scalping.strategy.scalping_team.base_agent import (
-    ScalpingAnalysis,
-    StockSnapshot,
-)
+from backend.models.market import MarketType, OHLCV
+from backend.models.position import Position
+from backend.models.signal import EntrySignal
+from backend.models.strategy import AnalysisContext
+
+
+# === BAR-45: Strategy v2 fixtures ===
+
+@pytest.fixture
+def sample_candles() -> list[OHLCV]:
+    """간단한 OHLCV 캔들 5개 (KRX, MarketType.STOCK)."""
+    base_time = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    prices = [70000.0, 70500.0, 71000.0, 71500.0, 72000.0]
+    return [
+        OHLCV(
+            symbol="005930",
+            timestamp=base_time.replace(day=i + 1),
+            open=p - 100,
+            high=p + 200,
+            low=p - 200,
+            close=p,
+            volume=1_000_000.0 + i * 100_000,
+            market_type=MarketType.STOCK,
+        )
+        for i, p in enumerate(prices)
+    ]
 
 
 @pytest.fixture
-def sample_stock_snapshot() -> StockSnapshot:
-    return StockSnapshot(
-        code="005930",
+def sample_ctx(sample_candles: list[OHLCV]) -> AnalysisContext:
+    """Strategy v2 진입점 컨텍스트."""
+    return AnalysisContext(
+        symbol="005930",
+        name="삼성전자",
+        candles=sample_candles,
+        market_type=MarketType.STOCK,
+    )
+
+
+@pytest.fixture
+def sample_signal() -> EntrySignal:
+    return EntrySignal(
+        symbol="005930",
         name="삼성전자",
         price=72000.0,
-        open=71500.0,
-        high=72500.0,
-        low=71000.0,
-        prev_close=71200.0,
-        volume=15_000_000,
-        change_pct=1.12,
-        trade_value=1_080_000_000_000.0,
-        volume_ratio=1.5,
-        category="강세주",
-        score=85.0,
+        signal_type="f_zone",
+        score=0.85,
+        reason="test",
+        market_type=MarketType.STOCK,
+        strategy_id="test_v1",
+        timestamp=datetime.now(timezone.utc),
     )
 
 
 @pytest.fixture
-def sample_scalping_analysis(sample_stock_snapshot: StockSnapshot) -> ScalpingAnalysis:
-    return ScalpingAnalysis(
-        code="005930",
+def sample_position() -> Position:
+    return Position(
+        symbol="005930",
         name="삼성전자",
-        rank=1,
-        total_score=85.0,
-        confidence=0.78,
-        timing="즉시",
-        consensus_level="다수합의",
-        optimal_entry_price=72000.0,
-        scalp_tp_pct=3.0,
-        scalp_sl_pct=-3.0,
-        hold_minutes=15,
-        top_reasons=["VWAP 돌파", "거래량 폭증", "골든타임 진입"],
-        surge_type="intraday",
-        intraday_atr=850.0,
-        snapshot=sample_stock_snapshot,
+        quantity=100.0,
+        avg_price=72000.0,
+        current_price=72500.0,
+        realized_pnl=0.0,
+        unrealized_pnl=50000.0,
+        pnl_pct=0.0069,
+        market_type=MarketType.STOCK,
+        entry_time=datetime.now(timezone.utc),
+        strategy_id="test_v1",
     )
-
-
-@pytest.fixture
-def sample_legacy_dict() -> dict:
-    return {
-        "code": "005930",
-        "name": "삼성전자",
-        "price": 72000.0,
-        "total_score": 85.0,
-        "timing": "즉시",
-        "consensus_level": "다수합의",
-        "confidence": 0.78,
-        "scalp_tp_pct": 3.0,
-        "scalp_sl_pct": -3.0,
-        "hold_minutes": 15,
-        "top_reasons": ["VWAP 돌파", "거래량 폭증"],
-    }

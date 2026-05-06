@@ -18,8 +18,10 @@ from typing import List, Optional
 
 import pandas as pd
 
+from backend.core.strategy.base import Strategy
 from backend.models.market import OHLCV, MarketType
 from backend.models.signal import EntrySignal
+from backend.models.strategy import AnalysisContext
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ class CryptoBreakoutParams:
     min_candles: int = 40
 
 
-class CryptoBreakoutStrategy:
+class CryptoBreakoutStrategy(Strategy):
     """암호화폐 돌파 전략 엔진"""
 
     STRATEGY_ID = "crypto_breakout_v1"
@@ -41,7 +43,11 @@ class CryptoBreakoutStrategy:
     def __init__(self, params: Optional[CryptoBreakoutParams] = None) -> None:
         self.params = params or CryptoBreakoutParams()
 
-    def analyze(
+    def _analyze_v2(self, ctx: AnalysisContext) -> Optional[EntrySignal]:
+        # BAR-45: Strategy v2 진입점.
+        return self._analyze_impl(ctx.symbol, ctx.name or ctx.symbol, ctx.candles, ctx.market_type)
+
+    def _analyze_impl(
         self,
         symbol: str,
         name: str,
