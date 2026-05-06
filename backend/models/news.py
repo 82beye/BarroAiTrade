@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -30,10 +30,15 @@ SourceIdStr = Annotated[
 
 
 class NewsItem(BaseModel):
-    """수집된 뉴스/공시 1건. frozen — 외부 변조 차단."""
+    """수집된 뉴스/공시 1건. frozen — 외부 변조 차단.
+
+    BAR-58 보강: id Optional[int] 필드 추가 — DB BIGSERIAL id 회수용.
+    insert 후 collector 가 model_copy(update={"id": new_id}) 로 채워 publisher 에 전달.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    id: Optional[int] = None              # BAR-58: DB BIGSERIAL id 회수
     source: NewsSource
     source_id: SourceIdStr
     title: str = Field(min_length=1, max_length=512)

@@ -108,12 +108,14 @@ class NewsCollector:
         try:
             if await self._dedup.seen(key):
                 return
-            inserted = await self._repo.insert(item)
-            if not inserted:
+            new_id = await self._repo.insert(item)
+            if new_id is None:
                 # 0 row = race / 이미 적재 → publish skip (NFR-07)
                 return
+            # BAR-58 council: DB id 채워서 publisher 로 전달 (frozen → model_copy)
+            item_with_id = item.model_copy(update={"id": new_id})
             try:
-                await self._publisher.publish(item)
+                await self._publisher.publish(item_with_id)
             except Exception as exc:
                 # publisher 실패 — dedup.mark skip → 다음 사이클 재시도
                 logger.warning("publish failed for %s: %s", item.source_id, exc)
