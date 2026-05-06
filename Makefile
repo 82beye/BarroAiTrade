@@ -94,6 +94,16 @@ test-news: ## BAR-57 뉴스/공시 수집 파이프라인 단위 테스트
 		--cov-report=term-missing
 	@echo "[BAR-57] tests OK"
 
+test-themes: ## BAR-59 테마 분류기 단위 테스트
+	@echo "[BAR-59] Running pytest backend/tests/themes/ + db/test_alembic_0004..."
+	@$(PYTHON) -m pytest backend/tests/themes/ backend/tests/db/test_alembic_0004.py -v \
+		--cov=backend.core.themes \
+		--cov=backend.db.repositories.theme_repo \
+		--cov=backend.models.theme \
+		--cov-fail-under=70 \
+		--cov-report=term-missing
+	@echo "[BAR-59] tests OK"
+
 test-embeddings: ## BAR-58 임베딩 인프라 단위 테스트
 	@echo "[BAR-58] Running pytest backend/tests/embeddings/ + db/test_alembic_0003 + news/test_news_id_round_trip..."
 	@$(PYTHON) -m pytest backend/tests/embeddings/ backend/tests/db/test_alembic_0003.py backend/tests/news/test_news_id_round_trip.py -v \

@@ -28,3 +28,7 @@ apscheduler>=3.10
 feedparser>=6.0
 redis>=5.0
 lxml>=5.0
+
+# BAR-59: 테마 분류기 v1
+scikit-learn>=1.5
+kiwipiepy>=0.17
