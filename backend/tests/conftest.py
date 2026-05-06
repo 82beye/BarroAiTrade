@@ -81,3 +81,44 @@ def sample_position() -> Position:
         entry_time=datetime.now(timezone.utc),
         strategy_id="test_v1",
     )
+
+
+# === BAR-46: F존 score 분기 fixtures ===
+
+@pytest.fixture
+def sample_signal_high_score() -> EntrySignal:
+    return EntrySignal(
+        symbol="005930", name="삼성전자", price=72000.0,
+        signal_type="f_zone", score=0.85, reason="strong",
+        market_type=MarketType.STOCK, strategy_id="f_zone_v1",
+        timestamp=datetime.now(timezone.utc),
+    )
+
+
+@pytest.fixture
+def sample_signal_mid_score() -> EntrySignal:
+    return EntrySignal(
+        symbol="005930", name="삼성전자", price=72000.0,
+        signal_type="f_zone", score=0.6, reason="mid",
+        market_type=MarketType.STOCK, strategy_id="f_zone_v1",
+        timestamp=datetime.now(timezone.utc),
+    )
+
+
+@pytest.fixture
+def sample_signal_low_score() -> EntrySignal:
+    return EntrySignal(
+        symbol="005930", name="삼성전자", price=72000.0,
+        signal_type="f_zone", score=0.4, reason="weak",
+        market_type=MarketType.STOCK, strategy_id="f_zone_v1",
+        timestamp=datetime.now(timezone.utc),
+    )
+
+
+@pytest.fixture
+def sample_ctx_crypto(sample_candles: list[OHLCV]) -> AnalysisContext:
+    """crypto market_type 컨텍스트."""
+    return AnalysisContext(
+        symbol="BTC/KRW", name="Bitcoin",
+        candles=sample_candles, market_type=MarketType.CRYPTO,
+    )
