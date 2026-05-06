@@ -1,0 +1,5 @@
+{
+  "format": "YYYY-MM-DD",
+  "folder": "00-index/daily",
+  "template": "99-templates/daily-note"
+}

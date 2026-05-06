@@ -55,8 +55,14 @@ htmlcov/
 # Runtime data (SQLite, OHLCV cache 등)
 data/
 
-# Obsidian (UI 자동 갱신·임시)
-docs/.obsidian/
+# Obsidian — config 는 공유, UI 상태·캐시·플러그인 데이터만 ignore
+docs/.obsidian/graph.json
+docs/.obsidian/workspace.json
+docs/.obsidian/workspace-mobile.json
+docs/.obsidian/cache
+docs/.obsidian/plugins/*/data.json
+docs/.obsidian/.trash/
+# Obsidian 임시 (unsaved 무제.*)
 docs/무제.*
 
 # BAR-40: legacy_scalping (ai-trade 흡수) — OHLCV 캐시 144MB 등 차단

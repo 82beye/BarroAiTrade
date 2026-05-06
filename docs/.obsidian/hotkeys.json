@@ -1,0 +1,16 @@
+{
+  "app:open-vault": [],
+  "switcher:open": [{"modifiers": ["Mod"], "key": "O"}],
+  "global-search:open": [{"modifiers": ["Mod", "Shift"], "key": "F"}],
+  "graph:open": [{"modifiers": ["Mod"], "key": "G"}],
+  "graph:open-local": [{"modifiers": ["Mod", "Shift"], "key": "G"}],
+  "backlink:open": [{"modifiers": ["Mod", "Shift"], "key": "B"}],
+  "outline:open": [{"modifiers": ["Mod"], "key": "L"}],
+  "command-palette:open": [{"modifiers": ["Mod", "Shift"], "key": "P"}],
+  "templates:insert": [{"modifiers": ["Mod"], "key": "T"}],
+  "daily-notes": [{"modifiers": ["Mod", "Alt"], "key": "D"}],
+  "editor:toggle-source": [{"modifiers": ["Mod"], "key": "E"}],
+  "editor:toggle-bold": [{"modifiers": ["Mod"], "key": "B"}],
+  "editor:toggle-italics": [{"modifiers": ["Mod"], "key": "I"}],
+  "file-explorer:reveal-active-file": [{"modifiers": ["Mod", "Shift"], "key": "E"}]
+}
