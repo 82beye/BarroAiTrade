@@ -16,8 +16,10 @@ from typing import List, Optional
 
 import pandas as pd
 
+from backend.core.strategy.base import Strategy
 from backend.models.market import OHLCV, MarketType
 from backend.models.signal import EntrySignal
+from backend.models.strategy import AnalysisContext
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ class BlueLineParams:
     min_candles: int = 60
 
 
-class BlueLineStrategy:
+class BlueLineStrategy(Strategy):
     """블루라인 전략 엔진"""
 
     STRATEGY_ID = "blue_line_v1"
@@ -39,7 +41,11 @@ class BlueLineStrategy:
     def __init__(self, params: Optional[BlueLineParams] = None) -> None:
         self.params = params or BlueLineParams()
 
-    def analyze(
+    def _analyze_v2(self, ctx: AnalysisContext) -> Optional[EntrySignal]:
+        # BAR-45: Strategy v2 진입점.
+        return self._analyze_impl(ctx.symbol, ctx.name or ctx.symbol, ctx.candles, ctx.market_type)
+
+    def _analyze_impl(
         self,
         symbol: str,
         name: str,

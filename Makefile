@@ -34,9 +34,17 @@ test-monitoring: ## BAR-43 모니터링 인프라 단위 테스트
 	@echo "[BAR-43] tests OK"
 
 test-baseline: ## BAR-44 베이스라인 재현성 테스트
-	@echo "[BAR-44] Running pytest backend/tests/strategy/..."
-	@$(PYTHON) -m pytest backend/tests/strategy/ -v
+	@echo "[BAR-44] Running pytest backend/tests/strategy/test_baseline.py..."
+	@$(PYTHON) -m pytest backend/tests/strategy/test_baseline.py -v
 	@echo "[BAR-44] tests OK"
+
+test-strategy: ## BAR-45 Strategy v2 ABC + 모델 단위 테스트
+	@echo "[BAR-45] Running pytest backend/tests/strategy/..."
+	@$(PYTHON) -m pytest backend/tests/strategy/ -v \
+		--cov=backend.core.strategy.base \
+		--cov=backend.models.strategy \
+		--cov-report=term-missing
+	@echo "[BAR-45] tests OK"
 
 baseline: ## BAR-44 베이스라인 측정 실행 (4 전략 합성 데이터)
 	@echo "[BAR-44] Running scripts/run_baseline.py..."

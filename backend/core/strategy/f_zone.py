@@ -24,8 +24,10 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from backend.core.strategy.base import Strategy
 from backend.models.market import OHLCV, MarketType
 from backend.models.signal import EntrySignal
+from backend.models.strategy import AnalysisContext
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +94,7 @@ class FZoneAnalysis:
 
 # ── F존 전략 엔진 ─────────────────────────────────────────────────────────────
 
-class FZoneStrategy:
+class FZoneStrategy(Strategy):
     """
     F존/SF존 매매 전략 엔진
 
@@ -110,7 +112,15 @@ class FZoneStrategy:
 
     # ── 공개 인터페이스 ────────────────────────────────────────────────────────
 
-    def analyze(
+    def _analyze_v2(self, ctx: AnalysisContext) -> Optional[EntrySignal]:
+        # BAR-45: Strategy v2 진입점. AnalysisContext 에서 legacy 4-arg 풀어냄.
+        symbol = ctx.symbol
+        name = ctx.name or ctx.symbol
+        candles = ctx.candles
+        market_type = ctx.market_type
+        return self._analyze_impl(symbol, name, candles, market_type)
+
+    def _analyze_impl(
         self,
         symbol: str,
         name: str,

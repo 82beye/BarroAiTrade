@@ -22,6 +22,7 @@ import numpy as np
 from backend.core.strategy.base import Strategy
 from backend.models.market import OHLCV, MarketType
 from backend.models.signal import EntrySignal
+from backend.models.strategy import AnalysisContext
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,11 @@ class StockStrategy(Strategy):
     STRATEGY_ID = "stock_v1"
     MIN_CANDLES = max(_BLUE_LINE_PERIOD, _ATR_PERIOD) + 10
 
-    def analyze(
+    def _analyze_v2(self, ctx: AnalysisContext) -> Optional[EntrySignal]:
+        # BAR-45: Strategy v2 진입점.
+        return self._analyze_impl(ctx.symbol, ctx.name or ctx.symbol, ctx.candles, ctx.market_type)
+
+    def _analyze_impl(
         self,
         symbol: str,
         name: str,
