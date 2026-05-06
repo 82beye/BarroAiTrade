@@ -12,7 +12,8 @@ tags: [index, plan]
 
 | 문서 | 범위 | 날짜 | 상태 |
 |------|------|------|------|
-| [[MASTER-EXECUTION-PLAN-v1\|마스터 실행 계획 v1]] | Phase 0~6 / BAR-40~78 (39 티켓) | 2026-05-06 | 🚧 진행 |
+| [[MASTER-EXECUTION-PLAN-v2\|마스터 실행 계획 v2]] | Phase 0~6 / BAR-40~79 (40 티켓, BAR-51→BAR-79 재할당, BAR-44b 신설) | 2026-05-06 | 🟢 Active |
+| [[MASTER-EXECUTION-PLAN-v1\|마스터 실행 계획 v1]] | (supersede by v2) | 2026-05-06 | 📦 보존 |
 
 ## 피처별 Plan 문서
 
