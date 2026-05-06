@@ -19,7 +19,8 @@ tags: [index, plan]
 
 | 피처 | 문서 | 날짜 | 상태 |
 |------|------|------|------|
-| BAR-44 회귀 베이스라인 (Phase 0 종료 게이트) | [[features/bar-44-baseline.plan\|보기]] | 2026-05-06 | 🚧 진행 |
+| BAR-45 Strategy v2 추상 + AnalysisContext (Phase 1) | [[features/bar-45-strategy-v2.plan\|보기]] | 2026-05-06 | 🚧 진행 |
+| BAR-44 회귀 베이스라인 (Phase 0 종료 게이트) | [[features/bar-44-baseline.plan\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-43 표준 로깅·메트릭 통일 (Phase 0) | [[features/bar-43-monitoring-unify.plan\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-42 통합 환경변수 스키마 (Phase 0) | [[features/bar-42-config-settings.plan\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-41 모델 호환 어댑터 (Phase 0) | [[features/bar-41-model-adapter.plan\|보기]] | 2026-05-06 | ✅ 완료 |
