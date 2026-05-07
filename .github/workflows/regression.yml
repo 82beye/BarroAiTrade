@@ -1,0 +1,26 @@
+name: Regression (BAR-78)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+jobs:
+  pytest-baseline:
+    name: 회귀 테스트 + 베이스라인 ±5% 게이트
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install
+        run: |
+          pip install -r backend/requirements.txt
+      - name: Run pytest
+        run: pytest backend/tests/ -q --tb=short
+      - name: 베이스라인 회귀 (BAR-44)
+        run: pytest backend/tests/strategy/test_baseline.py -q
+        # 베이스라인 ±5% 후퇴 시 PR 차단
