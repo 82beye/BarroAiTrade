@@ -1,0 +1,59 @@
+# BAR-73b/OPS-01 — Grafana / Prometheus alert rules (IaC).
+#
+# 운영 진입 시 monitoring/alerts.yaml 을 Grafana provisioning 으로 마운트.
+# build_alerts_yaml(policies) (backend.core.telemetry.alerts) 산출 결과.
+
+groups:
+  - name: barro_ai_trade
+    rules:
+      - alert: DailyLossExceeded
+        expr: barro_daily_pnl_pct < -0.03
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "일일 손실 -3% 한도 초과 — KillSwitch trip"
+          runbook_url: "https://docs/runbook/kill-switch"
+
+      - alert: GatewayDisconnect
+        expr: barro_gateway_connected == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "시세 게이트웨이 단절 — 신규 진입 차단"
+          runbook_url: "https://docs/runbook/gateway"
+
+      - alert: SlippageHigh
+        expr: rate(barro_slippage_events_total[5m]) > 3
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "슬리피지 5분 3회 초과"
+          runbook_url: "https://docs/runbook/slippage"
+
+      - alert: NewsConsumerLag
+        expr: barro_news_consumer_lag_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "뉴스 임베딩 consumer lag > 5분"
+          runbook_url: "https://docs/runbook/embedding"
+
+      - alert: APIErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API 5xx 에러율 > 5%"
+
+      - alert: DBPoolExhausted
+        expr: barro_db_pool_in_use_ratio > 0.9
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DB connection pool 90% 초과"
