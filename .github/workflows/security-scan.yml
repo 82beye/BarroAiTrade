@@ -1,0 +1,60 @@
+name: Security Scan (BAR-70)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  schedule:
+    # 매주 일요일 02:00 UTC
+    - cron: "0 2 * * 0"
+
+jobs:
+  semgrep:
+    name: Semgrep OWASP Top 10
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'ai-generated') || github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/owasp-top-ten
+            p/python
+            p/security-audit
+            p/secrets
+
+  bandit:
+    name: Bandit (Python AST 보안)
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'ai-generated') || github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install Bandit
+        run: pip install bandit[toml]
+      - name: Run Bandit
+        run: bandit -r backend/ -ll -f json -o bandit-report.json
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  pytest-regression:
+    name: pytest 회귀 (모든 PR)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install
+        run: |
+          pip install -r backend/requirements.txt
+      - name: Run pytest
+        run: pytest backend/tests/ -q --tb=short
