@@ -1,0 +1,117 @@
+# BAR-OPS-07 — BarroAiTrade 자체 Semgrep custom rules.
+#
+# OWASP Top 10 + bkit 정책 + 자금흐름 + SecretStr enforcement.
+
+rules:
+  # === 자금흐름 (area:money) ===
+  - id: barro-decimal-required-for-money
+    pattern-either:
+      - pattern: |
+          $FIELD: float = ...
+      - pattern: |
+          $FIELD: float
+    pattern-where:
+      - metavariable-regex:
+          metavariable: $FIELD
+          regex: "(price|qty|quantity|balance|pnl|amount|total|fee|tax|score)"
+    message: |
+      자금흐름 필드는 Decimal 사용 필수 (BAR-45 area:money 정책).
+      float → Decimal 로 변경.
+    severity: ERROR
+    languages: [python]
+    paths:
+      include: ["backend/models/", "backend/core/"]
+
+  # === SecretStr enforcement (CWE-798) ===
+  - id: barro-secretstr-required-for-keys
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $FIELD: Optional[str] = None
+          - pattern: |
+              $FIELD: str
+      - metavariable-regex:
+          metavariable: $FIELD
+          regex: ".*(api_key|secret|password|token|app_key|app_secret).*"
+    message: |
+      비밀 자격증명은 SecretStr 사용 (CWE-798).
+      str → SecretStr 로 승격.
+    severity: ERROR
+    languages: [python]
+    paths:
+      include: ["backend/config/", "backend/security/", "backend/core/"]
+
+  # === SQL injection (raw f-string) ===
+  - id: barro-no-raw-sql-fstring
+    pattern-either:
+      - pattern: |
+          db.execute(f"...{$X}...")
+      - pattern: |
+          db.execute("..." + $X + "...")
+    message: |
+      f-string / 문자열 결합 SQL 금지. text() + named param 사용 (CWE-89 SQL Injection).
+    severity: ERROR
+    languages: [python]
+    paths:
+      include: ["backend/db/", "backend/api/"]
+
+  # === Pydantic frozen 강제 ===
+  - id: barro-frozen-required-for-domain-models
+    patterns:
+      - pattern: |
+          class $CLS(BaseModel):
+              ...
+      - pattern-not: |
+          class $CLS(BaseModel):
+              model_config = ConfigDict(frozen=True, ...)
+              ...
+      - pattern-not: |
+          class $CLS(BaseModel):
+              model_config = ConfigDict(..., frozen=True)
+              ...
+    message: |
+      backend/models/*.py 의 도메인 모델은 frozen=True 필수 (BAR-45 정책).
+    severity: WARNING
+    languages: [python]
+    paths:
+      include: ["backend/models/"]
+
+  # === Print 비밀 노출 ===
+  - id: barro-no-secret-print
+    pattern-either:
+      - pattern: |
+          print($SECRET.get_secret_value())
+      - pattern: |
+          logger.info($SECRET.get_secret_value())
+      - pattern: |
+          logger.debug($SECRET.get_secret_value())
+    message: |
+      SecretStr.get_secret_value() 출력 금지 (CWE-532 로그 누설).
+    severity: ERROR
+    languages: [python]
+
+  # === HTTP 평문 ===
+  - id: barro-https-only
+    pattern-either:
+      - pattern: |
+          httpx.get("http://...")
+      - pattern: |
+          httpx.post("http://...")
+      - pattern: |
+          requests.get("http://...")
+    message: |
+      외부 HTTP 호출은 https 만 (CWE-319 평문 전송).
+    severity: ERROR
+    languages: [python]
+    paths:
+      exclude: ["backend/tests/", "**/*test*.py"]
+
+  # === Pickle 사용 (CWE-502) ===
+  - id: barro-no-pickle-load
+    pattern-either:
+      - pattern: pickle.load(...)
+      - pattern: pickle.loads(...)
+    message: |
+      pickle.load 직접 사용 금지 (CWE-502). joblib + SHA256/HMAC 무결성 검증 사용 (BAR-59 design §보안).
+    severity: WARNING
+    languages: [python]
