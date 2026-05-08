@@ -254,6 +254,36 @@ async def _cmd_confirm_sell(bot: TelegramBot, msg: dict) -> str:
     return "\n".join(lines)
 
 
+async def _cmd_tune(bot: TelegramBot, msg: dict) -> str:
+    """diff bias_counts 기반 정책 튜닝 추천 — BAR-OPS-30."""
+    from datetime import date, timedelta
+    from backend.core.journal.pnl_diff import compare, summarize
+    from backend.core.journal.policy_tuner import tune_all
+    sim_entries = SimulationLogger(_LOG_PATH).read_all()
+    if not sim_entries:
+        return f"시뮬 누적 없음 ({_LOG_PATH})"
+    end = date.today().strftime("%Y%m%d")
+    start = (date.today() - timedelta(days=30)).strftime("%Y%m%d")
+    oauth = _build_oauth()
+    account = KiwoomNativeAccountFetcher(oauth=oauth)
+    real_entries = await account.fetch_realized_pnl(start_date=start, end_date=end)
+    diffs = compare(sim_entries=sim_entries, real_entries=real_entries)
+    summary = summarize(diffs)
+    recs = tune_all(summary["bias_counts"])
+    if not recs:
+        return f"📋 *정책 추천*\n_조정 필요 없음 (현 정책 유지)_\nbias: {summary['bias_counts']}"
+    lines = [f"📋 *정책 튜닝 추천* ({len(recs)}건)"]
+    for r in recs:
+        emoji = {"info": "ℹ️", "warn": "⚠️", "critical": "🚨"}.get(r.severity, "•")
+        lines.append(
+            f"{emoji} `{r.field}`: {r.current} → *{r.recommended}*\n"
+            f"   _{r.reason}_"
+        )
+    lines.append("")
+    lines.append("_적용: simulate_leaders --min-score / --max-per-position 등_")
+    return "\n".join(lines)
+
+
 async def _cmd_diff(bot: TelegramBot, msg: dict) -> str:
     """시뮬(예측) PnL vs 실현 PnL 비교 — BAR-OPS-29."""
     from datetime import date, timedelta
