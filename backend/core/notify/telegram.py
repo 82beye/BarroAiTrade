@@ -62,6 +62,37 @@ class TelegramNotifier:
             )
         return cls(bot_token=SecretStr(token), chat_id=chat_id, **kw)
 
+    async def send_chunks(self, text: str, chunk_size: int = 3900) -> list[dict]:
+        """긴 메시지 자동 분할 전송 (BAR-OPS-23).
+
+        Telegram 4096 char 제한 → 줄 단위 분할 보존.
+        한 줄이 chunk_size 초과 시 강제 분할.
+        """
+        if not text or not text.strip():
+            raise ValueError("text required")
+        chunks: list[str] = []
+        cur = ""
+        for line in text.split("\n"):
+            if len(line) > chunk_size:
+                if cur:
+                    chunks.append(cur); cur = ""
+                for i in range(0, len(line), chunk_size):
+                    chunks.append(line[i:i + chunk_size])
+                continue
+            if len(cur) + len(line) + 1 > chunk_size:
+                chunks.append(cur)
+                cur = line
+            else:
+                cur = f"{cur}\n{line}" if cur else line
+        if cur:
+            chunks.append(cur)
+
+        results = []
+        for i, chunk in enumerate(chunks, 1):
+            prefix = f"_part {i}/{len(chunks)}_\n" if len(chunks) > 1 else ""
+            results.append(await self.send(prefix + chunk))
+        return results
+
     async def send(self, text: str) -> dict:
         if not text or not text.strip():
             raise ValueError("text required")
