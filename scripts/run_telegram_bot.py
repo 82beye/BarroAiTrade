@@ -254,11 +254,47 @@ async def _cmd_confirm_sell(bot: TelegramBot, msg: dict) -> str:
     return "\n".join(lines)
 
 
+_POLICY_PATH = "data/policy.json"
+
+
+async def _cmd_policy(bot: TelegramBot, msg: dict) -> str:
+    """현재 정책 + 최근 변경 이력 — BAR-OPS-31."""
+    from backend.core.journal.policy_config import PolicyConfigStore
+    cfg = PolicyConfigStore(_POLICY_PATH).load()
+    lines = [
+        "📜 *현재 정책*",
+        f"min_score: *{cfg.min_score}*",
+        f"stop_loss: *{cfg.stop_loss_pct}%*",
+        f"take_profit: *{cfg.take_profit_pct}%*",
+        f"max_per_position: *{cfg.max_per_position*100:.0f}%*",
+        f"max_total_position: *{cfg.max_total_position*100:.0f}%*",
+        f"daily_loss_limit: *{cfg.daily_loss_limit}%*",
+        f"daily_max_orders: *{cfg.daily_max_orders}*",
+    ]
+    if cfg.history:
+        lines.append("")
+        lines.append(f"*최근 변경* ({len(cfg.history)}/50)")
+        for h in cfg.history[-3:]:
+            ts = h["timestamp"][:19]
+            for ch in h["changes"]:
+                lines.append(f"`{ts}` {ch['field']}: {ch['old']} → {ch['new']}")
+    return "\n".join(lines)
+
+
 async def _cmd_tune(bot: TelegramBot, msg: dict) -> str:
-    """diff bias_counts 기반 정책 튜닝 추천 — BAR-OPS-30."""
+    """diff bias_counts 기반 정책 튜닝 추천 — BAR-OPS-30/31.
+
+    /tune        : 추천만 표시 (default)
+    /tune apply  : 추천 즉시 config 반영 (BAR-OPS-31)
+    """
     from datetime import date, timedelta
     from backend.core.journal.pnl_diff import compare, summarize
+    from backend.core.journal.policy_config import PolicyConfigStore
     from backend.core.journal.policy_tuner import tune_all
+
+    text = (msg.get("text") or "").strip()
+    apply_mode = "apply" in text.lower().split()[1:] if len(text.split()) > 1 else False
+
     sim_entries = SimulationLogger(_LOG_PATH).read_all()
     if not sim_entries:
         return f"시뮬 누적 없음 ({_LOG_PATH})"
@@ -269,9 +305,40 @@ async def _cmd_tune(bot: TelegramBot, msg: dict) -> str:
     real_entries = await account.fetch_realized_pnl(start_date=start, end_date=end)
     diffs = compare(sim_entries=sim_entries, real_entries=real_entries)
     summary = summarize(diffs)
-    recs = tune_all(summary["bias_counts"])
+    # 현재 config 기준 — 더 정확한 추천
+    store = PolicyConfigStore(_POLICY_PATH)
+    cfg = store.load()
+    field_to_current = {
+        "min_score": cfg.min_score,
+        "stop_loss": cfg.stop_loss_pct,
+        "max_per_position": cfg.max_per_position,
+    }
+    recs = tune_all(
+        summary["bias_counts"],
+        current_min_score=cfg.min_score,
+        current_stop_loss=cfg.stop_loss_pct,
+        current_max_per_position=cfg.max_per_position,
+    )
     if not recs:
         return f"📋 *정책 추천*\n_조정 필요 없음 (현 정책 유지)_\nbias: {summary['bias_counts']}"
+
+    if apply_mode:
+        # field 매핑 — recommend_stop_loss 의 field='stop_loss' → cfg.stop_loss_pct
+        for r in recs:
+            if r.field == "stop_loss":
+                object.__setattr__(r, "field", "stop_loss_pct")
+        cfg_new, applied = store.apply(recs, source="tune_telegram")
+        if not applied:
+            return "변경 없음"
+        lines = [f"✅ *정책 적용됨* ({len(applied)}건)"]
+        for ch in applied:
+            lines.append(
+                f"`{ch['field']}`: {ch['old']} → *{ch['new']}*  ({ch['severity']})"
+            )
+        lines.append("")
+        lines.append(f"_저장: {_POLICY_PATH}_")
+        return "\n".join(lines)
+
     lines = [f"📋 *정책 튜닝 추천* ({len(recs)}건)"]
     for r in recs:
         emoji = {"info": "ℹ️", "warn": "⚠️", "critical": "🚨"}.get(r.severity, "•")
@@ -280,7 +347,7 @@ async def _cmd_tune(bot: TelegramBot, msg: dict) -> str:
             f"   _{r.reason}_"
         )
     lines.append("")
-    lines.append("_적용: simulate_leaders --min-score / --max-per-position 등_")
+    lines.append("_적용: `/tune apply` 또는 simulate_leaders 옵션_")
     return "\n".join(lines)
 
 
@@ -413,6 +480,8 @@ def main() -> None:
     bot.register("/confirm_sell", _cmd_confirm_sell)   # OPS-27
     bot.register("/pnl", _cmd_pnl)                     # OPS-28
     bot.register("/diff", _cmd_diff)                   # OPS-29
+    bot.register("/tune", _cmd_tune)                   # OPS-30/31
+    bot.register("/policy", _cmd_policy)               # OPS-31
 
     print(f"🤖 봇 시작 — chat_id={chat_id}, 명령={list(bot._handlers)}")
     print("   Ctrl+C 로 종료")
