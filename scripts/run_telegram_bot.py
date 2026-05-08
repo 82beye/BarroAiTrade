@@ -193,6 +193,67 @@ async def _cmd_cancel(bot: TelegramBot, msg: dict) -> str:
     return "발급된 토큰 없음"
 
 
+async def _cmd_sell_execute(bot: TelegramBot, msg: dict) -> str:
+    """보유 종목 TP/SL 평가 → 매도 토큰 발급 — BAR-OPS-27."""
+    chat_id = str(msg.get("chat", {}).get("id", ""))
+    oauth = _build_oauth()
+    account = KiwoomNativeAccountFetcher(oauth=oauth)
+    balance = await account.fetch_balance()
+    if not balance.holdings:
+        return "보유 종목 없음 — 발급 X"
+    decisions = evaluate_all(balance.holdings, ExitPolicy())
+    targets = [d for d in decisions if d.signal.value != "hold"]
+    if not targets:
+        return "TP/SL 도달 종목 없음 (모두 HOLD) — 발급 X"
+    pending = [
+        PendingOrder(symbol=d.symbol, name=d.name, qty=d.qty, side="sell")
+        for d in targets
+    ]
+    batch = _CONFIRM_STORE.issue(chat_id=chat_id, orders=pending)
+    lines = [
+        f"🔐 *매도 토큰 발급* (TTL 5분)",
+        f"토큰: `{batch.token}`",
+        "",
+        "*예정 매도*",
+    ]
+    for d in targets:
+        sig = "✅ TP" if d.signal.value == "take_profit" else "🛑 SL"
+        lines.append(
+            f"`{d.symbol}` {d.name} {float(d.pnl_rate):+.2f}% qty={d.qty} {sig}"
+        )
+    lines.append("")
+    lines.append(f"확인: `/confirm_sell {batch.token}`  /  취소: `/cancel`")
+    return "\n".join(lines)
+
+
+async def _cmd_confirm_sell(bot: TelegramBot, msg: dict) -> str:
+    """token 검증 → 매도 실행 — BAR-OPS-27."""
+    chat_id = str(msg.get("chat", {}).get("id", ""))
+    text = (msg.get("text") or "").strip()
+    parts = text.split()
+    if len(parts) < 2:
+        return "사용법: `/confirm_sell <TOKEN>`"
+    batch = _CONFIRM_STORE.consume(chat_id=chat_id, token=parts[1])
+    if not batch:
+        return "❌ 토큰 무효/만료/이미 사용됨"
+    if not all(o.side == "sell" for o in batch.orders):
+        return "❌ 매도 토큰 아님 (`/sell_execute` 로 발급된 토큰만 사용)"
+
+    oauth = _build_oauth()
+    dry_run = os.environ.get("LIVE_TRADING_ENABLED", "").lower() not in {"1", "true", "yes", "on"}
+    executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=dry_run)
+    gate = LiveOrderGate(executor=executor, audit_path=_AUDIT_PATH, policy=GatePolicy())
+    lines = [f"🚀 *매도 실행* (dry\\_run={dry_run})"]
+    for o in batch.orders:
+        try:
+            r = await gate.place_sell(symbol=o.symbol, qty=o.qty)
+            tag = "🧪 DRY_RUN" if r.dry_run else "✅ ORDERED"
+            lines.append(f"{tag} `{o.symbol}` qty={o.qty}")
+        except Exception as e:
+            lines.append(f"❌ `{o.symbol}` {type(e).__name__}: {str(e)[:80]}")
+    return "\n".join(lines)
+
+
 async def _cmd_audit(bot: TelegramBot, msg: dict) -> str:
     """최근 audit log 5건."""
     p = Path(_AUDIT_PATH)
@@ -252,6 +313,8 @@ def main() -> None:
     bot.register("/sim_execute", _cmd_sim_execute) # OPS-26
     bot.register("/confirm", _cmd_confirm)         # OPS-26
     bot.register("/cancel", _cmd_cancel)           # OPS-26
+    bot.register("/sell_execute", _cmd_sell_execute)   # OPS-27
+    bot.register("/confirm_sell", _cmd_confirm_sell)   # OPS-27
 
     print(f"🤖 봇 시작 — chat_id={chat_id}, 명령={list(bot._handlers)}")
     print("   Ctrl+C 로 종료")
