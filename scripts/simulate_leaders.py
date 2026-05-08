@@ -194,6 +194,7 @@ async def _run(args) -> int:
                 daily_loss_limit_pct=Decimal(str(args.daily_loss_limit)),
                 daily_max_orders=args.daily_max_orders,
             ),
+            notifier=notifier,                  # OPS-22: 차단 시 자동 알림
         )
         executed = 0
         for r in gate_result.recommendations:
