@@ -1,0 +1,47 @@
+# BAR-OPS-07 — Bandit 정책 (Python AST 보안 스캔).
+#
+# 사용: bandit -r backend/ -c infra/semgrep/.bandit -ll -f json -o bandit-report.json
+
+[bandit]
+# 제외 디렉터리
+exclude_dirs = ["/tests/", "/.venv/", "/.claude/"]
+
+# 무시할 룰 (테스트 환경)
+skips = [
+    "B101",  # assert_used (테스트에서 OK)
+    "B311",  # random (전략에서 fixture seed 사용)
+]
+
+# 추가 강화 룰
+tests = [
+    "B102",  # exec_used
+    "B103",  # set_bad_file_permissions
+    "B104",  # hardcoded_bind_all_interfaces
+    "B105",  # hardcoded_password_string
+    "B106",  # hardcoded_password_funcarg
+    "B107",  # hardcoded_password_default
+    "B108",  # hardcoded_tmp_directory
+    "B113",  # request_without_timeout
+    "B201",  # flask_debug_true
+    "B301",  # pickle
+    "B303",  # MD5 (subset of weak hash)
+    "B304",  # ciphers (weak)
+    "B306",  # mktemp_q
+    "B307",  # eval
+    "B308",  # mark_safe
+    "B310",  # urllib_urlopen
+    "B312",  # telnetlib
+    "B313",  # xml_bad_cElementTree
+    "B314",  # xml_bad_ElementTree
+    "B321",  # ftplib
+    "B324",  # hashlib_insecure_functions
+    "B501",  # request_with_no_cert_validation
+    "B506",  # yaml_load
+    "B602",  # subprocess_popen_with_shell_equals_true
+    "B608",  # hardcoded_sql_expressions
+]
+
+# 자금흐름 영역은 strict
+[per_file_settings]
+"backend/models/*" = ["B101"]
+"backend/core/risk/*" = ["B101"]
