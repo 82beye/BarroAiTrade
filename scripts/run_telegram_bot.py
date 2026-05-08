@@ -254,6 +254,40 @@ async def _cmd_confirm_sell(bot: TelegramBot, msg: dict) -> str:
     return "\n".join(lines)
 
 
+async def _cmd_diff(bot: TelegramBot, msg: dict) -> str:
+    """시뮬(예측) PnL vs 실현 PnL 비교 — BAR-OPS-29."""
+    from datetime import date, timedelta
+    from backend.core.journal.pnl_diff import compare, summarize
+    sim_entries = SimulationLogger(_LOG_PATH).read_all()
+    if not sim_entries:
+        return f"시뮬 누적 없음 ({_LOG_PATH})"
+    end = date.today().strftime("%Y%m%d")
+    start = (date.today() - timedelta(days=30)).strftime("%Y%m%d")
+    oauth = _build_oauth()
+    account = KiwoomNativeAccountFetcher(oauth=oauth)
+    real_entries = await account.fetch_realized_pnl(start_date=start, end_date=end)
+    diffs = compare(sim_entries=sim_entries, real_entries=real_entries)
+    summary = summarize(diffs)
+    lines = [
+        f"🔍 *시뮬 vs 실현* ({summary['n_symbols']} 종목)",
+        f"시뮬 합계: *{int(summary['total_sim']):+,}*",
+        f"실현 합계: *{int(summary['total_real']):+,}*",
+        f"차이:     *{int(summary['total_diff']):+,}*",
+    ]
+    bias_str = " / ".join(f"{k}: {v}" for k, v in summary["bias_counts"].items())
+    if bias_str:
+        lines.append(f"_{bias_str}_")
+    lines.append("")
+    lines.append("*차이 큰 5종목*")
+    for d in diffs[:5]:
+        pct_str = f"{float(d.diff_pct):+.0f}%" if d.diff_pct is not None else "-"
+        lines.append(
+            f"`{d.symbol}` {d.name[:8]} sim={int(d.sim_pnl):+,} "
+            f"real={int(d.real_pnl):+,} ({pct_str}) {d.bias}"
+        )
+    return "\n".join(lines)
+
+
 async def _cmd_pnl(bot: TelegramBot, msg: dict) -> str:
     """최근 30일 실현손익 (ka10073) — BAR-OPS-28."""
     from datetime import date, timedelta
@@ -348,6 +382,7 @@ def main() -> None:
     bot.register("/sell_execute", _cmd_sell_execute)   # OPS-27
     bot.register("/confirm_sell", _cmd_confirm_sell)   # OPS-27
     bot.register("/pnl", _cmd_pnl)                     # OPS-28
+    bot.register("/diff", _cmd_diff)                   # OPS-29
 
     print(f"🤖 봇 시작 — chat_id={chat_id}, 명령={list(bot._handlers)}")
     print("   Ctrl+C 로 종료")
