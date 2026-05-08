@@ -385,6 +385,23 @@ async def _cmd_diff(bot: TelegramBot, msg: dict) -> str:
     return "\n".join(lines)
 
 
+async def _cmd_orders(bot: TelegramBot, msg: dict) -> str:
+    """미체결 주문 (kt00004) — BAR-OPS-33."""
+    oauth = _build_oauth()
+    account = KiwoomNativeAccountFetcher(oauth=oauth)
+    orders = await account.fetch_open_orders()
+    if not orders:
+        return "📭 미체결 주문 없음"
+    lines = [f"📋 *미체결 주문* ({len(orders)} 건)"]
+    for o in orders:
+        sig = "🟢 BUY" if o.side == "buy" else ("🔴 SELL" if o.side == "sell" else "⚪")
+        lines.append(
+            f"`{o.order_no}` {sig} {o.symbol} {o.name} "
+            f"{o.pending_qty}/{o.order_qty}주 @{int(o.order_price):,}"
+        )
+    return "\n".join(lines)
+
+
 async def _cmd_pnl(bot: TelegramBot, msg: dict) -> str:
     """최근 30일 실현손익 (ka10073) — BAR-OPS-28."""
     from datetime import date, timedelta
@@ -479,6 +496,7 @@ def main() -> None:
     bot.register("/sell_execute", _cmd_sell_execute)   # OPS-27
     bot.register("/confirm_sell", _cmd_confirm_sell)   # OPS-27
     bot.register("/pnl", _cmd_pnl)                     # OPS-28
+    bot.register("/orders", _cmd_orders)               # OPS-33
     bot.register("/diff", _cmd_diff)                   # OPS-29
     bot.register("/tune", _cmd_tune)                   # OPS-30/31
     bot.register("/policy", _cmd_policy)               # OPS-31
