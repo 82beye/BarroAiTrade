@@ -60,6 +60,46 @@ def _load_pykrx(symbol: str, start: str, end: str):
     return candles
 
 
+def _load_kiwoom_native(symbol: str, mode: str, base_dt: str, tic_scope: str):
+    """키움 자체 OpenAPI (api.kiwoom.com / mockapi.kiwoom.com) 다운로드.
+
+    환경변수: KIWOOM_APP_KEY / KIWOOM_APP_SECRET / KIWOOM_BASE_URL.
+    base_url 미지정 시 모의(mockapi) 기본.
+    """
+    import asyncio
+    import os
+
+    from pydantic import SecretStr
+
+    from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
+    from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
+
+    app_key = os.environ.get("KIWOOM_APP_KEY", "")
+    app_secret = os.environ.get("KIWOOM_APP_SECRET", "")
+    base_url = os.environ.get("KIWOOM_BASE_URL", "https://mockapi.kiwoom.com")
+
+    if not app_key or not app_secret:
+        raise SystemExit(
+            "KIWOOM_APP_KEY / KIWOOM_APP_SECRET 환경변수 필요.\n"
+            "예: export KIWOOM_APP_KEY='...' KIWOOM_APP_SECRET='...'"
+        )
+
+    async def run():
+        oauth = KiwoomNativeOAuth(
+            app_key=SecretStr(app_key),
+            app_secret=SecretStr(app_secret),
+            base_url=base_url,
+        )
+        fetcher = KiwoomNativeCandleFetcher(oauth=oauth)
+        if mode == "daily":
+            return await fetcher.fetch_daily(symbol=symbol, base_dt=base_dt or None)
+        if mode == "minute":
+            return await fetcher.fetch_minute(symbol=symbol, tic_scope=tic_scope)
+        raise SystemExit(f"unknown kiwoom-native mode: {mode}")
+
+    return asyncio.run(run())
+
+
 def _load_kiwoom(symbol: str, mode: str, start: str, end: str, time_unit: str = "1"):
     """키움 OpenAPI 다운로드 — KIWOOM_APP_KEY / SECRET / BASE_URL 환경변수 필요."""
     import asyncio
@@ -122,7 +162,21 @@ def main() -> None:
     ap.add_argument(
         "--kiwoom",
         choices=["daily", "minute"],
-        help="키움 OpenAPI 다운로드 (KIWOOM_APP_KEY/SECRET 환경변수 필요)",
+        help="(KIS API) 다운로드 — 키움이 KIS 호환일 때만",
+    )
+    ap.add_argument(
+        "--kiwoom-native",
+        choices=["daily", "minute"],
+        help="키움 자체 OpenAPI(api.kiwoom.com/mockapi.kiwoom.com). 키움 직접 발급 키 사용.",
+    )
+    ap.add_argument(
+        "--base-dt",
+        help="kiwoom-native daily 기준일 (YYYYMMDD, 기본=오늘)",
+    )
+    ap.add_argument(
+        "--tic-scope",
+        default="1",
+        help="kiwoom-native minute 분 단위 (1/3/5/10/15/30/45/60)",
     )
     ap.add_argument("--start", help="pykrx/kiwoom-daily start (YYYY-MM-DD)")
     ap.add_argument("--end", help="pykrx/kiwoom-daily end (YYYY-MM-DD), kiwoom-minute target")
@@ -153,8 +207,13 @@ def main() -> None:
             args.start or "", args.end or "",
             args.time_unit,
         )
+    elif args.kiwoom_native:
+        candles = _load_kiwoom_native(
+            args.symbol, args.kiwoom_native,
+            args.base_dt or "", args.tic_scope,
+        )
     else:
-        raise SystemExit("--csv / --synthetic / --pykrx / --kiwoom 중 하나 필요")
+        raise SystemExit("--csv / --synthetic / --pykrx / --kiwoom / --kiwoom-native 중 하나 필요")
 
     if len(candles) < 31:
         raise SystemExit(f"캔들이 부족합니다 (≥ 31 필요, 받은 수={len(candles)})")
