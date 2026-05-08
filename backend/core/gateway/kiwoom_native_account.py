@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _ACCT_PATH = "/api/dostk/acnt"
 _TR_BALANCE = "kt00018"     # 계좌평가현황
 _TR_DEPOSIT = "kt00001"     # 예수금상세현황
+_TR_REALIZED = "ka10073"    # 일자별실현손익 (BAR-OPS-28)
 
 
 def _abs_decimal(s: str) -> Decimal:
@@ -80,6 +81,21 @@ class AccountDeposit:
     next_day_settlement: Decimal   # 익일정산금
 
 
+@dataclass(frozen=True)
+class RealizedPnLEntry:
+    """일자별 실현손익 단건 (BAR-OPS-28)."""
+    date: str                      # YYYYMMDD
+    symbol: str
+    name: str
+    qty: int                       # 체결수량
+    buy_price: Decimal             # 매입단가
+    sell_price: Decimal            # 체결가 (매도가)
+    pnl: Decimal                   # 매도손익 (signed)
+    pnl_rate: Decimal              # 손익률 % (signed)
+    commission: Decimal            # 매매수수료
+    tax: Decimal                   # 매매세금
+
+
 class KiwoomNativeAccountFetcher:
     """키움 자체 OpenAPI 계좌·잔고 조회."""
 
@@ -122,6 +138,33 @@ class KiwoomNativeAccountFetcher:
             estimated_deposit=_abs_decimal(data.get("prsm_dpst_aset_amt", "0")),
             holdings=holdings,
         )
+
+    async def fetch_realized_pnl(
+        self, start_date: str, end_date: str,
+    ) -> list[RealizedPnLEntry]:
+        """일자별 실현손익 (ka10073). YYYYMMDD."""
+        if not (len(start_date) == 8 and start_date.isdigit()):
+            raise ValueError(f"invalid start_date: {start_date} (YYYYMMDD)")
+        if not (len(end_date) == 8 and end_date.isdigit()):
+            raise ValueError(f"invalid end_date: {end_date} (YYYYMMDD)")
+        data = await self._post(_TR_REALIZED, {
+            "strt_dt": start_date, "end_dt": end_date,
+        })
+        out: list[RealizedPnLEntry] = []
+        for r in data.get("dt_stk_rlzt_pl") or []:
+            out.append(RealizedPnLEntry(
+                date=r.get("dt", ""),
+                symbol=(r.get("stk_cd") or "").lstrip("A"),
+                name=r.get("stk_nm", ""),
+                qty=int(_abs_decimal(r.get("cntr_qty", "0"))),
+                buy_price=_abs_decimal(r.get("buy_uv", "0")),
+                sell_price=_abs_decimal(r.get("cntr_pric", "0")),
+                pnl=_signed_decimal(r.get("tdy_sel_pl", "0")),
+                pnl_rate=_signed_decimal(r.get("pl_rt", "0")),
+                commission=_abs_decimal(r.get("tdy_trde_cmsn", "0")),
+                tax=_abs_decimal(r.get("tdy_trde_tax", "0")),
+            ))
+        return out
 
     async def fetch_deposit(self, qry_tp: str = "3") -> AccountDeposit:
         data = await self._post(_TR_DEPOSIT, {"qry_tp": qry_tp})
@@ -169,5 +212,6 @@ class KiwoomNativeAccountFetcher:
 __all__ = [
     "KiwoomNativeAccountFetcher",
     "AccountBalance", "AccountDeposit", "HoldingPosition",
+    "RealizedPnLEntry",
     "_abs_decimal", "_signed_decimal",
 ]

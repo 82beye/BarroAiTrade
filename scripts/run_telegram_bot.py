@@ -254,6 +254,38 @@ async def _cmd_confirm_sell(bot: TelegramBot, msg: dict) -> str:
     return "\n".join(lines)
 
 
+async def _cmd_pnl(bot: TelegramBot, msg: dict) -> str:
+    """최근 30일 실현손익 (ka10073) — BAR-OPS-28."""
+    from datetime import date, timedelta
+    end = date.today().strftime("%Y%m%d")
+    start = (date.today() - timedelta(days=30)).strftime("%Y%m%d")
+    oauth = _build_oauth()
+    account = KiwoomNativeAccountFetcher(oauth=oauth)
+    rows = await account.fetch_realized_pnl(start_date=start, end_date=end)
+    if not rows:
+        return f"실현손익 없음 ({start}~{end})"
+    total_pnl = sum((r.pnl for r in rows), Decimal("0"))
+    total_cmsn = sum((r.commission for r in rows), Decimal("0"))
+    total_tax = sum((r.tax for r in rows), Decimal("0"))
+    win = sum(1 for r in rows if r.pnl > 0)
+    win_rate = (win / len(rows)) * 100 if rows else 0.0
+    lines = [
+        f"💵 *실현손익* ({start[4:6]}/{start[6:8]} ~ {end[4:6]}/{end[6:8]})",
+        f"거래: {len(rows)}건 / 승률: {win_rate:.1f}%",
+        f"순손익: *{int(total_pnl):+,}* 원",
+        f"수수료/세금: {int(total_cmsn):,} / {int(total_tax):,}",
+        "",
+        "*최근 5건*",
+    ]
+    for r in rows[-5:]:
+        sig = "✅" if r.pnl > 0 else ("🛑" if r.pnl < 0 else "⚪")
+        lines.append(
+            f"`{r.date}` {r.name} qty={r.qty} "
+            f"{int(r.pnl):+,} ({float(r.pnl_rate):+.2f}%) {sig}"
+        )
+    return "\n".join(lines)
+
+
 async def _cmd_audit(bot: TelegramBot, msg: dict) -> str:
     """최근 audit log 5건."""
     p = Path(_AUDIT_PATH)
@@ -315,6 +347,7 @@ def main() -> None:
     bot.register("/cancel", _cmd_cancel)           # OPS-26
     bot.register("/sell_execute", _cmd_sell_execute)   # OPS-27
     bot.register("/confirm_sell", _cmd_confirm_sell)   # OPS-27
+    bot.register("/pnl", _cmd_pnl)                     # OPS-28
 
     print(f"🤖 봇 시작 — chat_id={chat_id}, 명령={list(bot._handlers)}")
     print("   Ctrl+C 로 종료")
