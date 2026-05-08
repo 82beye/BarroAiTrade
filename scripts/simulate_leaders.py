@@ -22,6 +22,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from datetime import datetime, timezone
+
 from pydantic import SecretStr
 
 from backend.core.backtester import IntradaySimulator
@@ -31,6 +33,7 @@ from backend.core.gateway.kiwoom_native_rank import (
     KiwoomNativeLeaderPicker,
     LeaderCandidate,
 )
+from backend.core.journal.simulation_log import SimulationLogEntry, SimulationLogger
 
 
 def _build_oauth() -> KiwoomNativeOAuth:
@@ -79,6 +82,8 @@ async def _run(args) -> int:
     total_pnl = 0.0
     total_trades = 0
     per_strategy_pnl: dict[str, float] = {s: 0.0 for s in strategies}
+    log_entries: list[SimulationLogEntry] = []
+    run_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     print(f"\n== 시뮬 실행 ({len(leaders)} 종목 × {len(strategies)} 전략) ==")
     for c in leaders:
@@ -100,7 +105,16 @@ async def _run(args) -> int:
         total_pnl += sym_pnl
         total_trades += len(result.trades)
         for sid, pnl in result.pnl_by_strategy.items():
-            per_strategy_pnl[sid] = per_strategy_pnl.get(sid, 0.0) + float(pnl)
+            pnl_f = float(pnl)
+            per_strategy_pnl[sid] = per_strategy_pnl.get(sid, 0.0) + pnl_f
+            sid_trades = [t for t in result.trades if t.strategy_id == sid]
+            wr = result.win_rate_by_strategy.get(sid, 0.0)
+            log_entries.append(SimulationLogEntry(
+                run_at=run_at, mode=args.mode,
+                symbol=c.symbol, name=c.name, strategy=sid,
+                candle_count=len(candles), trades=len(sid_trades),
+                pnl=pnl_f, win_rate=wr, score=c.score, flu_rate=c.flu_rate,
+            ))
         print(
             f"  {c.symbol} {c.name:<16} candles={len(candles):>4} "
             f"trades={len(result.trades):>2}  PnL={sym_pnl:>+12,.0f}"
@@ -112,6 +126,12 @@ async def _run(args) -> int:
     print(f"  전략별 합산:")
     for sid in strategies:
         print(f"    {sid:<25s}: {per_strategy_pnl.get(sid, 0):+,.0f}")
+
+    if args.log and log_entries:
+        logger = SimulationLogger(args.log)
+        n = logger.append(log_entries)
+        total = len(logger.read_all())
+        print(f"\n📝 {n}개 entry → {args.log} 영속화 (누적 {total} rows)")
     return 0
 
 
@@ -135,6 +155,10 @@ def main() -> None:
         "--strategies",
         default="f_zone,sf_zone,gold_zone,swing_38,scalping_consensus",
         help="실행 전략 (comma-separated)",
+    )
+    ap.add_argument(
+        "--log",
+        help="시뮬 결과 CSV 영속화 경로 (예: data/simulation_log.csv)",
     )
     args = ap.parse_args()
     sys.exit(asyncio.run(_run(args)))
