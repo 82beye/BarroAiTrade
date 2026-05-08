@@ -1,0 +1,73 @@
+# BarroAiTrade — Live Trading 진입 체크리스트
+#
+# Master Plan v2 Phase 4 종료 게이트:
+# "실거래 진입 권한 부여 (자산 5% 이내, 1주 라이브 검증 의무)" 자동 검증.
+#
+# LiveTradingChecker.verify(checklist_path) 실행 시 모든 항목 통과해야 진입 허가.
+
+gates:
+  # === Phase 4 종료 (자동매매 운영) ===
+  - id: regression_passed
+    description: "전체 회귀 테스트 0 fail"
+    type: pytest
+    command: "backend/tests/"
+    min_passed: 605
+
+  - id: baseline_within_5pct
+    description: "BAR-44 베이스라인 ±5% 이내"
+    type: pytest
+    command: "backend/tests/strategy/test_baseline.py"
+    min_passed: 1
+
+  - id: simulation_3weeks_clean
+    description: "모의투자 3주 인간 개입 0회"
+    type: manual
+    evidence: "docs/04-report/simulation-3weeks-{date}.md"
+
+  - id: kill_switch_sim_100pct
+    description: "KillSwitch 시뮬 시나리오 100% 발동"
+    type: pytest
+    command: "backend/tests/risk/"
+    min_passed: 24    # 11 + 13
+
+  # === Phase 5 종료 (보안) ===
+  - id: owasp_top10_passed
+    description: "Semgrep OWASP Top 10 통과"
+    type: workflow
+    workflow: ".github/workflows/security-scan.yml"
+
+  - id: pen_test_p0_p1_zero
+    description: "모의 침투 테스트 P0/P1 0건"
+    type: manual
+    evidence: "docs/04-report/pen-test-{date}.md"
+
+  - id: audit_chain_30d_intact
+    description: "30일 감사 로그 hash chain 무결성"
+    type: pytest
+    command: "backend/tests/security/test_mfa_audit.py::TestAuditChain"
+    min_passed: 3
+
+  # === 운영 환경 ===
+  - id: alerts_iac_deployed
+    description: "monitoring/alerts.yaml Grafana 적용"
+    type: file_exists
+    path: "monitoring/alerts.yaml"
+
+  - id: runbook_exists
+    description: "운영 RUNBOOK 존재"
+    type: file_exists
+    path: "RUNBOOK.md"
+
+  - id: deployment_doc_exists
+    description: "배포 절차서 존재"
+    type: file_exists
+    path: "DEPLOYMENT.md"
+
+# 진입 허용 기준
+approval:
+  capital_pct_initial: 0.05      # 5%
+  duration_days_initial: 7        # 1주
+  escalation:
+    - { day: 7,  capital_pct: 0.10, condition: "1주 무사고" }
+    - { day: 14, capital_pct: 0.25, condition: "2주 무사고" }
+    - { day: 28, capital_pct: 0.50, condition: "4주 무사고" }
