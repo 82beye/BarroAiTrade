@@ -29,6 +29,7 @@ from pydantic import SecretStr
 from backend.core.gateway.kiwoom_native_account import KiwoomNativeAccountFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
 from backend.core.gateway.kiwoom_native_orders import KiwoomNativeOrderExecutor
+from backend.core.journal.policy_config import PolicyConfigStore
 from backend.core.notify.telegram import TelegramNotifier, format_sell_alert
 from backend.core.risk.holding_evaluator import (
     ExitPolicy,
@@ -60,12 +61,16 @@ async def _run(args) -> int:
         print("보유 종목 없음.")
         return 0
 
+    # PolicyConfig 자동 로드 (BAR-OPS-32) — CLI default 인 경우만 override
+    cfg = PolicyConfigStore("data/policy.json").load()
+    tp = args.tp if args.tp != 5.0 else cfg.take_profit_pct
+    sl = args.sl if args.sl != -2.0 else cfg.stop_loss_pct
     policy = ExitPolicy(
-        take_profit_pct=Decimal(str(args.tp)),
-        stop_loss_pct=Decimal(str(args.sl)),
+        take_profit_pct=Decimal(str(tp)),
+        stop_loss_pct=Decimal(str(sl)),
     )
     decisions = evaluate_all(balance.holdings, policy)
-    print(f"== 보유 종목 평가 ({len(decisions)} 종목, TP={args.tp}%, SL={args.sl}%) ==\n")
+    print(f"== 보유 종목 평가 ({len(decisions)} 종목, TP={tp}%, SL={sl}%) [policy.json] ==\n")
     print(render_decisions_table(decisions))
 
     if not args.auto_sell:
