@@ -25,6 +25,7 @@ _ACCT_PATH = "/api/dostk/acnt"
 _TR_BALANCE = "kt00018"     # 계좌평가현황
 _TR_DEPOSIT = "kt00001"     # 예수금상세현황
 _TR_REALIZED = "ka10073"    # 일자별실현손익 (BAR-OPS-28)
+_TR_OPEN_ORDERS = "kt00004" # 미체결요청 (BAR-OPS-33)
 
 
 def _abs_decimal(s: str) -> Decimal:
@@ -79,6 +80,20 @@ class AccountDeposit:
     margin_cash: Decimal           # 증거금현금
     bond_margin_cash: Decimal      # 보증금현금
     next_day_settlement: Decimal   # 익일정산금
+
+
+@dataclass(frozen=True)
+class OpenOrder:
+    """미체결 주문 (BAR-OPS-33)."""
+    order_no: str               # 주문번호
+    symbol: str
+    name: str
+    side: str                   # "buy" / "sell" / "unknown"
+    order_qty: int              # 주문수량
+    filled_qty: int             # 체결수량
+    pending_qty: int            # 미체결수량 = ord - filled
+    order_price: Decimal        # 주문단가
+    order_date: str             # YYYYMMDD
 
 
 @dataclass(frozen=True)
@@ -138,6 +153,50 @@ class KiwoomNativeAccountFetcher:
             estimated_deposit=_abs_decimal(data.get("prsm_dpst_aset_amt", "0")),
             holdings=holdings,
         )
+
+    async def fetch_open_orders(
+        self, exchange: str = "KRX", trade_type: str = "0",
+    ) -> list[OpenOrder]:
+        """미체결 주문 (kt00004). trade_type: 0=전체/1=매수/2=매도."""
+        if exchange not in {"KRX", "NXT", "SOR"}:
+            raise ValueError(f"invalid exchange: {exchange}")
+        if trade_type not in {"0", "1", "2"}:
+            raise ValueError(f"invalid trade_type: {trade_type}")
+        data = await self._post(_TR_OPEN_ORDERS, {
+            "all_stk_tp": "1",          # 전체 종목
+            "trde_tp": trade_type,
+            "stk_cd": "",
+            "stex_tp": "0",
+            "dmst_stex_tp": exchange,
+            "qry_tp": "1",
+        })
+        # list_key 후보 — 응답 키는 모의 0건일 때 stk_acnt_evlt_prst,
+        # 실 미체결 시 다른 키일 수 있어 동적 탐색
+        for key in ("stk_acnt_evlt_prst", "open_ordr", "ndchg_ordr"):
+            rows = data.get(key)
+            if isinstance(rows, list):
+                break
+        else:
+            rows = []
+
+        out: list[OpenOrder] = []
+        for r in rows:
+            ord_qty = int(_abs_decimal(r.get("ord_qty", "0")))
+            filled = int(_abs_decimal(r.get("cntr_qty", "0")))
+            tp = r.get("trde_tp", "")
+            side = "buy" if tp == "1" else ("sell" if tp == "2" else "unknown")
+            out.append(OpenOrder(
+                order_no=r.get("ord_no", ""),
+                symbol=(r.get("stk_cd") or "").lstrip("A"),
+                name=r.get("stk_nm", ""),
+                side=side,
+                order_qty=ord_qty,
+                filled_qty=filled,
+                pending_qty=max(ord_qty - filled, 0),
+                order_price=_abs_decimal(r.get("ord_uv", "0")),
+                order_date=r.get("ord_dt", ""),
+            ))
+        return out
 
     async def fetch_realized_pnl(
         self, start_date: str, end_date: str,
@@ -212,6 +271,6 @@ class KiwoomNativeAccountFetcher:
 __all__ = [
     "KiwoomNativeAccountFetcher",
     "AccountBalance", "AccountDeposit", "HoldingPosition",
-    "RealizedPnLEntry",
+    "RealizedPnLEntry", "OpenOrder",
     "_abs_decimal", "_signed_decimal",
 ]
