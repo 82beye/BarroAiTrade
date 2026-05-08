@@ -32,12 +32,14 @@ from backend.core.backtester import IntradaySimulator
 from backend.core.gateway.kiwoom_native_account import KiwoomNativeAccountFetcher
 from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
+from backend.core.gateway.kiwoom_native_orders import KiwoomNativeOrderExecutor
 from backend.core.gateway.kiwoom_native_rank import (
     KiwoomNativeLeaderPicker,
     LeaderCandidate,
 )
 from backend.core.journal.simulation_log import SimulationLogEntry, SimulationLogger
 from backend.core.risk.balance_gate import evaluate_risk_gate
+from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
 
 
 def _build_oauth() -> KiwoomNativeOAuth:
@@ -137,7 +139,8 @@ async def _run(args) -> int:
         total = len(logger.read_all())
         print(f"\n📝 {n}개 entry → {args.log} 영속화 (누적 {total} rows)")
 
-    if args.check_balance:
+    gate_result = None
+    if args.check_balance or args.execute:
         print("\n== 잔고 기반 자금 한도 + 추천 매수 qty (BAR-OPS-16) ==")
         account = KiwoomNativeAccountFetcher(oauth=oauth)
         deposit = await account.fetch_deposit()
@@ -145,26 +148,53 @@ async def _run(args) -> int:
         candidates_for_gate = [
             (c.symbol, c.name, Decimal(str(c.cur_price))) for c in leaders
         ]
-        gate = evaluate_risk_gate(
+        gate_result = evaluate_risk_gate(
             deposit=deposit, balance=balance,
             candidates=candidates_for_gate,
             max_per_position_ratio=Decimal(str(args.max_per_position)),
             max_total_position_ratio=Decimal(str(args.max_total_position)),
         )
-        print(f"  예수금         : {gate.cash:>15,.0f}")
-        print(f"  현재 평가금액   : {gate.current_eval:>15,.0f}")
-        print(f"  진입 가능액     : {gate.available:>15,.0f}")
-        print(f"  종목당 한도    : {gate.max_per_position:>15,.0f}")
-        print(f"  총 보유 한도   : {gate.max_total_position:>15,.0f}")
+        print(f"  예수금         : {gate_result.cash:>15,.0f}")
+        print(f"  현재 평가금액   : {gate_result.current_eval:>15,.0f}")
+        print(f"  진입 가능액     : {gate_result.available:>15,.0f}")
+        print(f"  종목당 한도    : {gate_result.max_per_position:>15,.0f}")
+        print(f"  총 보유 한도   : {gate_result.max_total_position:>15,.0f}")
         print()
         print(f"  {'symbol':<8} {'name':<16} {'price':>10} {'rec_qty':>8} {'value':>14}  비고")
-        for r in gate.recommendations:
+        for r in gate_result.recommendations:
             value = Decimal(r.recommended_qty) * r.cur_price
             tag = r.reason if r.blocked else "✅"
             print(
                 f"  {r.symbol:<8} {r.name:<16} {r.cur_price:>10,.0f} "
                 f"{r.recommended_qty:>8} {value:>+14,.0f}  {tag}"
             )
+
+    if args.execute and gate_result:
+        print(f"\n== 주문 실행 (BAR-OPS-17 LiveOrderGate, dry_run={args.dry_run}) ==")
+        executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
+        gate = LiveOrderGate(
+            executor=executor,
+            audit_path=args.audit_log,
+            policy=GatePolicy(
+                daily_loss_limit_pct=Decimal(str(args.daily_loss_limit)),
+                daily_max_orders=args.daily_max_orders,
+            ),
+        )
+        executed = 0
+        for r in gate_result.recommendations:
+            if r.blocked or r.recommended_qty <= 0:
+                continue
+            try:
+                result = await gate.place_buy(symbol=r.symbol, qty=r.recommended_qty)
+                executed += 1
+                tag = "DRY_RUN" if result.dry_run else "ORDERED"
+                print(
+                    f"  [{tag}] {r.symbol} {r.name:<16} qty={r.recommended_qty:>5} "
+                    f"order_no={result.order_no}"
+                )
+            except Exception as e:
+                print(f"  [BLOCKED] {r.symbol} {r.name:<16}: {type(e).__name__}: {e}")
+        print(f"\n  → 실행 {executed} 건 / audit log: {args.audit_log}")
     return 0
 
 
@@ -204,6 +234,30 @@ def main() -> None:
     ap.add_argument(
         "--max-total-position", type=float, default=0.90,
         help="총 보유 최대 비중 (기본 0.90 = 90%%)",
+    )
+    ap.add_argument(
+        "--execute", action="store_true",
+        help="추천 qty 그대로 LiveOrderGate 실 주문 (BAR-OPS-17/18)",
+    )
+    ap.add_argument(
+        "--dry-run", action="store_true", default=True,
+        help="DRY_RUN 모드 (기본 True). 실 주문 시 --no-dry-run 명시 필요",
+    )
+    ap.add_argument(
+        "--no-dry-run", action="store_false", dest="dry_run",
+        help="실 주문 활성화 (LIVE_TRADING_ENABLED 환경변수 필요)",
+    )
+    ap.add_argument(
+        "--audit-log", default="data/order_audit.csv",
+        help="주문 감사 CSV 경로 (기본 data/order_audit.csv)",
+    )
+    ap.add_argument(
+        "--daily-loss-limit", type=float, default=-3.0,
+        help="일일 손실 한도 %% (기본 -3.0)",
+    )
+    ap.add_argument(
+        "--daily-max-orders", type=int, default=50,
+        help="일일 거래수 한도 (기본 50)",
     )
     args = ap.parse_args()
     sys.exit(asyncio.run(_run(args)))
