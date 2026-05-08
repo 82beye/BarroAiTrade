@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 _ORDER_PATH = "/api/dostk/ordr"
 _TR_BUY = "kt10000"
 _TR_SELL = "kt10001"
+_TR_CANCEL = "kt10003"      # 미체결 취소 (BAR-OPS-34)
 
 _TRDE_TP_LIMIT = "0"        # 보통(지정가)
 _TRDE_TP_MARKET = "3"       # 시장가
@@ -90,6 +91,77 @@ class KiwoomNativeOrderExecutor:
         price: Optional[Decimal] = None,
     ) -> OrderResult:
         return await self._place(OrderSide.SELL, symbol, qty, price)
+
+    async def cancel_order(
+        self,
+        original_order_no: str,
+        symbol: str,
+        cancel_qty: int = 0,            # 0 = 전량 취소
+    ) -> OrderResult:
+        """미체결 주문 취소 (kt10003)."""
+        if not original_order_no or not original_order_no.strip():
+            raise ValueError("original_order_no required")
+        if not symbol or not symbol.isdigit() or len(symbol) != 6:
+            raise ValueError(f"invalid symbol: {symbol!r} (expected 6-digit)")
+        if cancel_qty < 0:
+            raise ValueError(f"cancel_qty must be ≥ 0 (0=all), got {cancel_qty}")
+
+        body = {
+            "dmst_stex_tp": self._market,
+            "orig_ord_no": original_order_no.strip(),
+            "stk_cd": symbol,
+            "cncl_qty": str(cancel_qty),
+        }
+
+        if self._dry_run:
+            logger.info(
+                "DRY_RUN cancel: orig=%s symbol=%s qty=%d",
+                original_order_no, symbol, cancel_qty,
+            )
+            return OrderResult(
+                side=OrderSide.SELL, symbol=symbol, qty=cancel_qty, price=None,
+                order_no=f"DRY_CANCEL:{original_order_no}",
+                return_code=0, return_msg="dry_run", dry_run=True,
+            )
+
+        token = await self._oauth.get_token()
+        client = self._http or httpx.AsyncClient(timeout=15)
+        owns = self._http is None
+        url = f"{self._oauth.base_url}{_ORDER_PATH}"
+        try:
+            resp = await client.post(
+                url,
+                headers={
+                    "authorization": f"Bearer {token.access_token.get_secret_value()}",
+                    "content-type": "application/json;charset=UTF-8",
+                    "cont-yn": "N",
+                    "next-key": "",
+                    "api-id": _TR_CANCEL,
+                },
+                json=body,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            logger.error("kiwoom-native cancel failed: orig=%s err=%s",
+                         original_order_no, type(exc).__name__)
+            raise
+        finally:
+            if owns:
+                await client.aclose()
+            await asyncio.sleep(self._rate)
+
+        rc = data.get("return_code")
+        if rc != 0:
+            raise RuntimeError(
+                f"kiwoom-native cancel error: orig={original_order_no} "
+                f"rc={rc} msg={data.get('return_msg')}"
+            )
+        return OrderResult(
+            side=OrderSide.SELL, symbol=symbol, qty=cancel_qty, price=None,
+            order_no=data.get("ord_no", original_order_no),
+            return_code=rc, return_msg=data.get("return_msg", ""),
+        )
 
     async def _place(
         self,
