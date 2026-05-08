@@ -60,6 +60,57 @@ def _load_pykrx(symbol: str, start: str, end: str):
     return candles
 
 
+def _load_kiwoom(symbol: str, mode: str, start: str, end: str, time_unit: str = "1"):
+    """키움 OpenAPI 다운로드 — KIWOOM_APP_KEY / SECRET / BASE_URL 환경변수 필요."""
+    import asyncio
+    import os
+
+    from pydantic import SecretStr
+
+    from backend.core.gateway.kiwoom_candles import KiwoomCandleFetcher
+    from backend.core.gateway.kiwoom_oauth import KiwoomOAuth2Manager
+
+    app_key = os.environ.get("KIWOOM_APP_KEY", "")
+    app_secret = os.environ.get("KIWOOM_APP_SECRET", "")
+    base_url = os.environ.get(
+        "KIWOOM_BASE_URL", "https://openapi.koreainvestment.com:9443"
+    )
+
+    if not app_key or not app_secret:
+        raise SystemExit(
+            "KIWOOM_APP_KEY / KIWOOM_APP_SECRET 환경변수 필요.\n"
+            "예: export KIWOOM_APP_KEY='...' KIWOOM_APP_SECRET='...'"
+        )
+
+    async def run():
+        oauth = KiwoomOAuth2Manager(
+            base_url=base_url,
+            app_key=SecretStr(app_key),
+            app_secret=SecretStr(app_secret),
+        )
+        fetcher = KiwoomCandleFetcher(
+            oauth=oauth,
+            app_key=SecretStr(app_key),
+            app_secret=SecretStr(app_secret),
+        )
+        if mode == "daily":
+            return await fetcher.fetch_daily(
+                symbol=symbol,
+                start_date=start.replace("-", ""),
+                end_date=end.replace("-", ""),
+            )
+        if mode == "minute":
+            target = end.replace("-", "") if end else None
+            return await fetcher.fetch_minute(
+                symbol=symbol,
+                target_date=target,
+                time_unit=time_unit,
+            )
+        raise SystemExit(f"unknown kiwoom mode: {mode}")
+
+    return asyncio.run(run())
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="당일 캔들 시뮬레이션 (BAR-OPS-08)")
     ap.add_argument("--symbol", required=True, help="종목코드 (예: 005930)")
@@ -68,8 +119,17 @@ def main() -> None:
         "--synthetic", action="store_true", help="합성 데이터 사용"
     )
     ap.add_argument("--pykrx", action="store_true", help="pykrx 자동 다운로드")
-    ap.add_argument("--start", help="pykrx start (YYYY-MM-DD)")
-    ap.add_argument("--end", help="pykrx end (YYYY-MM-DD)")
+    ap.add_argument(
+        "--kiwoom",
+        choices=["daily", "minute"],
+        help="키움 OpenAPI 다운로드 (KIWOOM_APP_KEY/SECRET 환경변수 필요)",
+    )
+    ap.add_argument("--start", help="pykrx/kiwoom-daily start (YYYY-MM-DD)")
+    ap.add_argument("--end", help="pykrx/kiwoom-daily end (YYYY-MM-DD), kiwoom-minute target")
+    ap.add_argument(
+        "--time-unit", default="1",
+        help="kiwoom-minute 시간 단위 (1/3/5/10/15/30/60 분)",
+    )
     ap.add_argument(
         "--strategies",
         default="f_zone,sf_zone,gold_zone,swing_38,scalping_consensus",
@@ -85,8 +145,16 @@ def main() -> None:
         if not args.start or not args.end:
             raise SystemExit("--pykrx 사용 시 --start 와 --end 필수")
         candles = _load_pykrx(args.symbol, args.start, args.end)
+    elif args.kiwoom:
+        if args.kiwoom == "daily" and (not args.start or not args.end):
+            raise SystemExit("--kiwoom daily 사용 시 --start 와 --end 필수")
+        candles = _load_kiwoom(
+            args.symbol, args.kiwoom,
+            args.start or "", args.end or "",
+            args.time_unit,
+        )
     else:
-        raise SystemExit("--csv / --synthetic / --pykrx 중 하나 필요")
+        raise SystemExit("--csv / --synthetic / --pykrx / --kiwoom 중 하나 필요")
 
     if len(candles) < 31:
         raise SystemExit(f"캔들이 부족합니다 (≥ 31 필요, 받은 수={len(candles)})")
