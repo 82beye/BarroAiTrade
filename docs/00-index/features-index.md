@@ -82,4 +82,29 @@ tags: [index, features]
 
 ---
 
-*[[../README|← 홈으로]] | 최종 업데이트: 2026-05-06 (Phase 0 종료)*
+## OPS 트랙 (운영 자동화 26 BAR)
+
+> Master Plan v2 (BAR-40~79) 완료 후 추가된 운영 자동화 + 자기학습 트랙.
+
+→ [[ops-track-index|OPS 작업 순서 인덱스]] (BAR-OPS-01~35, 26 BAR)
+→ [[system-flow|시스템 흐름도]] (Mermaid 9 다이어그램)
+→ [[../05-paperclip/runbook-ops|운영 시작 RUNBOOK]]
+→ [[../05-paperclip/security-rotation|보안 회전 가이드]]
+
+| 영역 | 진행 |
+|------|------|
+| 인증·기본 (OPS-01~07) | ✅ 완료 |
+| 시뮬·전략 (OPS-08~09) | ✅ 완료 |
+| 키움 자체 OpenAPI (OPS-10~12) | ✅ 완료 |
+| 영속·정책·게이트 (OPS-13~17) | ✅ 완료 |
+| End-to-End + 매도 (OPS-18~20) | ✅ 완료 |
+| Telegram (OPS-21~25) | ✅ 완료 |
+| Confirm 패턴 (OPS-26~27) | ✅ 완료 |
+| 학습 루프 (OPS-28~32) | ✅ 완료 |
+| 미체결 + 정확도 (OPS-33~35) | ✅ 완료 |
+
+**누적**: 키움 API 11 TR-ID / Telegram 19 명령 / 회귀 830 passed, 0 fail
+
+---
+
+*[[../README|← 홈으로]] | 최종 업데이트: 2026-05-08 (OPS-35 완료, 운영 가능)*
