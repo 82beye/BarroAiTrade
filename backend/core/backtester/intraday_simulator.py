@@ -162,7 +162,18 @@ def _build_strategies(strategy_ids: Sequence[str]):
 
 
 class IntradaySimulator:
-    """당일 캔들 시뮬레이터. 슬라이딩 윈도우로 5 전략 평가 + ExitEngine 청산."""
+    """당일 캔들 시뮬레이터. 슬라이딩 윈도우로 5 전략 평가 + ExitEngine 청산.
+
+    BAR-OPS-35 — 트레이딩뷰 등급 정확도 옵션:
+    - entry_on_next_open: 시그널 발생 캔들의 close 가 아닌 **다음 캔들 open** 으로 진입
+                         (lookahead bias 제거). default True.
+    - exit_on_intrabar: 청산 평가 시 close 가 아닌 **bar high/low 터치** 로 체결.
+                       TP 터치: high ≥ tp_price → tp_price 체결.
+                       SL 터치: low ≤ sl_price → sl_price 체결. default True.
+    - commission_pct: 매수·매도 각각 차감 (예: 0.015 = 0.015%). 키움 위탁 표준.
+    - tax_pct_on_sell: 매도 시만 차감 (예: 0.18 = 0.18%). 증권거래세+농특세.
+    - slippage_pct: 시장가 진입 시 진입가 * (1+slippage_pct/100) 적용. default 0.
+    """
 
     DEFAULT_STRATEGIES = [
         "f_zone",
@@ -177,10 +188,21 @@ class IntradaySimulator:
         exit_engine: Optional[ExitEngine] = None,
         warmup_candles: int = 30,
         position_qty: Decimal = Decimal("100"),
+        *,
+        entry_on_next_open: bool = True,
+        exit_on_intrabar: bool = True,
+        commission_pct: float = 0.0,
+        tax_pct_on_sell: float = 0.0,
+        slippage_pct: float = 0.0,
     ) -> None:
         self._exit = exit_engine or ExitEngine()
         self._warmup = warmup_candles
         self._qty = position_qty
+        self._entry_next_open = entry_on_next_open
+        self._exit_intrabar = exit_on_intrabar
+        self._commission = Decimal(str(commission_pct)) / Decimal("100")
+        self._tax = Decimal(str(tax_pct_on_sell)) / Decimal("100")
+        self._slippage = Decimal(str(slippage_pct)) / Decimal("100")
 
     def run(
         self,
@@ -204,16 +226,34 @@ class IntradaySimulator:
 
         for strategy, sid in zip(strategies_obj, strategy_ids):
             position: Optional[PositionState] = None
+            pending_entry: bool = False     # OPS-35: 시그널 캔들 → 다음 open 진입
             for i in range(self._warmup, len(candles)):
                 window = candles[: i + 1]
                 current = candles[i]
 
-                # 진입 평가 (포지션 없을 때만)
+                # 1. 지연 진입 처리 (OPS-35 entry_on_next_open) — 이전 캔들 시그널을
+                #    현 캔들 open 으로 진입
+                if pending_entry and position is None:
+                    raw_open = Decimal(str(current.open))
+                    entry_price = raw_open * (Decimal("1") + self._slippage)
+                    position = PositionState(
+                        symbol=symbol, entry_price=entry_price,
+                        qty=self._qty, initial_qty=self._qty,
+                        entry_time=current.timestamp,
+                    )
+                    trades.append(TradeRecord(
+                        strategy_id=sid, symbol=symbol, side="buy",
+                        qty=self._qty, price=entry_price,
+                        timestamp=current.timestamp, reason="entry",
+                    ))
+                    pending_entry = False
+                    # 진입 직후 캔들에서 즉시 청산 안 함 (다음 캔들부터 평가)
+                    continue
+
+                # 2. 진입 평가 (포지션 없을 때만)
                 if position is None:
                     ctx = AnalysisContext(
-                        symbol=symbol,
-                        candles=window,
-                        market_type=market_type,
+                        symbol=symbol, candles=window, market_type=market_type,
                     )
                     try:
                         signal = strategy.analyze(ctx)
@@ -221,39 +261,50 @@ class IntradaySimulator:
                         logger.debug("%s analyze err: %s", sid, exc)
                         signal = None
                     if signal is not None:
-                        entry_price = Decimal(str(current.close))
-                        position = PositionState(
-                            symbol=symbol,
-                            entry_price=entry_price,
-                            qty=self._qty,
-                            initial_qty=self._qty,
-                            entry_time=current.timestamp,
-                        )
-                        trades.append(
-                            TradeRecord(
+                        if self._entry_next_open and i + 1 < len(candles):
+                            # 다음 캔들 open 진입 예약 (lookahead 제거)
+                            pending_entry = True
+                        else:
+                            # 즉시 진입 (next_open 비활성 또는 마지막 캔들)
+                            raw_close = Decimal(str(current.close))
+                            entry_price = raw_close * (Decimal("1") + self._slippage)
+                            position = PositionState(
+                                symbol=symbol, entry_price=entry_price,
+                                qty=self._qty, initial_qty=self._qty,
+                                entry_time=current.timestamp,
+                            )
+                            trades.append(TradeRecord(
                                 strategy_id=sid, symbol=symbol, side="buy",
                                 qty=self._qty, price=entry_price,
                                 timestamp=current.timestamp, reason="entry",
-                            )
-                        )
+                            ))
                 else:
-                    # 청산 평가 — 동적 ExitPlan (entry 기준 +3/+5/+7%, -1.5%)
+                    # 3. 청산 평가 — bar high/low 터치 (OPS-35 exit_on_intrabar)
                     plan = _scaled_exit_plan(position.entry_price)
-                    new_pos, exit_orders = self._exit.evaluate(
-                        position, plan,
-                        Decimal(str(current.close)),
-                        current.timestamp,
-                    )
-                    for eo in exit_orders:
-                        trades.append(
-                            TradeRecord(
-                                strategy_id=sid, symbol=symbol, side="sell",
-                                qty=eo.qty, price=eo.target_price,
-                                timestamp=current.timestamp,
-                                reason=eo.reason.value,
-                            )
+                    if self._exit_intrabar:
+                        # high → TP 평가 / low → SL 평가
+                        # 두 평가를 동일 캔들에서 — TP 우선 (보수적 가정: 위로 먼저 갔다고 봄)
+                        new_pos, exit_orders = self._evaluate_intrabar(
+                            position, plan, current,
                         )
-                        pnl = (eo.target_price - position.entry_price) * eo.qty
+                    else:
+                        new_pos, exit_orders = self._exit.evaluate(
+                            position, plan,
+                            Decimal(str(current.close)),
+                            current.timestamp,
+                        )
+                    for eo in exit_orders:
+                        # 매도 시 commission + tax 차감
+                        gross = (eo.target_price - position.entry_price) * eo.qty
+                        commission = (eo.target_price + position.entry_price) * eo.qty * self._commission
+                        tax = eo.target_price * eo.qty * self._tax
+                        pnl = gross - commission - tax
+                        trades.append(TradeRecord(
+                            strategy_id=sid, symbol=symbol, side="sell",
+                            qty=eo.qty, price=eo.target_price,
+                            timestamp=current.timestamp,
+                            reason=eo.reason.value,
+                        ))
                         pnl_by_strategy[sid] += pnl
                         completed_by_strategy[sid] += 1
                         if pnl > 0:
@@ -279,6 +330,58 @@ class IntradaySimulator:
             pnl_by_strategy=pnl_by_strategy,
             win_rate_by_strategy=win_rate,
         )
+
+
+    def _evaluate_intrabar(
+        self,
+        position: PositionState,
+        plan: ExitPlan,
+        candle: OHLCV,
+    ) -> tuple[PositionState, list[ExitOrder]]:
+        """OPS-35 — bar high/low 터치 시 체결.
+
+        TP 우선 (위로 먼저 갔다고 가정 — 보수 X / 낙관). 동일 bar 에서
+        TP+SL 동시 터치 가능 — 둘 다 발생.
+        """
+        high = Decimal(str(candle.high))
+        low = Decimal(str(candle.low))
+        ts = candle.timestamp
+        pos = position
+        orders: list[ExitOrder] = []
+
+        # TP 평가 — 각 tier 의 절대가격이 high 이하면 체결
+        for tier in plan.take_profits:
+            tp_price = tier.price                       # _scaled_exit_plan 에서 절대가
+            if pos.qty <= 0 or high < tp_price:
+                continue
+            # ExitEngine.evaluate 호출 — current_price=tp_price 강제 사용
+            new_pos, exit_orders = self._exit.evaluate(pos, plan, tp_price, ts)
+            for eo in exit_orders:
+                if eo.reason in (ExitReason.TP1, ExitReason.TP2, ExitReason.TP3):
+                    orders.append(eo)
+            pos = new_pos
+            if pos.qty <= 0:
+                return pos, orders
+
+        # SL 평가 — low 가 SL 이하면 체결
+        if pos.qty > 0 and plan.stop_loss is not None:
+            sl_price = pos.entry_price * (Decimal("1") + plan.stop_loss.fixed_pct)
+            if low <= sl_price:
+                new_pos, exit_orders = self._exit.evaluate(pos, plan, sl_price, ts)
+                for eo in exit_orders:
+                    if eo.reason == ExitReason.STOP_LOSS:
+                        orders.append(eo)
+                pos = new_pos
+                return pos, orders
+
+        # 마지막 — close 기반 breakeven 트리거 등 잔여 평가
+        if pos.qty > 0:
+            close_p = Decimal(str(candle.close))
+            new_pos, exit_orders = self._exit.evaluate(pos, plan, close_p, ts)
+            # close 기반 추가 청산 X (위에서 이미 TP/SL 처리). breakeven 만 trigger.
+            pos = new_pos
+
+        return pos, orders
 
 
 def _scaled_exit_plan(entry_price: Decimal) -> ExitPlan:
