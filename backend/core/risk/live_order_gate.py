@@ -25,6 +25,10 @@ from backend.core.gateway.kiwoom_native_orders import (
     OrderResult,
     OrderSide,
 )
+from backend.core.notify.telegram import (
+    TelegramNotifier,
+    format_blocked_alert,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +67,13 @@ class LiveOrderGate:
         executor: KiwoomNativeOrderExecutor,
         audit_path: str | Path,
         policy: Optional[GatePolicy] = None,
+        notifier: Optional[TelegramNotifier] = None,
     ) -> None:
         self._executor = executor
         self._audit_path = Path(audit_path)
         self._audit_path.parent.mkdir(parents=True, exist_ok=True)
         self._policy = policy or GatePolicy()
+        self._notifier = notifier
 
     def _preflight(self, side: OrderSide, daily_pnl_pct: Decimal) -> None:
         # 1) ENV flag 강제 (실전 host 의 안전망)
@@ -115,6 +121,7 @@ class LiveOrderGate:
             self._preflight(side, daily_pnl_pct)
         except (TradingDisabled, DailyLossLimitExceeded, DailyOrderLimitExceeded) as e:
             self._audit("BLOCKED", side, symbol, qty, price, None, None, blocked=True, reason=str(e))
+            await self._notify_blocked(side, symbol, str(e))
             raise
 
         try:
@@ -125,6 +132,7 @@ class LiveOrderGate:
         except Exception as e:
             self._audit("FAILED", side, symbol, qty, price, None, None,
                         blocked=False, reason=type(e).__name__)
+            await self._notify_blocked(side, symbol, f"{type(e).__name__}: {e}")
             raise
 
         self._audit(
@@ -153,6 +161,14 @@ class LiveOrderGate:
                 "1" if blocked else "0",
                 reason,
             ])
+
+    async def _notify_blocked(self, side: OrderSide, symbol: str, reason: str) -> None:
+        if not self._notifier:
+            return
+        try:
+            await self._notifier.send(format_blocked_alert(side.value, symbol, reason))
+        except Exception as e:
+            logger.warning("blocked alert send failed: %s", type(e).__name__)
 
     def _count_today_orders(self, today: str) -> int:
         if not self._audit_path.exists():

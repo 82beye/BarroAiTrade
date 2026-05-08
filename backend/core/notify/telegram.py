@@ -128,12 +128,21 @@ def format_simulation_summary(
     )
 
 
+def _escape_md(s: str) -> str:
+    """Telegram Markdown 충돌 문자 escape."""
+    for ch in ("_", "*", "[", "]", "`"):
+        s = s.replace(ch, f"\\{ch}")
+    return s
+
+
 def format_blocked_alert(side: str, symbol: str, reason: str) -> str:
+    if len(reason) > 200:
+        reason = reason[:197] + "..."
     return (
         f"⚠️ *주문 차단*\n"
         f"방향: {side}\n"
         f"종목: `{symbol}`\n"
-        f"사유: {reason}"
+        f"사유: {_escape_md(reason)}"
     )
 
 

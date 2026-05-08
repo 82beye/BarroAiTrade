@@ -141,4 +141,13 @@ def test_format_simulation_summary():
 def test_format_blocked_alert():
     s = format_blocked_alert("buy", "005930", "LIVE_TRADING_ENABLED 미설정")
     assert "차단" in s
-    assert "LIVE_TRADING_ENABLED" in s
+    # Markdown escape 적용 — `_` → `\_`
+    assert "LIVE\\_TRADING\\_ENABLED" in s
+
+
+def test_format_blocked_alert_truncates_long_reason():
+    long_reason = "x" * 300
+    s = format_blocked_alert("buy", "005930", long_reason)
+    assert "..." in s
+    # 헤더 + truncated reason → 전체 길이 제한
+    assert len(s) < 300

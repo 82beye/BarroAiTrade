@@ -81,6 +81,7 @@ async def _run(args) -> int:
     gate = LiveOrderGate(
         executor=executor, audit_path=args.audit_log,
         policy=GatePolicy(daily_max_orders=args.daily_max_orders),
+        notifier=TelegramNotifier.from_env() if args.telegram else None,  # OPS-22
     )
     notifier = TelegramNotifier.from_env() if args.telegram else None
     for d in sell_targets:
