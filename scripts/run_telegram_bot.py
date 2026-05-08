@@ -385,6 +385,27 @@ async def _cmd_diff(bot: TelegramBot, msg: dict) -> str:
     return "\n".join(lines)
 
 
+async def _cmd_cancel_order(bot: TelegramBot, msg: dict) -> str:
+    """미체결 취소 — BAR-OPS-34. 사용: /cancel_order <ORD_NO> <SYMBOL> [<QTY>]."""
+    text = (msg.get("text") or "").strip()
+    parts = text.split()
+    if len(parts) < 3:
+        return "사용법: `/cancel_order <ORD_NO> <SYMBOL> [<QTY>]`\n_QTY 생략 시 전량 취소_"
+    orig_no, symbol = parts[1], parts[2]
+    qty = int(parts[3]) if len(parts) >= 4 else 0
+    oauth = _build_oauth()
+    dry_run = os.environ.get("LIVE_TRADING_ENABLED", "").lower() not in {"1", "true", "yes", "on"}
+    executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=dry_run)
+    try:
+        r = await executor.cancel_order(
+            original_order_no=orig_no, symbol=symbol, cancel_qty=qty,
+        )
+        tag = "🧪 DRY_RUN" if r.dry_run else "✅ CANCELED"
+        return f"{tag} 취소 — `{orig_no}` {symbol} qty={qty if qty else '전량'} → ord_no=`{r.order_no}`"
+    except Exception as e:
+        return f"❌ 취소 실패: {type(e).__name__}: {str(e)[:100]}"
+
+
 async def _cmd_orders(bot: TelegramBot, msg: dict) -> str:
     """미체결 주문 (kt00004) — BAR-OPS-33."""
     oauth = _build_oauth()
@@ -497,6 +518,7 @@ def main() -> None:
     bot.register("/confirm_sell", _cmd_confirm_sell)   # OPS-27
     bot.register("/pnl", _cmd_pnl)                     # OPS-28
     bot.register("/orders", _cmd_orders)               # OPS-33
+    bot.register("/cancel_order", _cmd_cancel_order)   # OPS-34
     bot.register("/diff", _cmd_diff)                   # OPS-29
     bot.register("/tune", _cmd_tune)                   # OPS-30/31
     bot.register("/policy", _cmd_policy)               # OPS-31
