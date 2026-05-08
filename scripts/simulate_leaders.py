@@ -51,22 +51,26 @@ def _build_oauth() -> KiwoomNativeOAuth:
 
 async def _run(args) -> int:
     oauth = _build_oauth()
-    picker = KiwoomNativeLeaderPicker(oauth=oauth, min_flu_rate=args.min_flu)
+    picker = KiwoomNativeLeaderPicker(
+        oauth=oauth,
+        min_flu_rate=args.min_flu,
+        min_score=args.min_score,
+    )
     fetcher = KiwoomNativeCandleFetcher(oauth=oauth)
 
-    print(f"== 당일 주도주 선정 (mode={args.mode}, top={args.top}, min_flu={args.min_flu}%) ==")
+    print(f"== 당일 주도주 선정 (mode={args.mode}, top={args.top}, min_flu={args.min_flu}%, min_score={args.min_score}) ==")
     leaders: list[LeaderCandidate] = await picker.pick(top_n=args.top)
     if not leaders:
-        print("주도주 후보 없음 (등락률 필터 통과 종목 0). --min-flu 낮춰서 재시도.")
+        print("주도주 후보 없음. --min-flu 또는 --min-score 낮춰서 재시도.")
         return 1
 
-    print(f"\n선정된 주도주 {len(leaders)} 종목:")
-    print(f"  {'rank':>4} {'symbol':<8} {'name':<16} {'price':>10} {'flu%':>7} {'TVrk':>5} {'FRrk':>5} {'score':>6}")
+    print(f"\n선정된 주도주 {len(leaders)} 종목 (3-factor: 거래대금·등락률·거래량):")
+    print(f"  {'rank':>4} {'symbol':<8} {'name':<16} {'price':>10} {'flu%':>7} {'TVrk':>5} {'FRrk':>5} {'VOLrk':>6} {'score':>6}")
     for i, c in enumerate(leaders, 1):
         print(
             f"  {i:>4} {c.symbol:<8} {c.name:<16} {c.cur_price:>10,.0f} "
             f"{c.flu_rate:>+7.2f} {str(c.rank_trade_value or '-'):>5} "
-            f"{str(c.rank_flu_rate or '-'):>5} {c.score:>6.3f}"
+            f"{str(c.rank_flu_rate or '-'):>5} {str(c.rank_volume or '-'):>6} {c.score:>6.3f}"
         )
 
     # 각 종목 시뮬
@@ -122,6 +126,10 @@ def main() -> None:
     ap.add_argument(
         "--min-flu", type=float, default=1.0,
         help="최소 등락률 필터 %% (기본 1.0)",
+    )
+    ap.add_argument(
+        "--min-score", type=float, default=0.0,
+        help="최소 절대 점수 threshold 0~1 (기본 0.0, 강한 시그널만은 0.7+)",
     )
     ap.add_argument(
         "--strategies",
