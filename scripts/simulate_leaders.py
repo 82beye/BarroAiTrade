@@ -26,7 +26,10 @@ from datetime import datetime, timezone
 
 from pydantic import SecretStr
 
+from decimal import Decimal
+
 from backend.core.backtester import IntradaySimulator
+from backend.core.gateway.kiwoom_native_account import KiwoomNativeAccountFetcher
 from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
 from backend.core.gateway.kiwoom_native_rank import (
@@ -34,6 +37,7 @@ from backend.core.gateway.kiwoom_native_rank import (
     LeaderCandidate,
 )
 from backend.core.journal.simulation_log import SimulationLogEntry, SimulationLogger
+from backend.core.risk.balance_gate import evaluate_risk_gate
 
 
 def _build_oauth() -> KiwoomNativeOAuth:
@@ -132,6 +136,35 @@ async def _run(args) -> int:
         n = logger.append(log_entries)
         total = len(logger.read_all())
         print(f"\n📝 {n}개 entry → {args.log} 영속화 (누적 {total} rows)")
+
+    if args.check_balance:
+        print("\n== 잔고 기반 자금 한도 + 추천 매수 qty (BAR-OPS-16) ==")
+        account = KiwoomNativeAccountFetcher(oauth=oauth)
+        deposit = await account.fetch_deposit()
+        balance = await account.fetch_balance()
+        candidates_for_gate = [
+            (c.symbol, c.name, Decimal(str(c.cur_price))) for c in leaders
+        ]
+        gate = evaluate_risk_gate(
+            deposit=deposit, balance=balance,
+            candidates=candidates_for_gate,
+            max_per_position_ratio=Decimal(str(args.max_per_position)),
+            max_total_position_ratio=Decimal(str(args.max_total_position)),
+        )
+        print(f"  예수금         : {gate.cash:>15,.0f}")
+        print(f"  현재 평가금액   : {gate.current_eval:>15,.0f}")
+        print(f"  진입 가능액     : {gate.available:>15,.0f}")
+        print(f"  종목당 한도    : {gate.max_per_position:>15,.0f}")
+        print(f"  총 보유 한도   : {gate.max_total_position:>15,.0f}")
+        print()
+        print(f"  {'symbol':<8} {'name':<16} {'price':>10} {'rec_qty':>8} {'value':>14}  비고")
+        for r in gate.recommendations:
+            value = Decimal(r.recommended_qty) * r.cur_price
+            tag = r.reason if r.blocked else "✅"
+            print(
+                f"  {r.symbol:<8} {r.name:<16} {r.cur_price:>10,.0f} "
+                f"{r.recommended_qty:>8} {value:>+14,.0f}  {tag}"
+            )
     return 0
 
 
@@ -159,6 +192,18 @@ def main() -> None:
     ap.add_argument(
         "--log",
         help="시뮬 결과 CSV 영속화 경로 (예: data/simulation_log.csv)",
+    )
+    ap.add_argument(
+        "--check-balance", action="store_true",
+        help="잔고 조회 + 자금 한도 정책 + 추천 매수 qty 표시 (BAR-OPS-16)",
+    )
+    ap.add_argument(
+        "--max-per-position", type=float, default=0.30,
+        help="종목당 최대 비중 (기본 0.30 = 30%%)",
+    )
+    ap.add_argument(
+        "--max-total-position", type=float, default=0.90,
+        help="총 보유 최대 비중 (기본 0.90 = 90%%)",
     )
     args = ap.parse_args()
     sys.exit(asyncio.run(_run(args)))
