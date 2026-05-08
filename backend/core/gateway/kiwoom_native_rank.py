@@ -28,8 +28,10 @@ logger = logging.getLogger(__name__)
 _RANK_PATH = "/api/dostk/rkinfo"
 _TR_TRADING_VALUE = "ka10032"   # 거래대금상위
 _TR_FLUCT_RATE = "ka10027"      # 전일대비등락률상위
+_TR_VOLUME = "ka10030"          # 당일거래량상위 (BAR-OPS-12)
 _KEY_TRADING_VALUE = "trde_prica_upper"
 _KEY_FLUCT_RATE = "pred_pre_flu_rt_upper"
+_KEY_VOLUME = "tdy_trde_qty_upper"
 
 _BODY_TRADING_VALUE = {
     "mrkt_tp": "000", "sort_tp": "1", "mang_stk_incls": "0", "crd_tp": "0",
@@ -40,6 +42,11 @@ _BODY_FLUCT_RATE = {
     "mrkt_tp": "000", "sort_tp": "1", "stk_cnd": "0", "trde_qty_cnd": "0000",
     "crd_cnd": "0", "updown_incls": "1", "pric_cnd": "0", "trde_prica_cnd": "0",
     "stex_tp": "3",
+}
+_BODY_VOLUME = {
+    "mrkt_tp": "000", "sort_tp": "1", "mang_stk_incls": "0", "crd_tp": "0",
+    "trde_qty_tp": "0", "pric_tp": "0", "trde_prica_tp": "0",
+    "mrkt_open_tp": "0", "stex_tp": "3",
 }
 
 
@@ -63,68 +70,75 @@ class LeaderCandidate:
     symbol: str
     name: str
     cur_price: float
-    flu_rate: float                 # 등락률 (%)
+    flu_rate: float                       # 등락률 (%)
     rank_trade_value: Optional[int]
     rank_flu_rate: Optional[int]
+    rank_volume: Optional[int]            # BAR-OPS-12 — 거래량 순위
     score: float
 
 
 class KiwoomNativeLeaderPicker:
-    """주도주 선정 — 거래대금 × 등락률 결합 ranking."""
+    """주도주 선정 — 거래대금 + 등락률 + 거래량 결합 ranking (3-factor)."""
 
     def __init__(
         self,
         oauth: KiwoomNativeOAuth,
         http_client: Optional[httpx.AsyncClient] = None,
         rate_limit_seconds: float = 0.25,
-        weight_trade_value: float = 0.6,
-        weight_flu_rate: float = 0.4,
+        weight_trade_value: float = 0.4,
+        weight_flu_rate: float = 0.3,
+        weight_volume: float = 0.3,        # BAR-OPS-12 — 거래량 가중
         min_flu_rate: float = 1.0,
+        min_score: float = 0.0,            # BAR-OPS-12 — 절대 점수 threshold
     ) -> None:
-        if abs(weight_trade_value + weight_flu_rate - 1.0) > 1e-6:
+        if abs(weight_trade_value + weight_flu_rate + weight_volume - 1.0) > 1e-6:
             raise ValueError("weights must sum to 1.0")
         self._oauth = oauth
         self._http = http_client
         self._rate = rate_limit_seconds
         self._w_tv = weight_trade_value
         self._w_fr = weight_flu_rate
+        self._w_vol = weight_volume
         self._min_fr = min_flu_rate
+        self._min_score = min_score
 
     async def pick(self, top_n: int = 5) -> list[LeaderCandidate]:
         tv_rows = await self._fetch_rank(_TR_TRADING_VALUE, _BODY_TRADING_VALUE, _KEY_TRADING_VALUE)
         fr_rows = await self._fetch_rank(_TR_FLUCT_RATE, _BODY_FLUCT_RATE, _KEY_FLUCT_RATE)
+        vol_rows = await self._fetch_rank(_TR_VOLUME, _BODY_VOLUME, _KEY_VOLUME)
 
-        # rank 맵 — 응답 순서 = 1위, 2위, ...
-        tv_rank: dict[str, int] = {}
-        tv_meta: dict[str, dict] = {}
-        for i, r in enumerate(tv_rows, start=1):
-            sym = _normalize_symbol(r.get("stk_cd", ""))
-            if sym:
-                tv_rank[sym] = i
-                tv_meta[sym] = r
-        fr_rank: dict[str, int] = {}
-        fr_meta: dict[str, dict] = {}
-        for i, r in enumerate(fr_rows, start=1):
-            sym = _normalize_symbol(r.get("stk_cd", ""))
-            if sym:
-                fr_rank[sym] = i
-                fr_meta[sym] = r
+        def _build_rank(rows: list[dict]) -> tuple[dict[str, int], dict[str, dict]]:
+            r_map: dict[str, int] = {}
+            m_map: dict[str, dict] = {}
+            for i, r in enumerate(rows, start=1):
+                sym = _normalize_symbol(r.get("stk_cd", ""))
+                if sym:
+                    r_map[sym] = i
+                    m_map[sym] = r
+            return r_map, m_map
+
+        tv_rank, tv_meta = _build_rank(tv_rows)
+        fr_rank, fr_meta = _build_rank(fr_rows)
+        vol_rank, vol_meta = _build_rank(vol_rows)
 
         n_tv = max(len(tv_rank), 1)
         n_fr = max(len(fr_rank), 1)
-        symbols = set(tv_rank) | set(fr_rank)
+        n_vol = max(len(vol_rank), 1)
+        symbols = set(tv_rank) | set(fr_rank) | set(vol_rank)
 
         out: list[LeaderCandidate] = []
         for sym in symbols:
-            meta = tv_meta.get(sym) or fr_meta.get(sym, {})
+            meta = tv_meta.get(sym) or fr_meta.get(sym) or vol_meta.get(sym, {})
             flu_rate = _parse_signed_pct(meta.get("flu_rt", "0"))
             if flu_rate < self._min_fr:
                 continue
             tv_score = (1 - (tv_rank[sym] - 1) / n_tv) if sym in tv_rank else 0.0
             fr_score = (1 - (fr_rank[sym] - 1) / n_fr) if sym in fr_rank else 0.0
-            score = self._w_tv * tv_score + self._w_fr * fr_score
-            cur_price = float(_parse_signed_pct(meta.get("cur_prc", "0")))
-            cur_price = abs(cur_price)
+            vol_score = (1 - (vol_rank[sym] - 1) / n_vol) if sym in vol_rank else 0.0
+            score = self._w_tv * tv_score + self._w_fr * fr_score + self._w_vol * vol_score
+            if score < self._min_score:
+                continue
+            cur_price = abs(_parse_signed_pct(meta.get("cur_prc", "0")))
             out.append(LeaderCandidate(
                 symbol=sym,
                 name=meta.get("stk_nm", ""),
@@ -132,6 +146,7 @@ class KiwoomNativeLeaderPicker:
                 flu_rate=flu_rate,
                 rank_trade_value=tv_rank.get(sym),
                 rank_flu_rate=fr_rank.get(sym),
+                rank_volume=vol_rank.get(sym),
                 score=score,
             ))
 
