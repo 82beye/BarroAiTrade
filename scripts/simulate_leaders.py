@@ -38,6 +38,11 @@ from backend.core.gateway.kiwoom_native_rank import (
     LeaderCandidate,
 )
 from backend.core.journal.simulation_log import SimulationLogEntry, SimulationLogger
+from backend.core.notify.telegram import (
+    TelegramNotifier,
+    format_buy_alert,
+    format_simulation_summary,
+)
 from backend.core.risk.balance_gate import evaluate_risk_gate
 from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
 
@@ -133,6 +138,16 @@ async def _run(args) -> int:
     for sid in strategies:
         print(f"    {sid:<25s}: {per_strategy_pnl.get(sid, 0):+,.0f}")
 
+    notifier = TelegramNotifier.from_env() if args.telegram else None
+    if notifier:
+        try:
+            await notifier.send(format_simulation_summary(
+                total_trades=total_trades, total_pnl=total_pnl,
+                n_leaders=len(leaders), mode=args.mode,
+            ))
+        except Exception as e:
+            print(f"⚠️ telegram 전송 실패: {e}")
+
     if args.log and log_entries:
         logger = SimulationLogger(args.log)
         n = logger.append(log_entries)
@@ -192,6 +207,14 @@ async def _run(args) -> int:
                     f"  [{tag}] {r.symbol} {r.name:<16} qty={r.recommended_qty:>5} "
                     f"order_no={result.order_no}"
                 )
+                if notifier:
+                    try:
+                        await notifier.send(format_buy_alert(
+                            r.symbol, r.name, r.recommended_qty,
+                            result.order_no, result.dry_run,
+                        ))
+                    except Exception as te:
+                        print(f"    ⚠️ telegram 알림 실패: {te}")
             except Exception as e:
                 print(f"  [BLOCKED] {r.symbol} {r.name:<16}: {type(e).__name__}: {e}")
         print(f"\n  → 실행 {executed} 건 / audit log: {args.audit_log}")
@@ -258,6 +281,10 @@ def main() -> None:
     ap.add_argument(
         "--daily-max-orders", type=int, default=50,
         help="일일 거래수 한도 (기본 50)",
+    )
+    ap.add_argument(
+        "--telegram", action="store_true",
+        help="Telegram 알림 전송 (TELEGRAM_BOT_TOKEN/CHAT_ID 환경변수 필요)",
     )
     args = ap.parse_args()
     sys.exit(asyncio.run(_run(args)))

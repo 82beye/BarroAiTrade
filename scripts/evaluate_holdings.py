@@ -29,6 +29,7 @@ from pydantic import SecretStr
 from backend.core.gateway.kiwoom_native_account import KiwoomNativeAccountFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
 from backend.core.gateway.kiwoom_native_orders import KiwoomNativeOrderExecutor
+from backend.core.notify.telegram import TelegramNotifier, format_sell_alert
 from backend.core.risk.holding_evaluator import (
     ExitPolicy,
     SellSignal,
@@ -81,6 +82,7 @@ async def _run(args) -> int:
         executor=executor, audit_path=args.audit_log,
         policy=GatePolicy(daily_max_orders=args.daily_max_orders),
     )
+    notifier = TelegramNotifier.from_env() if args.telegram else None
     for d in sell_targets:
         try:
             r = await gate.place_sell(symbol=d.symbol, qty=d.qty)
@@ -89,6 +91,14 @@ async def _run(args) -> int:
                 f"  [{tag}] {d.symbol} {d.name:<14} qty={d.qty:>5} "
                 f"signal={d.signal.value:<12} order_no={r.order_no}"
             )
+            if notifier:
+                try:
+                    await notifier.send(format_sell_alert(
+                        d.symbol, d.name, d.qty, d.signal.value,
+                        float(d.pnl_rate), r.order_no, r.dry_run,
+                    ))
+                except Exception as te:
+                    print(f"    ⚠️ telegram 알림 실패: {te}")
         except Exception as e:
             print(f"  [BLOCKED] {d.symbol} {d.name:<14}: {type(e).__name__}: {e}")
 
@@ -109,6 +119,8 @@ def main() -> None:
                     help="audit CSV (OPS-17)")
     ap.add_argument("--daily-max-orders", type=int, default=50,
                     help="일일 거래수 한도 (기본 50)")
+    ap.add_argument("--telegram", action="store_true",
+                    help="Telegram 알림 (TELEGRAM_BOT_TOKEN/CHAT_ID 필요)")
     args = ap.parse_args()
     sys.exit(asyncio.run(_run(args)))
 
