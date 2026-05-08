@@ -28,18 +28,22 @@ from decimal import Decimal
 from backend.core.gateway.kiwoom_native_account import KiwoomNativeAccountFetcher
 from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
+from backend.core.gateway.kiwoom_native_orders import KiwoomNativeOrderExecutor
 from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
 from backend.core.journal.simulation_log import (
     SimulationLogger,
     summarize_by_strategy,
 )
+from backend.core.notify.order_confirm import OrderConfirmStore, PendingOrder
 from backend.core.notify.telegram import TelegramNotifier
 from backend.core.notify.telegram_bot import TelegramBot
 from backend.core.risk.balance_gate import evaluate_risk_gate
 from backend.core.risk.holding_evaluator import ExitPolicy, evaluate_all
+from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
 
 _LOG_PATH = "data/simulation_log.csv"
 _AUDIT_PATH = "data/order_audit.csv"
+_CONFIRM_STORE = OrderConfirmStore(ttl_seconds=300)            # 5분 TTL
 
 
 def _build_oauth() -> KiwoomNativeOAuth:
@@ -120,6 +124,75 @@ async def _cmd_eval(bot: TelegramBot, msg: dict) -> str:
     return "\n".join(lines)
 
 
+async def _cmd_sim_execute(bot: TelegramBot, msg: dict) -> str:
+    """주도주 시뮬 + 자금 정책 → 토큰 발급 (5분 TTL) — BAR-OPS-26."""
+    chat_id = str(msg.get("chat", {}).get("id", ""))
+    oauth = _build_oauth()
+    picker = KiwoomNativeLeaderPicker(oauth=oauth, min_score=0.5)
+    leaders = await picker.pick(top_n=3)
+    if not leaders:
+        return "주도주 후보 없음 — 발급 X"
+    account = KiwoomNativeAccountFetcher(oauth=oauth)
+    deposit = await account.fetch_deposit()
+    balance = await account.fetch_balance()
+    gate = evaluate_risk_gate(
+        deposit=deposit, balance=balance,
+        candidates=[(c.symbol, c.name, Decimal(str(c.cur_price))) for c in leaders],
+    )
+    pending = [
+        PendingOrder(symbol=r.symbol, name=r.name, qty=r.recommended_qty)
+        for r in gate.recommendations if not r.blocked and r.recommended_qty > 0
+    ]
+    if not pending:
+        return "추천 매수 종목 없음 (자금 부족 또는 한도) — 발급 X"
+    batch = _CONFIRM_STORE.issue(chat_id=chat_id, orders=pending)
+    lines = [
+        f"🔐 *매수 토큰 발급* (TTL 5분)",
+        f"토큰: `{batch.token}`",
+        "",
+        "*예정 주문*",
+    ]
+    for o in pending:
+        lines.append(f"`{o.symbol}` {o.name} → {o.qty}주")
+    lines.append("")
+    lines.append(f"확인: `/confirm {batch.token}`  /  취소: `/cancel`")
+    return "\n".join(lines)
+
+
+async def _cmd_confirm(bot: TelegramBot, msg: dict) -> str:
+    """token 검증 → 매수 실행 — BAR-OPS-26."""
+    chat_id = str(msg.get("chat", {}).get("id", ""))
+    text = (msg.get("text") or "").strip()
+    parts = text.split()
+    if len(parts) < 2:
+        return "사용법: `/confirm <TOKEN>`"
+    batch = _CONFIRM_STORE.consume(chat_id=chat_id, token=parts[1])
+    if not batch:
+        return "❌ 토큰 무효/만료/이미 사용됨"
+
+    oauth = _build_oauth()
+    dry_run = os.environ.get("LIVE_TRADING_ENABLED", "").lower() not in {"1", "true", "yes", "on"}
+    executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=dry_run)
+    gate = LiveOrderGate(executor=executor, audit_path=_AUDIT_PATH, policy=GatePolicy())
+    lines = [f"🚀 *매수 실행* (dry\\_run={dry_run})"]
+    for o in batch.orders:
+        try:
+            r = await gate.place_buy(symbol=o.symbol, qty=o.qty)
+            tag = "🧪 DRY_RUN" if r.dry_run else "✅ ORDERED"
+            lines.append(f"{tag} `{o.symbol}` qty={o.qty}")
+        except Exception as e:
+            lines.append(f"❌ `{o.symbol}` {type(e).__name__}: {str(e)[:80]}")
+    return "\n".join(lines)
+
+
+async def _cmd_cancel(bot: TelegramBot, msg: dict) -> str:
+    """발급 토큰 폐기 — BAR-OPS-26."""
+    chat_id = str(msg.get("chat", {}).get("id", ""))
+    if _CONFIRM_STORE.cancel(chat_id=chat_id):
+        return "🗑️ 토큰 폐기됨"
+    return "발급된 토큰 없음"
+
+
 async def _cmd_audit(bot: TelegramBot, msg: dict) -> str:
     """최근 audit log 5건."""
     p = Path(_AUDIT_PATH)
@@ -176,6 +249,9 @@ def main() -> None:
     bot.register("/sim", _cmd_sim)                # OPS-25
     bot.register("/eval", _cmd_eval)              # OPS-25
     bot.register("/audit", _cmd_audit)            # OPS-25
+    bot.register("/sim_execute", _cmd_sim_execute) # OPS-26
+    bot.register("/confirm", _cmd_confirm)         # OPS-26
+    bot.register("/cancel", _cmd_cancel)           # OPS-26
 
     print(f"🤖 봇 시작 — chat_id={chat_id}, 명령={list(bot._handlers)}")
     print("   Ctrl+C 로 종료")
