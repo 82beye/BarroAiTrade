@@ -28,6 +28,7 @@ class PendingOrder:
     symbol: str
     name: str
     qty: int
+    side: str = "buy"        # "buy" / "sell" (BAR-OPS-27)
 
 
 @dataclass
