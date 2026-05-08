@@ -37,6 +37,7 @@ from backend.core.gateway.kiwoom_native_rank import (
     KiwoomNativeLeaderPicker,
     LeaderCandidate,
 )
+from backend.core.journal.policy_config import PolicyConfigStore
 from backend.core.journal.simulation_log import SimulationLogEntry, SimulationLogger
 from backend.core.notify.telegram import (
     TelegramNotifier,
@@ -64,6 +65,19 @@ def _build_oauth() -> KiwoomNativeOAuth:
 
 
 async def _run(args) -> int:
+    # PolicyConfig 자동 로드 — CLI 명시 X 인 옵션만 config 값 사용 (BAR-OPS-32)
+    cfg = PolicyConfigStore("data/policy.json").load()
+    if args.min_score == 0.0:
+        args.min_score = cfg.min_score
+    if args.max_per_position == 0.30:
+        args.max_per_position = cfg.max_per_position
+    if args.max_total_position == 0.90:
+        args.max_total_position = cfg.max_total_position
+    if args.daily_loss_limit == -3.0:
+        args.daily_loss_limit = cfg.daily_loss_limit
+    if args.daily_max_orders == 50:
+        args.daily_max_orders = cfg.daily_max_orders
+
     oauth = _build_oauth()
     picker = KiwoomNativeLeaderPicker(
         oauth=oauth,
@@ -72,7 +86,7 @@ async def _run(args) -> int:
     )
     fetcher = KiwoomNativeCandleFetcher(oauth=oauth)
 
-    print(f"== 당일 주도주 선정 (mode={args.mode}, top={args.top}, min_flu={args.min_flu}%, min_score={args.min_score}) ==")
+    print(f"== 당일 주도주 선정 (mode={args.mode}, top={args.top}, min_flu={args.min_flu}%, min_score={args.min_score}) [policy.json 로드됨] ==")
     leaders: list[LeaderCandidate] = await picker.pick(top_n=args.top)
     if not leaders:
         print("주도주 후보 없음. --min-flu 또는 --min-score 낮춰서 재시도.")
