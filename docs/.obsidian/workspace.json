@@ -185,8 +185,9 @@
   },
   "active": "eb93e7a5ca66bbba",
   "lastOpenFiles": [
-    "00-index/features-index.md",
+    "05-paperclip/runbook-ops.md",
     "05-paperclip/multi-machine-ops.md",
+    "00-index/features-index.md",
     "00-index/ops-track-index.md",
     "01-plan/features/bar-44-baseline.plan.md",
     "04-report/PHASE-0-summary.md",
@@ -198,7 +199,6 @@
     "operations/team-agent-tmux.md",
     "operations",
     "05-paperclip/security-rotation.md",
-    "05-paperclip/runbook-ops.md",
     "04-report/features/BAR-OPS-35-report.md",
     "04-report/features/BAR-OPS-34-report.md",
     "04-report/features/BAR-OPS-33-report.md",
