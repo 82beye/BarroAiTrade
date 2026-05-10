@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "00-index/features-index.md",
+                "file": "05-paperclip/multi-machine-ops.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "features-index"
+              "title": "multi-machine-ops"
             }
           }
         ]
@@ -185,6 +185,7 @@
   },
   "active": "eb93e7a5ca66bbba",
   "lastOpenFiles": [
+    "00-index/features-index.md",
     "05-paperclip/multi-machine-ops.md",
     "00-index/ops-track-index.md",
     "01-plan/features/bar-44-baseline.plan.md",
@@ -212,7 +213,6 @@
     "04-report/features/BAR-OPS-24-report.md",
     "04-report/features/BAR-OPS-23-report.md",
     "04-report/features/BAR-OPS-22-report.md",
-    "04-report/features/BAR-OPS-21-report.md",
     "04-report/features",
     "04-report/analyze",
     "무제 1.canvas",
