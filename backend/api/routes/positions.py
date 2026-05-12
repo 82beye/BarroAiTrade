@@ -114,17 +114,24 @@ async def get_positions(
         holdings = balance.holdings or []
         if symbol:
             holdings = [h for h in holdings if h.symbol == symbol]
-        positions = [
-            {
+
+        # active_positions 에서 전략 정보 로드
+        from backend.core.journal.active_positions import ActivePositionStore
+        active = ActivePositionStore("data/active_positions.json").load_all()
+
+        positions = []
+        for h in holdings:
+            pos_meta = active.get(h.symbol)
+            positions.append({
                 "symbol": h.symbol,
                 "name": getattr(h, "name", ""),
                 "quantity": int(h.qty),
                 "avg_price": float(getattr(h, "avg_buy_price", 0)),
                 "cur_price": float(getattr(h, "cur_price", 0)),
                 "pnl_rate": float(getattr(h, "pnl_rate", 0)),
-            }
-            for h in holdings
-        ]
+                "strategy": pos_meta.strategy if pos_meta else "",
+                "tranche": f"{sum(1 for t in pos_meta.tranches if t.status == 'filled')}/{len(pos_meta.tranches)}" if pos_meta else "",
+            })
         logger.info("포지션 목록 조회: %d 종목", len(positions))
         return {"positions": positions, "count": len(positions), "status": "ok"}
     except Exception as e:

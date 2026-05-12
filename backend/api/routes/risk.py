@@ -163,6 +163,14 @@ async def get_audit_log(
         logger.error("audit CSV 읽기 실패: %s", e)
         return {"log": [], "count": 0, "status": "error"}
 
+    # active_positions 에서 전략 정보 merge
+    from backend.core.journal.active_positions import ActivePositionStore
+    active = ActivePositionStore("data/active_positions.json").load_all()
+    for row in rows:
+        sym = row.get("symbol", "")
+        pos = active.get(sym)
+        row["strategy"] = pos.strategy if pos else ""
+
     log = rows[-limit:][::-1]  # 최신순
     return {"log": log, "count": len(log), "status": "ok"}
 

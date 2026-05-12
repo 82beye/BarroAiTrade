@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback } from 'react';
 
 const API = 'http://localhost:8000/api';
-const POLL_MS = 1_000;       // 핵심 데이터 (risk/positions/audit/signals)
-const LOG_POLL_MS = 10_000;  // 로그 파일 상태 (파일 I/O 부담 분리)
+const POLL_MS = 1_000;
+const LOG_POLL_MS = 10_000;
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface RiskStatus {
@@ -24,6 +24,8 @@ interface Position {
   avg_price?: number;
   cur_price?: number;
   pnl_rate?: number;
+  strategy?: string;
+  tranche?: string;
 }
 
 interface AuditRow {
@@ -35,6 +37,7 @@ interface AuditRow {
   price: string;
   blocked: string;
   reason?: string;
+  strategy?: string;
 }
 
 interface Signal {
@@ -229,6 +232,7 @@ export default function MonitorPage() {
               <thead>
                 <tr className="text-left text-xs text-slate-500">
                   <th className="pb-2">종목</th>
+                  <th className="pb-2">전략</th>
                   <th className="pb-2 text-right">수량</th>
                   <th className="pb-2 text-right">손익</th>
                 </tr>
@@ -241,6 +245,14 @@ export default function MonitorPage() {
                       <td className="py-1.5 font-mono text-xs">
                         {p.symbol}
                         {p.name && <span className="ml-1 text-slate-400">{p.name}</span>}
+                      </td>
+                      <td className="py-1.5 text-xs">
+                        {p.strategy && (
+                          <span className="rounded bg-slate-700 px-1.5 py-0.5 text-sky-400">{p.strategy}</span>
+                        )}
+                        {p.tranche && (
+                          <span className="ml-1 text-slate-500">{p.tranche}</span>
+                        )}
                       </td>
                       <td className="py-1.5 text-right tabular-nums">{p.quantity}</td>
                       <td
@@ -279,6 +291,9 @@ export default function MonitorPage() {
                       <span className="text-slate-300">
                         {row.side} {row.symbol} {row.qty}주
                       </span>
+                      {row.strategy && (
+                        <span className="rounded bg-slate-700 px-1 py-0.5 text-sky-400">{row.strategy}</span>
+                      )}
                       <span className="ml-auto text-slate-500">
                         {row.ts?.slice(11, 16)}
                       </span>
@@ -310,7 +325,6 @@ export default function MonitorPage() {
                     key={i}
                     className="rounded border border-slate-700 bg-slate-900 px-2 py-2 text-xs"
                   >
-                    {/* 1행: 종목코드 + 종목명 + 방향 + 시간 */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
                         <span className="font-mono text-slate-300">{s.symbol}</span>
@@ -327,7 +341,6 @@ export default function MonitorPage() {
                         <span className="text-slate-500">{timeFmt}</span>
                       )}
                     </div>
-                    {/* 2행: 전략 + 스코어 + 등락률 + 현재가 */}
                     <div className="mt-1 flex items-center gap-2 text-slate-400">
                       {s.strategy && (
                         <span className="rounded bg-slate-800 px-1 py-0.5 text-slate-400">
