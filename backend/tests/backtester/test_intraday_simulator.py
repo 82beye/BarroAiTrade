@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -14,6 +15,8 @@ from backend.core.backtester import (
     TradeRecord,
     load_csv_candles,
 )
+from backend.core.backtester.intraday_simulator import _build_strategies
+from backend.core.strategy.scalping_consensus import ScalpingConsensusStrategy
 from backend.models.market import MarketType, OHLCV
 
 
@@ -142,3 +145,93 @@ class TestTradeRecord:
             timestamp=datetime.now(),
         )
         assert t.side == "sell"
+
+
+# ─── BAR-OPS-09: scalping_consensus provider 주입 ──────────────────────────
+
+
+class TestScalpingProviderInjection:
+    """scalping_consensus 가 시뮬에 포함될 때 provider 미주입 → 0건 영구 버그
+    해소를 위한 인터페이스 검증."""
+
+    def _high_score_provider(self, ctx):
+        last = ctx.candles[-1]
+        return {
+            "code": ctx.symbol,
+            "name": "TEST",
+            "price": float(last.close),
+            "total_score": 85.0,
+            "timing": "즉시",
+            "consensus_level": "다수합의",
+            "top_reasons": ["unit test"],
+        }
+
+    def _low_score_provider(self, ctx):
+        last = ctx.candles[-1]
+        return {
+            "code": ctx.symbol,
+            "name": "TEST",
+            "price": float(last.close),
+            "total_score": 30.0,  # 0.30 < threshold 0.65 → 차단
+            "timing": "관망",
+        }
+
+    def test_build_injects_provider(self):
+        """_build_strategies 가 ScalpingConsensusStrategy 에 provider 를 주입한다."""
+        provider = self._high_score_provider
+        strats = _build_strategies(["scalping_consensus"], scalping_provider=provider)
+        assert len(strats) == 1
+        s = strats[0]
+        assert isinstance(s, ScalpingConsensusStrategy)
+        assert s.health_check()["provider_registered"] is True
+
+    def test_build_without_provider_warns(self, caplog):
+        """provider 미주입 시 warning 로그 — 조용한 0건 방지."""
+        with caplog.at_level(logging.WARNING, logger="backend.core.backtester.intraday_simulator"):
+            strats = _build_strategies(["scalping_consensus"])
+        assert any("scalping_consensus" in r.message for r in caplog.records)
+        assert strats[0].health_check()["provider_registered"] is False
+
+    def test_simulator_propagates_provider(self):
+        """IntradaySimulator(scalping_provider=...) 가 run() 시 주입된다."""
+        sim = IntradaySimulator(
+            warmup_candles=15,
+            position_qty=Decimal("10"),
+            scalping_provider=self._high_score_provider,
+        )
+        result = sim.run(
+            _synthetic_candles(80),
+            symbol="005930",
+            strategies=["scalping_consensus"],
+        )
+        # provider 가 매 캔들 high_score 반환 → 적어도 1회 진입 발생
+        sc_trades = [t for t in result.trades if t.strategy_id == "scalping_consensus"]
+        assert len(sc_trades) >= 1, "provider 주입에도 trade 0 — 주입 실패"
+        # buy 가 최소 한 번 발생
+        assert any(t.side == "buy" for t in sc_trades)
+
+    def test_low_score_provider_no_entry(self):
+        """provider 가 threshold 미달 score 반환 → 진입 0건 (정상 차단)."""
+        sim = IntradaySimulator(
+            warmup_candles=15,
+            position_qty=Decimal("10"),
+            scalping_provider=self._low_score_provider,
+        )
+        result = sim.run(
+            _synthetic_candles(80),
+            symbol="005930",
+            strategies=["scalping_consensus"],
+        )
+        sc_trades = [t for t in result.trades if t.strategy_id == "scalping_consensus"]
+        assert len(sc_trades) == 0
+
+    def test_default_simulator_no_provider_backward_compat(self):
+        """기존 호출(provider 미지정) 동작 보존: scalping_consensus 포함돼도 0건."""
+        sim = IntradaySimulator(warmup_candles=15, position_qty=Decimal("10"))
+        result = sim.run(
+            _synthetic_candles(80),
+            symbol="005930",
+            strategies=["scalping_consensus"],
+        )
+        sc_trades = [t for t in result.trades if t.strategy_id == "scalping_consensus"]
+        assert len(sc_trades) == 0

@@ -15,7 +15,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,6 +30,12 @@ from backend.models.strategy import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ScalpingConsensusStrategy 의 AnalysisProvider 시그니처 재선언 (순환 import 회피).
+# `Callable[[AnalysisContext], Optional[ScalpingAnalysis|dict]]` — _adapter.to_entry_signal
+# 가 받을 수 있는 형식이면 됨.
+ScalpingProvider = Callable[[AnalysisContext], Optional[Any]]
 
 
 # ─── 결과 모델 ────────────────────────────────────────────
@@ -130,8 +136,17 @@ _DEFAULT_EXIT_PLAN = ExitPlan(
 )
 
 
-def _build_strategies(strategy_ids: Sequence[str]):
-    """strategy_id → 인스턴스 lazy import."""
+def _build_strategies(
+    strategy_ids: Sequence[str],
+    scalping_provider: Optional[ScalpingProvider] = None,
+):
+    """strategy_id → 인스턴스 lazy import.
+
+    scalping_provider 가 주어지면 ScalpingConsensusStrategy 인스턴스에 주입.
+    미주입 상태에서 scalping_consensus 가 포함되면 warning 로그를 남김 — analyze()
+    가 항상 None 을 반환해 trades=0 이 보장되므로 호출측이 조용히 0건을 받는 것을
+    방지하기 위함.
+    """
     out = []
     for sid in strategy_ids:
         if sid == "f_zone":
@@ -155,7 +170,16 @@ def _build_strategies(strategy_ids: Sequence[str]):
                 ScalpingConsensusStrategy,
             )
 
-            out.append(ScalpingConsensusStrategy())
+            strat = ScalpingConsensusStrategy()
+            if scalping_provider is not None:
+                strat.set_analysis_provider(scalping_provider)
+            else:
+                logger.warning(
+                    "scalping_consensus included without provider — "
+                    "analyze() will return None for every candle. "
+                    "Pass scalping_provider=... to IntradaySimulator to enable."
+                )
+            out.append(strat)
         else:
             raise ValueError(f"unknown strategy: {sid}")
     return out
@@ -194,6 +218,7 @@ class IntradaySimulator:
         commission_pct: float = 0.0,
         tax_pct_on_sell: float = 0.0,
         slippage_pct: float = 0.0,
+        scalping_provider: Optional[ScalpingProvider] = None,
     ) -> None:
         self._exit = exit_engine or ExitEngine()
         self._warmup = warmup_candles
@@ -203,6 +228,7 @@ class IntradaySimulator:
         self._commission = Decimal(str(commission_pct)) / Decimal("100")
         self._tax = Decimal(str(tax_pct_on_sell)) / Decimal("100")
         self._slippage = Decimal(str(slippage_pct)) / Decimal("100")
+        self._scalping_provider = scalping_provider
 
     def run(
         self,
@@ -217,7 +243,7 @@ class IntradaySimulator:
                 f"need ≥ {self._warmup + 1} candles, got {len(candles)}"
             )
         strategy_ids = strategies or self.DEFAULT_STRATEGIES
-        strategies_obj = _build_strategies(strategy_ids)
+        strategies_obj = _build_strategies(strategy_ids, self._scalping_provider)
 
         trades: list[TradeRecord] = []
         pnl_by_strategy: dict[str, Decimal] = {sid: Decimal(0) for sid in strategy_ids}
@@ -399,6 +425,7 @@ def _scaled_exit_plan(entry_price: Decimal) -> ExitPlan:
 
 __all__ = [
     "IntradaySimulator",
+    "ScalpingProvider",
     "SimulationResult",
     "TradeRecord",
     "load_csv_candles",

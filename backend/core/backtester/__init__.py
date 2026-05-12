@@ -2,6 +2,7 @@
 
 from backend.core.backtester.intraday_simulator import (
     IntradaySimulator,
+    ScalpingProvider,
     SimulationResult,
     TradeRecord,
     load_csv_candles,
@@ -9,6 +10,7 @@ from backend.core.backtester.intraday_simulator import (
 
 __all__ = [
     "IntradaySimulator",
+    "ScalpingProvider",
     "SimulationResult",
     "TradeRecord",
     "load_csv_candles",
