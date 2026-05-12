@@ -142,15 +142,28 @@ async def get_audit_log(
     event_type: str | None = Query(None, description="이벤트 타입 필터"),
 ) -> dict:
     """
-    감사 로그 조회
-
-    컴플라이언스 전용 엔드포인트.
+    감사 로그 조회 — order_audit.csv 직접 읽기.
     """
-    compliance = app_state.compliance
-    if compliance is None:
-        return {"log": [], "status": "not_initialized"}
+    import csv
+    from pathlib import Path
 
-    log = compliance.get_audit_log(limit=limit, event_type=event_type)
+    audit_path = Path(__file__).resolve().parents[3] / "data" / "order_audit.csv"
+    if not audit_path.exists():
+        return {"log": [], "count": 0, "status": "ok"}
+
+    rows = []
+    try:
+        with open(audit_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if event_type and row.get("action") != event_type:
+                    continue
+                rows.append(dict(row))
+    except Exception as e:
+        logger.error("audit CSV 읽기 실패: %s", e)
+        return {"log": [], "count": 0, "status": "error"}
+
+    log = rows[-limit:][::-1]  # 최신순
     return {"log": log, "count": len(log), "status": "ok"}
 
 

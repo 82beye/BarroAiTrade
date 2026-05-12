@@ -8,13 +8,30 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from fastapi import APIRouter, HTTPException
+from pydantic import SecretStr
 
 from backend.core.state import app_state
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+_kiwoom_oauth = None
+
+def _build_kiwoom_fetcher():
+    global _kiwoom_oauth
+    from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
+    from backend.core.gateway.kiwoom_native_account import KiwoomNativeAccountFetcher
+    if _kiwoom_oauth is None:
+        _kiwoom_oauth = KiwoomNativeOAuth(
+            app_key=SecretStr(os.environ["KIWOOM_APP_KEY"]),
+            app_secret=SecretStr(os.environ["KIWOOM_APP_SECRET"]),
+            base_url=os.environ.get("KIWOOM_BASE_URL", "https://mockapi.kiwoom.com"),
+        )
+    return KiwoomNativeAccountFetcher(oauth=_kiwoom_oauth)
 
 
 def _get_gateway():
@@ -92,15 +109,24 @@ async def get_positions(
     ```
     """
     try:
-        # TODO: 포지션 조회 구현
-        # 현재는 모의 데이터 반환
-        logger.info("포지션 목록 조회")
-
-        return {
-            "positions": [],
-            "count": 0,
-            "status": "mock",
-        }
+        fetcher = _build_kiwoom_fetcher()
+        balance = await fetcher.fetch_balance()
+        holdings = balance.holdings or []
+        if symbol:
+            holdings = [h for h in holdings if h.symbol == symbol]
+        positions = [
+            {
+                "symbol": h.symbol,
+                "name": getattr(h, "name", ""),
+                "quantity": int(h.qty),
+                "avg_price": float(getattr(h, "avg_buy_price", 0)),
+                "cur_price": float(getattr(h, "cur_price", 0)),
+                "pnl_rate": float(getattr(h, "pnl_rate", 0)),
+            }
+            for h in holdings
+        ]
+        logger.info("포지션 목록 조회: %d 종목", len(positions))
+        return {"positions": positions, "count": len(positions), "status": "ok"}
     except Exception as e:
         logger.error(f"포지션 조회 실패: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"positions": [], "count": 0, "status": "error", "detail": str(e)}
