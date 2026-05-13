@@ -215,6 +215,16 @@ async def _run(args) -> int:
         except Exception:
             pass
 
+        # ── 이미 보유 중인 종목 집합 (중복 매수 방지) ───────────────────
+        already_held: set[str] = set()
+        try:
+            held_balance = await account.fetch_balance()
+            already_held = {h.symbol for h in (held_balance.holdings or [])}
+            if already_held:
+                print(f"  ℹ️ 이미 보유 중: {', '.join(already_held)}")
+        except Exception:
+            pass
+
         pos_store = ActivePositionStore(args.pos_log)
 
         print(f"\n== 주문 실행 (BAR-OPS-17 LiveOrderGate, dry_run={args.dry_run}, 1분할 50%) ==")
@@ -249,7 +259,12 @@ async def _run(args) -> int:
                 print(f"  [SKIP] {r.symbol} {r.name:<16} 당일 SL 발동 종목 — 재매수 금지")
                 continue
 
-            # ④ 1분할(50%) 수량 계산
+            # ④ 이미 보유 중인 종목 중복 매수 방지
+            if r.symbol in already_held:
+                print(f"  [SKIP] {r.symbol} {r.name:<16} 이미 보유 중 — 중복 매수 금지")
+                continue
+
+            # ⑤ 1분할(50%) 수량 계산
             tranche1_qty = max(1, round(r.recommended_qty * 0.5))
 
             try:
@@ -261,7 +276,7 @@ async def _run(args) -> int:
                     f"(1/3분할, 전체 {r.recommended_qty}) order_no={result.order_no}"
                 )
 
-                # ⑤ active_positions 저장 (전략 정보 + 분할 계획)
+                # ⑥ active_positions 저장 (전략 정보 + 분할 계획)
                 best_strategy = max(
                     per_strategy_pnl,
                     key=lambda s: per_strategy_pnl.get(s, 0.0),

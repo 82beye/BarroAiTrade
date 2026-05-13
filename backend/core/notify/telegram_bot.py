@@ -119,16 +119,20 @@ class TelegramBot:
     async def run(self) -> None:
         """무한 polling. SIGINT/SIGTERM 으로만 종료."""
         self._running = True
+        _backoff = 5
+        _MAX_BACKOFF = 60
         logger.info("telegram bot started (whitelist=%s, handlers=%s)",
                     self._whitelist, list(self._handlers))
         while self._running:
             try:
                 await self.poll_once()
+                _backoff = 5  # 성공 시 리셋
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("poll cycle failed: %s — retrying in 5s", type(e).__name__)
-                await asyncio.sleep(5)
+                logger.warning("poll cycle failed: %s — retrying in %ds", type(e).__name__, _backoff)
+                await asyncio.sleep(_backoff)
+                _backoff = min(_backoff * 2, _MAX_BACKOFF)
 
     def stop(self) -> None:
         self._running = False

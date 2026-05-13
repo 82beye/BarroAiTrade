@@ -78,23 +78,42 @@ class KiwoomNativeOAuth:
         }
         owns = self._http is None
         client = self._http or httpx.AsyncClient(timeout=15)
+        _retries = 3
+        _retry_delay = 2.0
         try:
-            resp = await client.post(
-                url,
-                headers={"Content-Type": "application/json;charset=UTF-8"},
-                json=body,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except httpx.HTTPStatusError as exc:
-            logger.error(
-                "kiwoom-native token issue failed: status=%s url=%s",
-                exc.response.status_code, url,
-            )
-            raise
-        except Exception as exc:
-            logger.error("kiwoom-native token issue error: %s", type(exc).__name__)
-            raise
+            for attempt in range(_retries):
+                try:
+                    resp = await client.post(
+                        url,
+                        headers={"Content-Type": "application/json;charset=UTF-8"},
+                        json=body,
+                    )
+                    if resp.status_code == 429 and attempt < _retries - 1:
+                        wait = _retry_delay * (attempt + 1)
+                        logger.warning(
+                            "oauth 429 rate-limit — %.1fs 후 재시도 (%d/%d)",
+                            wait, attempt + 1, _retries,
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+                    resp.raise_for_status()
+                    data = resp.json()
+                    break
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 429 and attempt < _retries - 1:
+                        await asyncio.sleep(_retry_delay * (attempt + 1))
+                        continue
+                    logger.error(
+                        "kiwoom-native token issue failed: status=%s url=%s",
+                        exc.response.status_code, url,
+                    )
+                    raise
+                except Exception as exc:
+                    if attempt < _retries - 1:
+                        await asyncio.sleep(_retry_delay * (attempt + 1))
+                        continue
+                    logger.error("kiwoom-native token issue error: %s", type(exc).__name__)
+                    raise
         finally:
             if owns:
                 await client.aclose()

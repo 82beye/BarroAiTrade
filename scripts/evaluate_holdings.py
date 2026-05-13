@@ -65,7 +65,7 @@ async def _run(args) -> int:
     # PolicyConfig 자동 로드 (BAR-OPS-32) — CLI default 인 경우만 override
     cfg = PolicyConfigStore("data/policy.json").load()
     tp = args.tp if args.tp != 5.0 else cfg.take_profit_pct
-    sl = args.sl if args.sl != -2.0 else cfg.stop_loss_pct
+    sl = args.sl if args.sl != -4.0 else cfg.stop_loss_pct
     policy = ExitPolicy(
         take_profit_pct=Decimal(str(tp)),
         stop_loss_pct=Decimal(str(sl)),
@@ -159,7 +159,7 @@ async def _run(args) -> int:
 def main() -> None:
     ap = argparse.ArgumentParser(description="보유 종목 매도 시그널 평가 (BAR-OPS-20)")
     ap.add_argument("--tp", type=float, default=5.0, help="take_profit %% (기본 5.0)")
-    ap.add_argument("--sl", type=float, default=-2.0, help="stop_loss %% (기본 -2.0, policy.json 우선)")
+    ap.add_argument("--sl", type=float, default=-4.0, help="stop_loss %% (기본 -4.0, policy.json 우선)")
     ap.add_argument("--pos-log", default="data/active_positions.json",
                     help="활성 포지션 메타 경로")
     ap.add_argument("--auto-sell", action="store_true",
