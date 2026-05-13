@@ -79,8 +79,11 @@ class FZoneParams:
     # 종목 ATR% < min_atr_pct 시 진입 거부 — SL 폭(-1.5~-2%) 이 정상 일중 변동
     # 절반 이하면 SL 노이즈 발동 위험 큼. LG전자(ATR% 2.94%, win 0%, -627k)
     # 같은 저변동·고가 종목 제외 목적.
-    # 0 으로 두면 필터 비활성 (BEFORE 동작).
-    min_atr_pct: float = 0.035
+    #
+    # default 0.0 (필터 비활성) — BAR-44 baseline 합성 데이터 (변동성 낮음) 회귀 보존.
+    # 운영 적용: 진입점에서 명시 override (예: scripts/simulate_leaders.py).
+    # 권장값: 0.035 (운영 8 종목 백테스트 +186k 검증, F1).
+    min_atr_pct: float = 0.0
     atr_n: int = 14
 
 

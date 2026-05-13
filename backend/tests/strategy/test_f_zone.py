@@ -135,29 +135,30 @@ class TestFZoneVolatilityFilter:
         atr = FZoneStrategy._atr_pct(candles, n=14)
         assert 0.04 <= atr <= 0.06, f"atr={atr}, ~5% 예상"
 
-    def test_low_atr_rejected(self):
-        """ATR% < min_atr_pct (default 3.5%) 종목은 진입 거부."""
-        from backend.core.strategy.f_zone import FZoneStrategy
-        from backend.models.strategy import AnalysisContext
+    def test_low_atr_rejected_when_filter_enabled(self):
+        """명시 override min_atr_pct=0.035 시 ATR% < 3.5% 종목은 진입 거부.
 
-        s = FZoneStrategy()
-        # ATR% 약 2% — 임계 3.5% 미만
-        candles = self._candles(0.02, n=70)
-        ctx = AnalysisContext(symbol="LOW_VOL", candles=candles, market_type=MarketType.STOCK)
-        result = s._analyze_v2(ctx)
-        assert result is None, "저변동 종목 진입 거부 실패"
-
-    def test_filter_disabled_when_min_zero(self):
-        """min_atr_pct=0 → 필터 비활성, BEFORE 동작 보존."""
+        운영 진입점(scripts/simulate_leaders.py)에서 명시 적용 — F1 효과 유지.
+        default 는 0.0 (BAR-44 baseline 회귀 보존).
+        """
         from backend.core.strategy.f_zone import FZoneParams, FZoneStrategy
         from backend.models.strategy import AnalysisContext
 
-        s = FZoneStrategy(FZoneParams(min_atr_pct=0.0))
+        s = FZoneStrategy(FZoneParams(min_atr_pct=0.035))
+        # ATR% 약 2% — 명시 임계 3.5% 미만
         candles = self._candles(0.02, n=70)
         ctx = AnalysisContext(symbol="LOW_VOL", candles=candles, market_type=MarketType.STOCK)
-        # 임펄스/눌림 조건 미충족이라 None 이긴 하지만 ATR 필터 통과는 확인됨
-        # (filter 통과 후 다른 단계에서 None) — exception 안 나면 OK
-        s._analyze_v2(ctx)  # 예외 없으면 통과
+        result = s._analyze_v2(ctx)
+        assert result is None, "저변동 종목 진입 거부 실패 (명시 override)"
+
+    def test_default_filter_disabled(self):
+        """default min_atr_pct=0.0 — BAR-44 baseline 회귀 보존."""
+        from backend.core.strategy.f_zone import FZoneStrategy
+
+        s = FZoneStrategy()
+        assert s.params.min_atr_pct == 0.0, (
+            "default min_atr_pct 가 0 이 아님 — baseline 회귀 깨질 위험"
+        )
 
 
 class TestFZoneBaselineRegression:

@@ -14,7 +14,8 @@ def test_load_missing_returns_defaults(tmp_path):
     store = PolicyConfigStore(tmp_path / "policy.json")
     cfg = store.load()
     assert cfg.min_score == 0.5
-    assert cfg.stop_loss_pct == -2.0
+    # main 9c4ed24 fix(strategy): SL -2 → -4 정책 변경
+    assert cfg.stop_loss_pct == -4.0
     assert cfg.max_per_position == 0.30
 
 

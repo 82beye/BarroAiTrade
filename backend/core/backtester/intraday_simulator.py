@@ -150,9 +150,12 @@ def _build_strategies(
     out = []
     for sid in strategy_ids:
         if sid == "f_zone":
-            from backend.core.strategy.f_zone import FZoneStrategy
+            from backend.core.strategy.f_zone import FZoneParams, FZoneStrategy
 
-            out.append(FZoneStrategy())
+            # F1 변동성 필터를 운영·시뮬 진입점에서 명시 적용 (default 는 0.0 으로
+            # BAR-44 baseline 회귀 보존, 여기서만 0.035 활성화).
+            # 2026-05-14 백테스트 +186k 효과 검증 — LESSON_S1_NORMALIZATION 참조.
+            out.append(FZoneStrategy(FZoneParams(min_atr_pct=0.035)))
         elif sid == "sf_zone":
             from backend.core.strategy.sf_zone import SFZoneStrategy
 
