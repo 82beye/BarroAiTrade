@@ -12,6 +12,7 @@ tags: [index, report]
 
 | 피처 | 문서 | 날짜 | 상태 |
 |------|------|------|------|
+| 🆕 **BAR-OPS-09 후속** — 전략 시그널·청산 분리 + S1 정규화 | [[features/BAR-OPS-09-strategy-refactor-2026-05-14.report\|보기]] | 2026-05-14 | ✅ 완료 |
 | 🎉 **Phase 1 종합 회고** | [[PHASE-1-summary\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-50 ScalpingConsensus (Phase 1 마지막, Match 97%) | [[bar-50-scalping-consensus.report\|보기]] | 2026-05-06 | ✅ 완료 |
 | BAR-49 38스윙 신규 (Phase 1, Match 96%) | [[bar-49-swing-38.report\|보기]] | 2026-05-06 | ✅ 완료 |
