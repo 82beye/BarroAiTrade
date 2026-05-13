@@ -15,7 +15,12 @@ from backend.core.backtester import (
     TradeRecord,
     load_csv_candles,
 )
-from backend.core.backtester.intraday_simulator import _build_strategies
+from backend.core.backtester.intraday_simulator import (
+    _atr_pct,
+    _build_strategies,
+    _exit_plan_for_strategy,
+    _scaled_exit_plan,
+)
 from backend.core.strategy.scalping_consensus import ScalpingConsensusStrategy
 from backend.models.market import MarketType, OHLCV
 
@@ -254,3 +259,118 @@ class TestScalpingProviderInjection:
         # 정상 완료 + 결과 객체 검증 (trades 수는 ScalpingCoordinator 판단에 따라 0+)
         assert "scalping_consensus" in result.strategies_run
         assert isinstance(result.pnl_by_strategy.get("scalping_consensus"), Decimal)
+
+
+# ─── D: ATR 기반 동적 SL (2026-05-14) ──────────────────────────────────────
+
+
+class TestAtrDynamicSL:
+    """ATR 기반 동적 SL — 종목 변동성 적응 (LESSON_FZONE_MAX_GAIN.md 후속)."""
+
+    def _flat_then_volatile(self, n: int = 30) -> list[OHLCV]:
+        """일정 가격 base 100 + 마지막 봉만 high-low 변동성 큰 합성."""
+        out = []
+        t0 = datetime(2026, 5, 1, 9, 0)
+        for i in range(n - 1):
+            out.append(OHLCV(
+                symbol="TEST", timestamp=t0 + timedelta(minutes=i),
+                open=100, high=101, low=99, close=100, volume=1000,
+                market_type=MarketType.STOCK,
+            ))
+        # 마지막 봉: TR 큰 봉 (high=110, low=95 → TR=15, atr%≈3% 정도)
+        out.append(OHLCV(
+            symbol="TEST", timestamp=t0 + timedelta(minutes=n - 1),
+            open=100, high=110, low=95, close=100, volume=2000,
+            market_type=MarketType.STOCK,
+        ))
+        return out
+
+    def test_atr_pct_basic(self):
+        """평탄 캔들의 ATR% 는 약 2% (high-low=2 / close=100)."""
+        out = []
+        t0 = datetime(2026, 5, 1, 9, 0)
+        for i in range(20):
+            out.append(OHLCV(
+                symbol="X", timestamp=t0 + timedelta(minutes=i),
+                open=100, high=101, low=99, close=100, volume=1000,
+                market_type=MarketType.STOCK,
+            ))
+        atr_pct = _atr_pct(out, n=14)
+        assert Decimal("0.015") <= atr_pct <= Decimal("0.025"), (
+            f"평탄 캔들 atr_pct={atr_pct}, 약 2% 예상"
+        )
+
+    def test_atr_pct_empty_safe(self):
+        """캔들 1개 이하 → 0 반환 (안전)."""
+        assert _atr_pct([], n=14) == Decimal("0")
+
+    def test_scaled_exit_plan_default_sl(self):
+        """sl_pct 미지정 시 default -1.5% 적용 (기존 동작 보존)."""
+        plan = _scaled_exit_plan(Decimal("100"))
+        assert plan.stop_loss.fixed_pct == Decimal("-0.015")
+
+    def test_scaled_exit_plan_custom_sl(self):
+        """sl_pct 지정 시 적용."""
+        plan = _scaled_exit_plan(Decimal("100"), sl_pct=Decimal("-0.04"))
+        assert plan.stop_loss.fixed_pct == Decimal("-0.04")
+
+    def test_exit_plan_fzone_uses_fixed(self):
+        """f_zone → 고정 _scaled_exit_plan (BEFORE 동작 보존)."""
+        plan = _exit_plan_for_strategy(
+            "f_zone", Decimal("100"), self._flat_then_volatile(30),
+        )
+        assert plan.stop_loss.fixed_pct == Decimal("-0.015")
+        # 고정 TP +3/+5/+7%
+        assert plan.take_profits[0].price == Decimal("103")
+        assert plan.take_profits[1].price == Decimal("105")
+        assert plan.take_profits[2].price == Decimal("107")
+
+    def test_exit_plan_sfzone_uses_atr(self):
+        """sf_zone → ATR 기반 동적 TP·SL. R:R 균형 유지 (SL=2×ATR, TP=1.5/2.5/3.5×ATR)."""
+        candles = self._flat_then_volatile(30)
+        plan = _exit_plan_for_strategy("sf_zone", Decimal("100"), candles)
+        # SL 은 ATR×2, floor 1.5% / cap 8% 클램프 적용 후 음수
+        assert plan.stop_loss.fixed_pct < Decimal("0")
+        # SL 절대값 >= floor 1.5% × 2 = 3% (clamp 적용)
+        assert plan.stop_loss.fixed_pct <= Decimal("-0.03"), (
+            f"sf_zone SL={plan.stop_loss.fixed_pct} — 평탄+큰봉 1개 시 |SL|≥3% 예상"
+        )
+        # TP1 < TP2 < TP3 (오름차순) — R:R 균형
+        tps = [t.price for t in plan.take_profits]
+        assert tps[0] < tps[1] < tps[2]
+
+    def test_exit_plan_other_strategies_use_fixed(self):
+        """gold_zone, swing_38, scalping_consensus → 고정 (BEFORE 보존)."""
+        candles = self._flat_then_volatile(30)
+        for sid in ("gold_zone", "swing_38", "scalping_consensus"):
+            plan = _exit_plan_for_strategy(sid, Decimal("100"), candles)
+            assert plan.stop_loss.fixed_pct == Decimal("-0.015"), f"{sid} SL drift"
+            assert plan.take_profits[0].price == Decimal("103"), f"{sid} TP drift"
+
+    def test_sfzone_atr_floor_clamp(self):
+        """sf_zone — 극도로 평탄한 캔들이면 SL floor (×2 적용 후 −3%) 로 클램프."""
+        out = []
+        t0 = datetime(2026, 5, 1, 9, 0)
+        for i in range(20):
+            out.append(OHLCV(
+                symbol="X", timestamp=t0 + timedelta(minutes=i),
+                open=100, high=100.05, low=99.95, close=100,
+                volume=1000, market_type=MarketType.STOCK,
+            ))
+        plan = _exit_plan_for_strategy("sf_zone", Decimal("100"), out)
+        # ATR≈0.001, floor 0.015 적용 → SL = -0.015×2 = -0.03
+        assert plan.stop_loss.fixed_pct == Decimal("-0.030")
+
+    def test_sfzone_atr_cap_clamp(self):
+        """sf_zone — 극도로 변동성 큰 캔들이면 SL cap (×2 = −16%) 로 클램프."""
+        out = []
+        t0 = datetime(2026, 5, 1, 9, 0)
+        for i in range(20):
+            out.append(OHLCV(
+                symbol="X", timestamp=t0 + timedelta(minutes=i),
+                open=100, high=130, low=70, close=100,
+                volume=1000, market_type=MarketType.STOCK,
+            ))
+        plan = _exit_plan_for_strategy("sf_zone", Decimal("100"), out)
+        # ATR≈0.60, cap 0.08 적용 → SL = -0.08×2 = -0.16
+        assert plan.stop_loss.fixed_pct == Decimal("-0.16")

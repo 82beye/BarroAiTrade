@@ -264,6 +264,8 @@ class IntradaySimulator:
         for strategy, sid in zip(strategies_obj, strategy_ids):
             position: Optional[PositionState] = None
             pending_entry: bool = False     # OPS-35: 시그널 캔들 → 다음 open 진입
+            # 진입 시점에 1회 결정 → 청산까지 유지. 전략별 분기 (sf_zone=ATR, 그 외=고정).
+            current_plan: Optional[ExitPlan] = None
             for i in range(self._warmup, len(candles)):
                 window = candles[: i + 1]
                 current = candles[i]
@@ -278,6 +280,7 @@ class IntradaySimulator:
                         qty=self._qty, initial_qty=self._qty,
                         entry_time=current.timestamp,
                     )
+                    current_plan = _exit_plan_for_strategy(sid, entry_price, window)
                     trades.append(TradeRecord(
                         strategy_id=sid, symbol=symbol, side="buy",
                         qty=self._qty, price=entry_price,
@@ -310,6 +313,7 @@ class IntradaySimulator:
                                 qty=self._qty, initial_qty=self._qty,
                                 entry_time=current.timestamp,
                             )
+                            current_plan = _exit_plan_for_strategy(sid, entry_price, window)
                             trades.append(TradeRecord(
                                 strategy_id=sid, symbol=symbol, side="buy",
                                 qty=self._qty, price=entry_price,
@@ -317,7 +321,7 @@ class IntradaySimulator:
                             ))
                 else:
                     # 3. 청산 평가 — bar high/low 터치 (OPS-35 exit_on_intrabar)
-                    plan = _scaled_exit_plan(position.entry_price)
+                    plan = current_plan or _scaled_exit_plan(position.entry_price)
                     if self._exit_intrabar:
                         # high → TP 평가 / low → SL 평가
                         # 두 평가를 동일 캔들에서 — TP 우선 (보수적 가정: 위로 먼저 갔다고 봄)
@@ -421,17 +425,100 @@ class IntradaySimulator:
         return pos, orders
 
 
-def _scaled_exit_plan(entry_price: Decimal) -> ExitPlan:
-    """entry_price 기준 +3/+5/+7% TP, -1.5% SL."""
+def _scaled_exit_plan(
+    entry_price: Decimal,
+    sl_pct: Decimal = Decimal("-0.015"),
+) -> ExitPlan:
+    """entry_price 기준 +3/+5/+7% TP, SL(default -1.5%). 고정 정책 — 대부분 전략 default."""
     return ExitPlan(
         take_profits=[
             TakeProfitTier(price=entry_price * Decimal("1.03"), qty_pct=Decimal("0.33")),
             TakeProfitTier(price=entry_price * Decimal("1.05"), qty_pct=Decimal("0.33")),
             TakeProfitTier(price=entry_price * Decimal("1.07"), qty_pct=Decimal("0.34")),
         ],
-        stop_loss=StopLoss(fixed_pct=Decimal("-0.015")),
+        stop_loss=StopLoss(fixed_pct=sl_pct),
         breakeven_trigger=Decimal("0.01"),
     )
+
+
+def _sfzone_atr_exit_plan(
+    entry_price: Decimal,
+    candles_window: list[OHLCV],
+    n: int = 14,
+    sl_multiplier: Decimal = Decimal("2.0"),
+    tp_multipliers: tuple[Decimal, Decimal, Decimal] = (
+        Decimal("1.5"), Decimal("2.5"), Decimal("3.5"),
+    ),
+    sl_floor_pct: Decimal = Decimal("0.015"),
+    sl_cap_pct: Decimal = Decimal("0.08"),
+) -> ExitPlan:
+    """SF존 전용 ExitPlan — TP·SL 모두 ATR 기반 (R:R 균형).
+
+    종목 변동성에 비례한 동적 TP/SL — fixed +3/+5/+7%와 −1.5%가 변동성 큰 종목에서
+    부적합한 문제를 종목별로 해소. sl_floor·sl_cap 으로 극단값 클램프.
+
+    SFZoneStrategy 전용 분기 — 다른 전략은 _scaled_exit_plan 그대로 사용.
+    """
+    atr_pct = _atr_pct(candles_window, n=n)
+    atr_clamped = max(sl_floor_pct, min(atr_pct, sl_cap_pct))
+    sl_pct = -atr_clamped * sl_multiplier
+    # 클램프: SL 도 [-floor×mult, -cap×mult] 안에. sf-zone 정상 SL 범위 −3~−16%.
+    if sl_pct < -sl_cap_pct * Decimal("2"):
+        sl_pct = -sl_cap_pct * Decimal("2")
+
+    tp1_pct, tp2_pct, tp3_pct = (atr_clamped * m for m in tp_multipliers)
+    return ExitPlan(
+        take_profits=[
+            TakeProfitTier(price=entry_price * (Decimal("1") + tp1_pct),
+                           qty_pct=Decimal("0.33"), condition="SF ATR TP1"),
+            TakeProfitTier(price=entry_price * (Decimal("1") + tp2_pct),
+                           qty_pct=Decimal("0.33"), condition="SF ATR TP2"),
+            TakeProfitTier(price=entry_price * (Decimal("1") + tp3_pct),
+                           qty_pct=Decimal("0.34"), condition="SF ATR TP3"),
+        ],
+        stop_loss=StopLoss(fixed_pct=sl_pct),
+        breakeven_trigger=Decimal("0.01"),
+    )
+
+
+def _exit_plan_for_strategy(
+    strategy_id: str,
+    entry_price: Decimal,
+    candles_window: list[OHLCV],
+) -> ExitPlan:
+    """전략별 ExitPlan 분기 — '100% 중복은 공유, 나머지는 별도' 원칙.
+
+    - sf_zone: ATR 기반 동적 TP·SL (변동성 적응)
+    - 그 외 (f_zone, gold_zone, swing_38, scalping_consensus): 고정 +3/+5/+7%, −1.5%
+    """
+    if strategy_id == "sf_zone":
+        return _sfzone_atr_exit_plan(entry_price, candles_window)
+    return _scaled_exit_plan(entry_price)
+
+
+def _atr_pct(candles_window: list[OHLCV], n: int = 14) -> Decimal:
+    """최근 n봉의 True Range 평균을 마지막 close 로 나눈 비율 (예: 0.025 = 2.5%).
+
+    분봉/일봉 무관 동일 공식. 종목별 변동성 적응 SL 계산에 사용.
+    """
+    if len(candles_window) < 2:
+        return Decimal("0")
+    n = min(n, len(candles_window) - 1)
+    trs = []
+    for i in range(1, n + 1):
+        c = candles_window[-i]
+        prev = candles_window[-i - 1]
+        tr = max(
+            c.high - c.low,
+            abs(c.high - prev.close),
+            abs(c.low - prev.close),
+        )
+        trs.append(tr)
+    atr = sum(trs) / len(trs) if trs else 0.0
+    last_close = candles_window[-1].close
+    if last_close <= 0:
+        return Decimal("0")
+    return Decimal(str(atr / last_close))
 
 
 __all__ = [

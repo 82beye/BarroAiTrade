@@ -47,6 +47,10 @@ class FZoneParams:
 
     # 기준봉 조건
     impulse_min_gain_pct: float = 0.03        # 기준봉 최소 상승률: 3%
+    impulse_max_gain_pct: float = 1.0         # 기준봉 최대 상승률: default 무제한 (BEFORE 시그널 보존).
+                                              # 2026-05-14 LESSON_FZONE_MAX_GAIN.md — max 7% 적용 시
+                                              # winning 시그널까지 죽임이 확인되어 default 무제한 유지.
+                                              # 필요 시 호출자가 명시 override (예: 0.07) 가능.
     impulse_volume_ratio: float = 2.0         # 기준봉 거래량 배율 (평균 대비): 200%
     impulse_lookback: int = 5                 # 기준봉 탐색 과거 봉 수
 
@@ -70,6 +74,14 @@ class FZoneParams:
 
     # 이동평균선 계산용 데이터 최소 수
     min_candles: int = 60
+
+    # 변동성 필터 (F1, 2026-05-14)
+    # 종목 ATR% < min_atr_pct 시 진입 거부 — SL 폭(-1.5~-2%) 이 정상 일중 변동
+    # 절반 이하면 SL 노이즈 발동 위험 큼. LG전자(ATR% 2.94%, win 0%, -627k)
+    # 같은 저변동·고가 종목 제외 목적.
+    # 0 으로 두면 필터 비활성 (BEFORE 동작).
+    min_atr_pct: float = 0.035
+    atr_n: int = 14
 
 
 # ── 분석 결과 ─────────────────────────────────────────────────────────────────
@@ -136,6 +148,16 @@ class FZoneStrategy(Strategy):
         if len(candles) < p.min_candles:
             logger.debug("%s: 캔들 수 부족 (%d < %d)", symbol, len(candles), p.min_candles)
             return None
+
+        # F1: 변동성 필터 — ATR% 이 임계 미만이면 진입 거부 (저변동 종목 제외)
+        if p.min_atr_pct > 0:
+            atr_pct = self._atr_pct(candles, n=p.atr_n)
+            if atr_pct < p.min_atr_pct:
+                logger.debug(
+                    "%s: ATR%% 임계 미달 (%.3f < %.3f) — f_zone 진입 거부",
+                    symbol, atr_pct, p.min_atr_pct,
+                )
+                return None
 
         # pandas DataFrame으로 변환 (오래된 → 최신 순)
         df = self._to_dataframe(candles)
@@ -274,7 +296,12 @@ class FZoneStrategy(Strategy):
             gain_pct = (row["close"] - row["open"]) / row["open"]
             vol_ratio = row["volume"] / avg_volume
 
-            if gain_pct >= p.impulse_min_gain_pct and vol_ratio >= p.impulse_volume_ratio:
+            # 과열(+impulse_max_gain_pct 초과) 임펄스는 거부 — 단기 정점 매수 패턴 차단
+            # sf_zone 은 default max=1.0 으로 사실상 무제한 (전략별 분리)
+            if (
+                p.impulse_min_gain_pct <= gain_pct <= p.impulse_max_gain_pct
+                and vol_ratio >= p.impulse_volume_ratio
+            ):
                 if gain_pct > best_gain:
                     best_gain = gain_pct
                     best_idx = i
@@ -448,6 +475,31 @@ class FZoneStrategy(Strategy):
         analysis.reason = f"[{zone_label}] " + " | ".join(reasons)
 
     # ── 유틸리티 ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _atr_pct(candles: List[OHLCV], n: int = 14) -> float:
+        """True Range 평균 / 마지막 close 비율 — 종목 변동성 측정.
+
+        IntradaySimulator._atr_pct 와 동일 공식. 순환 import 회피 위해 정적 메서드로 자체 구현.
+        """
+        if len(candles) < 2:
+            return 0.0
+        n = min(n, len(candles) - 1)
+        trs: list[float] = []
+        for i in range(1, n + 1):
+            c = candles[-i]
+            prev = candles[-i - 1]
+            tr = max(
+                c.high - c.low,
+                abs(c.high - prev.close),
+                abs(c.low - prev.close),
+            )
+            trs.append(tr)
+        atr = sum(trs) / len(trs) if trs else 0.0
+        last_close = candles[-1].close
+        if last_close <= 0:
+            return 0.0
+        return atr / last_close
 
     @staticmethod
     def _to_dataframe(candles: List[OHLCV]) -> pd.DataFrame:
