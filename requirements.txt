@@ -1,0 +1,14 @@
+# BarroAiTrade — 진입용 requirements.txt
+#
+# 실제 의존성은 backend/requirements.txt 에 정의됨.
+# root 에서 pip install -r requirements.txt 로도 동일 동작.
+#
+# 사용:
+#   python3.14 -m venv .venv
+#   source .venv/bin/activate
+#   pip install -r requirements.txt
+#
+# 또는 backend 직접:
+#   pip install -r backend/requirements.txt
+
+-r backend/requirements.txt

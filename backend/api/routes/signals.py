@@ -95,9 +95,53 @@ async def get_recent_signals(
     """
     logger.info("최근 신호 %d개 조회", limit)
 
-    # TODO: Redis/메모리 캐시에서 최근 신호 조회
-    return {
-        "signals": [],
-        "timestamp": None,
-        "status": "not_ready"
-    }
+    import os
+    from datetime import datetime, timezone
+    from pydantic import SecretStr
+    try:
+        from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
+        from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
+
+        # 모듈 수준 싱글톤 — 토큰 캐시 유지
+        if not hasattr(get_recent_signals, "_oauth"):
+            get_recent_signals._oauth = KiwoomNativeOAuth(
+                app_key=SecretStr(os.environ["KIWOOM_APP_KEY"]),
+                app_secret=SecretStr(os.environ["KIWOOM_APP_SECRET"]),
+                base_url=os.environ.get("KIWOOM_BASE_URL", "https://mockapi.kiwoom.com"),
+            )
+        oauth = get_recent_signals._oauth
+        # 60초 캐시 — rank API rate limit 방어
+        import time
+        cache = getattr(get_recent_signals, "_cache", None)
+        if cache and time.time() - cache["ts"] < 60:
+            return cache["data"]
+
+        picker = KiwoomNativeLeaderPicker(oauth=oauth, min_score=0.5)
+        leaders = await picker.pick(top_n=limit)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        signals = [
+            {
+                "symbol": l.symbol,
+                "name": getattr(l, "name", ""),
+                "score": round(float(getattr(l, "score", 0)), 3),
+                "direction": "BUY",
+                "flu_rate": float(getattr(l, "flu_rate", 0)),
+                "cur_price": float(getattr(l, "cur_price", 0)),
+                "ts": now_iso,
+            }
+            for l in leaders
+        ]
+        result = {
+            "signals": signals,
+            "timestamp": now_iso,
+            "status": "ok",
+        }
+        get_recent_signals._cache = {"ts": time.time(), "data": result}
+        return result
+    except Exception as e:
+        logger.warning("시그널 조회 실패: %s", e)
+        # 캐시된 데이터 있으면 반환
+        cache = getattr(get_recent_signals, "_cache", None)
+        if cache:
+            return cache["data"]
+        return {"signals": [], "timestamp": None, "status": "error", "detail": str(e)}

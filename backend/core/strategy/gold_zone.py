@@ -38,13 +38,14 @@ class GoldZoneParams:
     bb_period: int = 20
     bb_std: float = 2.0
     fib_lookback: int = 30
-    fib_min: float = 0.382
-    fib_max: float = 0.618
+    fib_min: float = 0.236
+    fib_max: float = 0.786
     rsi_period: int = 14
-    rsi_oversold: float = 30.0
-    rsi_recovery: float = 40.0
-    bb_proximity_pct: float = 0.01
+    rsi_oversold: float = 35.0
+    rsi_recovery: float = 38.0
+    bb_proximity_pct: float = 0.03
     min_candles: int = 60
+    min_conditions: int = 2          # 최소 충족 조건 수 (2/3 허용)
 
 
 class GoldZoneStrategy(Strategy):
@@ -66,12 +67,13 @@ class GoldZoneStrategy(Strategy):
         fib_score = self._fib_score(df)
         rsi_score = self._rsi_score(df)
 
-        # 3 조건 모두 충족 (각 score > 0)
-        if bb_score == 0 or fib_score == 0 or rsi_score == 0:
+        # 최소 min_conditions 개 조건 충족 (기본 2/3)
+        conditions_met = (bb_score > 0) + (fib_score > 0) + (rsi_score > 0)
+        if conditions_met < p.min_conditions:
             return None
 
         score = bb_score * 0.4 + fib_score * 0.3 + rsi_score * 0.3
-        if score < 0.3:
+        if score < 0.25:
             return None
 
         return EntrySignal(

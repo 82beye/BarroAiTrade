@@ -239,24 +239,38 @@ class KiwoomNativeAccountFetcher:
         client = self._http or httpx.AsyncClient(timeout=15)
         owns = self._http is None
         url = f"{self._oauth.base_url}{_ACCT_PATH}"
+        _retries = 3
+        _retry_delay = 1.0
         try:
-            resp = await client.post(
-                url,
-                headers={
-                    "authorization": f"Bearer {token.access_token.get_secret_value()}",
-                    "content-type": "application/json;charset=UTF-8",
-                    "cont-yn": "N",
-                    "next-key": "",
-                    "api-id": tr_id,
-                },
-                json=body,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as exc:
-            logger.error("kiwoom-native account fetch failed: tr=%s err=%s",
-                         tr_id, type(exc).__name__)
-            raise
+            for attempt in range(_retries):
+                try:
+                    resp = await client.post(
+                        url,
+                        headers={
+                            "authorization": f"Bearer {token.access_token.get_secret_value()}",
+                            "content-type": "application/json;charset=UTF-8",
+                            "cont-yn": "N",
+                            "next-key": "",
+                            "api-id": tr_id,
+                        },
+                        json=body,
+                    )
+                    if resp.status_code == 429 and attempt < _retries - 1:
+                        wait = _retry_delay * (attempt + 1)
+                        logger.warning("account 429 rate-limit tr=%s — %.1fs 후 재시도 (%d/%d)",
+                                       tr_id, wait, attempt + 1, _retries)
+                        await asyncio.sleep(wait)
+                        continue
+                    resp.raise_for_status()
+                    data = resp.json()
+                    break
+                except Exception as exc:
+                    if attempt < _retries - 1:
+                        await asyncio.sleep(_retry_delay * (attempt + 1))
+                        continue
+                    logger.error("kiwoom-native account fetch failed: tr=%s err=%s",
+                                 tr_id, type(exc).__name__)
+                    raise
         finally:
             if owns:
                 await client.aclose()

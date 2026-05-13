@@ -37,6 +37,7 @@ from backend.core.gateway.kiwoom_native_rank import (
     KiwoomNativeLeaderPicker,
     LeaderCandidate,
 )
+from backend.core.journal.active_positions import ActivePositionStore
 from backend.core.journal.policy_config import PolicyConfigStore
 from backend.core.journal.simulation_log import SimulationLogEntry, SimulationLogger
 from backend.core.notify.telegram import (
@@ -174,8 +175,51 @@ async def _run(args) -> int:
         account = KiwoomNativeAccountFetcher(oauth=oauth)
         deposit = await account.fetch_deposit()
         balance = await account.fetch_balance()
+
+        # ── 필터링을 자금 배분 **전에** 적용 (예산 낭비 방지) ──────────
+        # 당일 SL 종목
+        today_sl_symbols: set[str] = set()
+        try:
+            import csv as _csv
+            audit_path = Path(args.audit_log)
+            if audit_path.exists():
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                with audit_path.open(newline="", encoding="utf-8") as f:
+                    for row in _csv.DictReader(f):
+                        if row.get("ts", "").startswith(today) and row.get("action") == "ORDERED" \
+                                and row.get("side") == "sell":
+                            today_sl_symbols.add(row["symbol"])
+        except Exception:
+            pass
+
+        # 이미 보유 중인 종목
+        already_held: set[str] = set()
+        try:
+            already_held = {h.symbol for h in (balance.holdings or [])}
+        except Exception:
+            pass
+
+        filtered_leaders: list[LeaderCandidate] = []
+        for c in leaders:
+            if c.flu_rate >= 25.0:
+                print(f"  [PRE-SKIP] {c.symbol} {c.name:<16} 상한가 근접 ({c.flu_rate:+.1f}%)")
+                continue
+            if c.cur_price < 5_000:
+                print(f"  [PRE-SKIP] {c.symbol} {c.name:<16} 저가주 ({c.cur_price:,.0f}원)")
+                continue
+            if c.symbol in today_sl_symbols:
+                print(f"  [PRE-SKIP] {c.symbol} {c.name:<16} 당일 SL 발동 종목")
+                continue
+            if c.symbol in already_held:
+                print(f"  [PRE-SKIP] {c.symbol} {c.name:<16} 이미 보유 중")
+                continue
+            filtered_leaders.append(c)
+
+        if already_held:
+            print(f"  ℹ️ 이미 보유 중: {', '.join(already_held)}")
+
         candidates_for_gate = [
-            (c.symbol, c.name, Decimal(str(c.cur_price))) for c in leaders
+            (c.symbol, c.name, Decimal(str(c.cur_price))) for c in filtered_leaders
         ]
         gate_result = evaluate_risk_gate(
             deposit=deposit, balance=balance,
@@ -199,7 +243,9 @@ async def _run(args) -> int:
             )
 
     if args.execute and gate_result:
-        print(f"\n== 주문 실행 (BAR-OPS-17 LiveOrderGate, dry_run={args.dry_run}) ==")
+        pos_store = ActivePositionStore(args.pos_log)
+
+        print(f"\n== 주문 실행 (BAR-OPS-17 LiveOrderGate, dry_run={args.dry_run}, 1분할 50%) ==")
         executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
         gate = LiveOrderGate(
             executor=executor,
@@ -208,24 +254,47 @@ async def _run(args) -> int:
                 daily_loss_limit_pct=Decimal(str(args.daily_loss_limit)),
                 daily_max_orders=args.daily_max_orders,
             ),
-            notifier=notifier,                  # OPS-22: 차단 시 자동 알림
+            notifier=notifier,
         )
         executed = 0
         for r in gate_result.recommendations:
             if r.blocked or r.recommended_qty <= 0:
                 continue
+
+            # 1분할(50%) 수량 계산
+            tranche1_qty = max(1, round(r.recommended_qty * 0.5))
+
             try:
-                result = await gate.place_buy(symbol=r.symbol, qty=r.recommended_qty)
+                result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty)
                 executed += 1
                 tag = "DRY_RUN" if result.dry_run else "ORDERED"
                 print(
-                    f"  [{tag}] {r.symbol} {r.name:<16} qty={r.recommended_qty:>5} "
-                    f"order_no={result.order_no}"
+                    f"  [{tag}] {r.symbol} {r.name:<16} qty={tranche1_qty:>5}"
+                    f"(1/3분할, 전체 {r.recommended_qty}) order_no={result.order_no}"
                 )
+
+                # active_positions 저장 (전략 정보 + 분할 계획)
+                best_strategy = max(
+                    per_strategy_pnl,
+                    key=lambda s: per_strategy_pnl.get(s, 0.0),
+                ) if per_strategy_pnl else "swing_38"
+                leader = next((c for c in filtered_leaders if c.symbol == r.symbol), None)
+                pos_store.create_from_order(
+                    symbol=r.symbol,
+                    name=r.name,
+                    strategy=best_strategy,
+                    entry_price=float(r.cur_price),
+                    total_recommended_qty=r.recommended_qty,
+                    order_no=result.order_no,
+                    sl_pct=args.sl,
+                    flu_rate=float(leader.flu_rate) if leader else 0.0,
+                    score=float(leader.score) if leader else 0.0,
+                )
+
                 if notifier:
                     try:
                         await notifier.send(format_buy_alert(
-                            r.symbol, r.name, r.recommended_qty,
+                            r.symbol, r.name, tranche1_qty,
                             result.order_no, result.dry_run,
                         ))
                     except Exception as te:
@@ -288,6 +357,14 @@ def main() -> None:
     ap.add_argument(
         "--audit-log", default="data/order_audit.csv",
         help="주문 감사 CSV 경로 (기본 data/order_audit.csv)",
+    )
+    ap.add_argument(
+        "--pos-log", default="data/active_positions.json",
+        help="활성 포지션 메타 경로 (기본 data/active_positions.json)",
+    )
+    ap.add_argument(
+        "--sl", type=float, default=-4.0,
+        help="분할매수 SL 기준 %% (기본 -4.0)",
     )
     ap.add_argument(
         "--daily-loss-limit", type=float, default=-3.0,

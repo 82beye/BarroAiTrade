@@ -38,7 +38,7 @@ class HoldingDecision:
 @dataclass(frozen=True)
 class ExitPolicy:
     take_profit_pct: Decimal = Decimal("5.0")
-    stop_loss_pct: Decimal = Decimal("-2.0")
+    stop_loss_pct: Decimal = Decimal("-4.0")
 
 
 def evaluate_holding(

@@ -93,24 +93,38 @@ class KiwoomNativeCandleFetcher:
         client = self._http or httpx.AsyncClient(timeout=15)
         owns = self._http is None
         url = f"{self._oauth.base_url}{_CHART_PATH}"
+        _retries = 3
+        _retry_delay = 1.0
         try:
-            resp = await client.post(
-                url,
-                headers={
-                    "authorization": f"Bearer {token.access_token.get_secret_value()}",
-                    "content-type": "application/json;charset=UTF-8",
-                    "cont-yn": "N",
-                    "next-key": "",
-                    "api-id": tr_id,
-                },
-                json=body,
-            )
-            resp.raise_for_status()
+            for attempt in range(_retries):
+                try:
+                    resp = await client.post(
+                        url,
+                        headers={
+                            "authorization": f"Bearer {token.access_token.get_secret_value()}",
+                            "content-type": "application/json;charset=UTF-8",
+                            "cont-yn": "N",
+                            "next-key": "",
+                            "api-id": tr_id,
+                        },
+                        json=body,
+                    )
+                    if resp.status_code == 429 and attempt < _retries - 1:
+                        wait = _retry_delay * (attempt + 1)
+                        logger.warning("chart 429 rate-limit tr=%s sym=%s — %.1fs 후 재시도 (%d/%d)",
+                                       tr_id, symbol, wait, attempt + 1, _retries)
+                        await asyncio.sleep(wait)
+                        continue
+                    resp.raise_for_status()
+                    break
+                except Exception as exc:
+                    if attempt < _retries - 1:
+                        await asyncio.sleep(_retry_delay * (attempt + 1))
+                        continue
+                    logger.error("kiwoom-native chart fetch failed: tr=%s sym=%s err=%s",
+                                 tr_id, symbol, type(exc).__name__)
+                    raise
             data = resp.json()
-        except Exception as exc:
-            logger.error("kiwoom-native chart fetch failed: tr=%s sym=%s err=%s",
-                         tr_id, symbol, type(exc).__name__)
-            raise
         finally:
             if owns:
                 await client.aclose()

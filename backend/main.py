@@ -45,7 +45,18 @@ async def lifespan(app: FastAPI):
     market = os.getenv("TRADING_MARKET", "stock")
     await telegram.notify_system_start(mode, market)
 
+    # 일일 리포트 스케줄러 시작 (매일 09:00 KST)
+    try:
+        from scripts.finance.telegram_integration.scheduler import start_scheduler, stop_scheduler
+        start_scheduler()
+        _log.info("일일 리포트 스케줄러 시작 완료")
+    except Exception as e:
+        _log.warning("스케줄러 시작 실패 (선택적 기능): %s", e)
+        stop_scheduler = lambda: None  # noqa: E731
+
     yield  # 서버 실행 중
+
+    stop_scheduler()
 
 
 app = FastAPI(
@@ -57,7 +68,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -73,6 +84,7 @@ from backend.api.routes.watchlist import router as watchlist_router
 from backend.api.routes.config import router as config_router
 from backend.api.routes.reports import router as reports_router
 from backend.api.routes.metrics import router as metrics_router  # BAR-43
+from backend.api.routes.logs import router as logs_router
 
 app.include_router(signals_router, prefix="/api")
 app.include_router(risk_router, prefix="/api")
@@ -82,6 +94,7 @@ app.include_router(positions_router, prefix="/api")
 app.include_router(watchlist_router, prefix="/api")
 app.include_router(config_router, prefix="/api")
 app.include_router(reports_router, prefix="/api")
+app.include_router(logs_router, prefix="/api")
 # BAR-43: /metrics (Prometheus exposition) — 단, prefix 없음 (Prometheus 표준 경로)
 app.include_router(metrics_router)
 

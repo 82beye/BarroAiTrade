@@ -29,6 +29,7 @@ from pydantic import SecretStr
 from backend.core.gateway.kiwoom_native_account import KiwoomNativeAccountFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
 from backend.core.gateway.kiwoom_native_orders import KiwoomNativeOrderExecutor
+from backend.core.journal.active_positions import ActivePositionStore
 from backend.core.journal.policy_config import PolicyConfigStore
 from backend.core.notify.telegram import TelegramNotifier, format_sell_alert
 from backend.core.risk.holding_evaluator import (
@@ -64,7 +65,7 @@ async def _run(args) -> int:
     # PolicyConfig 자동 로드 (BAR-OPS-32) — CLI default 인 경우만 override
     cfg = PolicyConfigStore("data/policy.json").load()
     tp = args.tp if args.tp != 5.0 else cfg.take_profit_pct
-    sl = args.sl if args.sl != -2.0 else cfg.stop_loss_pct
+    sl = args.sl if args.sl != -4.0 else cfg.stop_loss_pct
     policy = ExitPolicy(
         take_profit_pct=Decimal(str(tp)),
         stop_loss_pct=Decimal(str(sl)),
@@ -72,6 +73,62 @@ async def _run(args) -> int:
     decisions = evaluate_all(balance.holdings, policy)
     print(f"== 보유 종목 평가 ({len(decisions)} 종목, TP={tp}%, SL={sl}%) [policy.json] ==\n")
     print(render_decisions_table(decisions))
+
+    executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
+    notifier = TelegramNotifier.from_env() if args.telegram else None
+    gate = LiveOrderGate(
+        executor=executor, audit_path=args.audit_log,
+        policy=GatePolicy(daily_max_orders=args.daily_max_orders),
+        notifier=notifier,
+    )
+    pos_store = ActivePositionStore(args.pos_log)
+
+    # ── DCA 2·3분할 매수 체크 (SL 대상은 DCA 스킵) ─────────────────────────
+    # SL 종목에 추가매수하면 즉시 손절되므로, SL 대상을 먼저 파악 후 제외
+    sl_symbols = {d.symbol for d in decisions if d.signal == SellSignal.STOP_LOSS}
+
+    if args.auto_sell:
+        active_positions = pos_store.load_all()
+        dca_executed = 0
+        for h in balance.holdings:
+            # SL 대상 종목은 DCA 스킵
+            if h.symbol in sl_symbols:
+                continue
+            pos = active_positions.get(h.symbol)
+            if not pos:
+                continue
+            pending = pos.pending_tranches()
+            if not pending:
+                continue
+            cur_price = float(h.cur_price)
+            for tranche in pending:
+                # qty=0 방어 (원래 수량이 작을 때 25% → 0주)
+                if tranche.qty <= 0:
+                    continue
+                trigger_price = pos.entry_price * (1 + tranche.trigger_drop_pct / 100)
+                if cur_price > trigger_price:
+                    continue  # 아직 트리거 조건 미달
+                print(
+                    f"  [DCA-T{tranche.tranche}] {h.symbol} {h.name:<14} "
+                    f"qty={tranche.qty} 현재가={cur_price:,.0f} ≤ 트리거{trigger_price:,.0f}"
+                    f"({tranche.trigger_drop_pct:+.0f}%)"
+                )
+                try:
+                    r = await gate.place_buy(symbol=h.symbol, qty=tranche.qty)
+                    tag = "DRY_RUN" if r.dry_run else "ORDERED"
+                    print(f"    [{tag}] order_no={r.order_no}")
+                    # 트랜치 상태 업데이트
+                    tranche.status = "filled"
+                    tranche.order_no = r.order_no
+                    tranche.filled_price = cur_price
+                    from datetime import datetime, timezone
+                    tranche.filled_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                    pos_store.upsert(pos)
+                    dca_executed += 1
+                except Exception as e:
+                    print(f"    [BLOCKED] DCA 주문 실패: {e}")
+        if dca_executed:
+            print(f"\n  → DCA 분할매수 {dca_executed} 건 실행")
 
     if not args.auto_sell:
         return 0
@@ -82,13 +139,6 @@ async def _run(args) -> int:
         return 0
 
     print(f"\n== 자동 매도 ({len(sell_targets)} 종목, dry_run={args.dry_run}) ==")
-    executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
-    gate = LiveOrderGate(
-        executor=executor, audit_path=args.audit_log,
-        policy=GatePolicy(daily_max_orders=args.daily_max_orders),
-        notifier=TelegramNotifier.from_env() if args.telegram else None,  # OPS-22
-    )
-    notifier = TelegramNotifier.from_env() if args.telegram else None
     for d in sell_targets:
         try:
             r = await gate.place_sell(symbol=d.symbol, qty=d.qty)
@@ -97,6 +147,9 @@ async def _run(args) -> int:
                 f"  [{tag}] {d.symbol} {d.name:<14} qty={d.qty:>5} "
                 f"signal={d.signal.value:<12} order_no={r.order_no}"
             )
+            # 전량 매도 시 active_positions 정리
+            if d.signal == SellSignal.STOP_LOSS or d.signal == SellSignal.TAKE_PROFIT:
+                pos_store.remove(d.symbol)
             if notifier:
                 try:
                     await notifier.send(format_sell_alert(
@@ -115,7 +168,9 @@ async def _run(args) -> int:
 def main() -> None:
     ap = argparse.ArgumentParser(description="보유 종목 매도 시그널 평가 (BAR-OPS-20)")
     ap.add_argument("--tp", type=float, default=5.0, help="take_profit %% (기본 5.0)")
-    ap.add_argument("--sl", type=float, default=-2.0, help="stop_loss %% (기본 -2.0)")
+    ap.add_argument("--sl", type=float, default=-4.0, help="stop_loss %% (기본 -4.0, policy.json 우선)")
+    ap.add_argument("--pos-log", default="data/active_positions.json",
+                    help="활성 포지션 메타 경로")
     ap.add_argument("--auto-sell", action="store_true",
                     help="TP/SL 도달 종목 LiveOrderGate 매도")
     ap.add_argument("--dry-run", action="store_true", default=True,

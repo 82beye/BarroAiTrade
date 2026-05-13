@@ -185,11 +185,25 @@ class TestScalpingProviderInjection:
         assert isinstance(s, ScalpingConsensusStrategy)
         assert s.health_check()["provider_registered"] is True
 
-    def test_build_without_provider_warns(self, caplog):
-        """provider 미주입 시 warning 로그 — 조용한 0건 방지."""
-        with caplog.at_level(logging.WARNING, logger="backend.core.backtester.intraday_simulator"):
+    def test_build_autoloads_provider_when_unset(self):
+        """provider 명시 미지정 시 backend.legacy_scalping._provider 가 auto-load 됨."""
+        strats = _build_strategies(["scalping_consensus"])
+        assert strats[0].health_check()["provider_registered"] is True
+
+    def test_build_warns_when_autoload_fails(self, caplog, monkeypatch):
+        """auto-load 실패(예: legacy 모듈 import 에러) 시 warning + provider 미등록."""
+        import backend.legacy_scalping._provider as legacy_provider_mod
+
+        def _boom(*_a, **_kw):
+            raise RuntimeError("simulated legacy module failure")
+
+        monkeypatch.setattr(legacy_provider_mod, "build_scalping_provider", _boom)
+        with caplog.at_level(
+            logging.WARNING,
+            logger="backend.core.backtester.intraday_simulator",
+        ):
             strats = _build_strategies(["scalping_consensus"])
-        assert any("scalping_consensus" in r.message for r in caplog.records)
+        assert any("auto-provider 로드 실패" in r.message for r in caplog.records)
         assert strats[0].health_check()["provider_registered"] is False
 
     def test_simulator_propagates_provider(self):
@@ -225,13 +239,18 @@ class TestScalpingProviderInjection:
         sc_trades = [t for t in result.trades if t.strategy_id == "scalping_consensus"]
         assert len(sc_trades) == 0
 
-    def test_default_simulator_no_provider_backward_compat(self):
-        """기존 호출(provider 미지정) 동작 보존: scalping_consensus 포함돼도 0건."""
+    def test_default_simulator_uses_autoloaded_provider(self):
+        """provider 미지정 → auto-load 된 ScalpingCoordinator wrapper 가 적용된다.
+
+        synthetic 캔들로는 진짜 ScalpingCoordinator 의 진입 조건이 충족되지 않을
+        가능성이 높음(빈약한 데이터). 본 테스트는 'auto-load 자체가 동작'함을
+        검증하는 데 집중 — sim.run() 이 예외 없이 정상 완료되는지 확인."""
         sim = IntradaySimulator(warmup_candles=15, position_qty=Decimal("10"))
         result = sim.run(
             _synthetic_candles(80),
             symbol="005930",
             strategies=["scalping_consensus"],
         )
-        sc_trades = [t for t in result.trades if t.strategy_id == "scalping_consensus"]
-        assert len(sc_trades) == 0
+        # 정상 완료 + 결과 객체 검증 (trades 수는 ScalpingCoordinator 판단에 따라 0+)
+        assert "scalping_consensus" in result.strategies_run
+        assert isinstance(result.pnl_by_strategy.get("scalping_consensus"), Decimal)

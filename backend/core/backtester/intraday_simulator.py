@@ -170,16 +170,27 @@ def _build_strategies(
                 ScalpingConsensusStrategy,
             )
 
-            strat = ScalpingConsensusStrategy()
-            if scalping_provider is not None:
-                strat.set_analysis_provider(scalping_provider)
-            else:
-                logger.warning(
-                    "scalping_consensus included without provider — "
-                    "analyze() will return None for every candle. "
-                    "Pass scalping_provider=... to IntradaySimulator to enable."
-                )
-            out.append(strat)
+            sc = ScalpingConsensusStrategy()
+            provider = scalping_provider
+            if provider is None:
+                # auto-load: 운영 환경에서는 실제 ScalpingCoordinator wrapper 자동 연결
+                # (legacy_scalping 의존성·sys.path 부트스트랩 비용 포함).
+                try:
+                    from backend.legacy_scalping._provider import (
+                        build_scalping_provider,
+                    )
+
+                    provider = build_scalping_provider()
+                except Exception as exc:
+                    logger.warning(
+                        "scalping_consensus auto-provider 로드 실패 (%s) — "
+                        "analyze() returns None. IntradaySimulator(scalping_provider=...) "
+                        "로 명시 주입 가능.",
+                        exc,
+                    )
+            if provider is not None:
+                sc.set_analysis_provider(provider)
+            out.append(sc)
         else:
             raise ValueError(f"unknown strategy: {sid}")
     return out
