@@ -83,11 +83,17 @@ async def _run(args) -> int:
     )
     pos_store = ActivePositionStore(args.pos_log)
 
-    # ── DCA 2·3분할 매수 체크 ─────────────────────────────────────────────
+    # ── DCA 2·3분할 매수 체크 (SL 대상은 DCA 스킵) ─────────────────────────
+    # SL 종목에 추가매수하면 즉시 손절되므로, SL 대상을 먼저 파악 후 제외
+    sl_symbols = {d.symbol for d in decisions if d.signal == SellSignal.STOP_LOSS}
+
     if args.auto_sell:
         active_positions = pos_store.load_all()
         dca_executed = 0
         for h in balance.holdings:
+            # SL 대상 종목은 DCA 스킵
+            if h.symbol in sl_symbols:
+                continue
             pos = active_positions.get(h.symbol)
             if not pos:
                 continue
@@ -96,6 +102,9 @@ async def _run(args) -> int:
                 continue
             cur_price = float(h.cur_price)
             for tranche in pending:
+                # qty=0 방어 (원래 수량이 작을 때 25% → 0주)
+                if tranche.qty <= 0:
+                    continue
                 trigger_price = pos.entry_price * (1 + tranche.trigger_drop_pct / 100)
                 if cur_price > trigger_price:
                     continue  # 아직 트리거 조건 미달

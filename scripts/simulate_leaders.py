@@ -175,8 +175,51 @@ async def _run(args) -> int:
         account = KiwoomNativeAccountFetcher(oauth=oauth)
         deposit = await account.fetch_deposit()
         balance = await account.fetch_balance()
+
+        # ── 필터링을 자금 배분 **전에** 적용 (예산 낭비 방지) ──────────
+        # 당일 SL 종목
+        today_sl_symbols: set[str] = set()
+        try:
+            import csv as _csv
+            audit_path = Path(args.audit_log)
+            if audit_path.exists():
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                with audit_path.open(newline="", encoding="utf-8") as f:
+                    for row in _csv.DictReader(f):
+                        if row.get("ts", "").startswith(today) and row.get("action") == "ORDERED" \
+                                and row.get("side") == "sell":
+                            today_sl_symbols.add(row["symbol"])
+        except Exception:
+            pass
+
+        # 이미 보유 중인 종목
+        already_held: set[str] = set()
+        try:
+            already_held = {h.symbol for h in (balance.holdings or [])}
+        except Exception:
+            pass
+
+        filtered_leaders: list[LeaderCandidate] = []
+        for c in leaders:
+            if c.flu_rate >= 25.0:
+                print(f"  [PRE-SKIP] {c.symbol} {c.name:<16} 상한가 근접 ({c.flu_rate:+.1f}%)")
+                continue
+            if c.cur_price < 5_000:
+                print(f"  [PRE-SKIP] {c.symbol} {c.name:<16} 저가주 ({c.cur_price:,.0f}원)")
+                continue
+            if c.symbol in today_sl_symbols:
+                print(f"  [PRE-SKIP] {c.symbol} {c.name:<16} 당일 SL 발동 종목")
+                continue
+            if c.symbol in already_held:
+                print(f"  [PRE-SKIP] {c.symbol} {c.name:<16} 이미 보유 중")
+                continue
+            filtered_leaders.append(c)
+
+        if already_held:
+            print(f"  ℹ️ 이미 보유 중: {', '.join(already_held)}")
+
         candidates_for_gate = [
-            (c.symbol, c.name, Decimal(str(c.cur_price))) for c in leaders
+            (c.symbol, c.name, Decimal(str(c.cur_price))) for c in filtered_leaders
         ]
         gate_result = evaluate_risk_gate(
             deposit=deposit, balance=balance,
@@ -200,31 +243,6 @@ async def _run(args) -> int:
             )
 
     if args.execute and gate_result:
-        # ── 당일 SL 종목 집합 (재매수 방지) ────────────────────────────
-        today_sl_symbols: set[str] = set()
-        try:
-            import csv as _csv
-            audit_path = Path(args.audit_log)
-            if audit_path.exists():
-                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                with audit_path.open(newline="", encoding="utf-8") as f:
-                    for row in _csv.DictReader(f):
-                        if row.get("ts", "").startswith(today) and row.get("action") == "ORDERED" \
-                                and row.get("side") == "sell":
-                            today_sl_symbols.add(row["symbol"])
-        except Exception:
-            pass
-
-        # ── 이미 보유 중인 종목 집합 (중복 매수 방지) ───────────────────
-        already_held: set[str] = set()
-        try:
-            held_balance = await account.fetch_balance()
-            already_held = {h.symbol for h in (held_balance.holdings or [])}
-            if already_held:
-                print(f"  ℹ️ 이미 보유 중: {', '.join(already_held)}")
-        except Exception:
-            pass
-
         pos_store = ActivePositionStore(args.pos_log)
 
         print(f"\n== 주문 실행 (BAR-OPS-17 LiveOrderGate, dry_run={args.dry_run}, 1분할 50%) ==")
@@ -243,28 +261,7 @@ async def _run(args) -> int:
             if r.blocked or r.recommended_qty <= 0:
                 continue
 
-            # ① 상한가 종목 제외 (등락률 25% 이상)
-            leader = next((c for c in leaders if c.symbol == r.symbol), None)
-            if leader and leader.flu_rate >= 25.0:
-                print(f"  [SKIP] {r.symbol} {r.name:<16} 상한가 근접 ({leader.flu_rate:+.1f}%) — 매수 제외")
-                continue
-
-            # ② 저가주 제외 (주가 5,000원 미만)
-            if float(r.cur_price) < 5_000:
-                print(f"  [SKIP] {r.symbol} {r.name:<16} 저가주 ({r.cur_price:,.0f}원) — 매수 제외")
-                continue
-
-            # ③ 당일 SL 종목 재매수 방지
-            if r.symbol in today_sl_symbols:
-                print(f"  [SKIP] {r.symbol} {r.name:<16} 당일 SL 발동 종목 — 재매수 금지")
-                continue
-
-            # ④ 이미 보유 중인 종목 중복 매수 방지
-            if r.symbol in already_held:
-                print(f"  [SKIP] {r.symbol} {r.name:<16} 이미 보유 중 — 중복 매수 금지")
-                continue
-
-            # ⑤ 1분할(50%) 수량 계산
+            # 1분할(50%) 수량 계산
             tranche1_qty = max(1, round(r.recommended_qty * 0.5))
 
             try:
@@ -276,11 +273,12 @@ async def _run(args) -> int:
                     f"(1/3분할, 전체 {r.recommended_qty}) order_no={result.order_no}"
                 )
 
-                # ⑥ active_positions 저장 (전략 정보 + 분할 계획)
+                # active_positions 저장 (전략 정보 + 분할 계획)
                 best_strategy = max(
                     per_strategy_pnl,
                     key=lambda s: per_strategy_pnl.get(s, 0.0),
                 ) if per_strategy_pnl else "swing_38"
+                leader = next((c for c in filtered_leaders if c.symbol == r.symbol), None)
                 pos_store.create_from_order(
                     symbol=r.symbol,
                     name=r.name,
