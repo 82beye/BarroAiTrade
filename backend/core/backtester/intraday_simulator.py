@@ -13,9 +13,9 @@ from __future__ import annotations
 import csv
 import logging
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,6 +30,12 @@ from backend.models.strategy import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ScalpingConsensusStrategy 의 AnalysisProvider 시그니처 재선언 (순환 import 회피).
+# `Callable[[AnalysisContext], Optional[ScalpingAnalysis|dict]]` — _adapter.to_entry_signal
+# 가 받을 수 있는 형식이면 됨.
+ScalpingProvider = Callable[[AnalysisContext], Optional[Any]]
 
 
 # ─── 결과 모델 ────────────────────────────────────────────
@@ -130,14 +136,26 @@ _DEFAULT_EXIT_PLAN = ExitPlan(
 )
 
 
-def _build_strategies(strategy_ids: Sequence[str]):
-    """strategy_id → 인스턴스 lazy import."""
+def _build_strategies(
+    strategy_ids: Sequence[str],
+    scalping_provider: Optional[ScalpingProvider] = None,
+):
+    """strategy_id → 인스턴스 lazy import.
+
+    scalping_provider 가 주어지면 ScalpingConsensusStrategy 인스턴스에 주입.
+    미주입 상태에서 scalping_consensus 가 포함되면 warning 로그를 남김 — analyze()
+    가 항상 None 을 반환해 trades=0 이 보장되므로 호출측이 조용히 0건을 받는 것을
+    방지하기 위함.
+    """
     out = []
     for sid in strategy_ids:
         if sid == "f_zone":
-            from backend.core.strategy.f_zone import FZoneStrategy
+            from backend.core.strategy.f_zone import FZoneParams, FZoneStrategy
 
-            out.append(FZoneStrategy())
+            # F1 변동성 필터를 운영·시뮬 진입점에서 명시 적용 (default 는 0.0 으로
+            # BAR-44 baseline 회귀 보존, 여기서만 0.035 활성화).
+            # 2026-05-14 백테스트 +186k 효과 검증 — LESSON_S1_NORMALIZATION 참조.
+            out.append(FZoneStrategy(FZoneParams(min_atr_pct=0.035)))
         elif sid == "sf_zone":
             from backend.core.strategy.sf_zone import SFZoneStrategy
 
@@ -154,10 +172,27 @@ def _build_strategies(strategy_ids: Sequence[str]):
             from backend.core.strategy.scalping_consensus import (
                 ScalpingConsensusStrategy,
             )
-            from backend.legacy_scalping._provider import build_scalping_provider
 
             sc = ScalpingConsensusStrategy()
-            sc.set_analysis_provider(build_scalping_provider())
+            provider = scalping_provider
+            if provider is None:
+                # auto-load: 운영 환경에서는 실제 ScalpingCoordinator wrapper 자동 연결
+                # (legacy_scalping 의존성·sys.path 부트스트랩 비용 포함).
+                try:
+                    from backend.legacy_scalping._provider import (
+                        build_scalping_provider,
+                    )
+
+                    provider = build_scalping_provider()
+                except Exception as exc:
+                    logger.warning(
+                        "scalping_consensus auto-provider 로드 실패 (%s) — "
+                        "analyze() returns None. IntradaySimulator(scalping_provider=...) "
+                        "로 명시 주입 가능.",
+                        exc,
+                    )
+            if provider is not None:
+                sc.set_analysis_provider(provider)
             out.append(sc)
         else:
             raise ValueError(f"unknown strategy: {sid}")
@@ -197,6 +232,10 @@ class IntradaySimulator:
         commission_pct: float = 0.0,
         tax_pct_on_sell: float = 0.0,
         slippage_pct: float = 0.0,
+        scalping_provider: Optional[ScalpingProvider] = None,
+        position_value: Optional[Decimal] = None,
+        high_price_threshold: Decimal = Decimal("1000000"),
+        high_price_budget: Decimal = Decimal("2000000"),
     ) -> None:
         self._exit = exit_engine or ExitEngine()
         self._warmup = warmup_candles
@@ -206,6 +245,14 @@ class IntradaySimulator:
         self._commission = Decimal(str(commission_pct)) / Decimal("100")
         self._tax = Decimal(str(tax_pct_on_sell)) / Decimal("100")
         self._slippage = Decimal(str(slippage_pct)) / Decimal("100")
+        self._scalping_provider = scalping_provider
+        # S1: 종목당 명목 가치 기준 진입 — 지정 시 qty = floor(value / entry_price).
+        # None 시 position_qty 고정 (기존 동작 보존).
+        # 고가주 (price > high_price_threshold) 는 high_price_budget 한도 사용 —
+        # 예: 1주당 100만원 초과 시 최대 200만원 한도 (즉 qty 1~2).
+        self._position_value = position_value
+        self._high_price_threshold = high_price_threshold
+        self._high_price_budget = high_price_budget
 
     def run(
         self,
@@ -220,7 +267,7 @@ class IntradaySimulator:
                 f"need ≥ {self._warmup + 1} candles, got {len(candles)}"
             )
         strategy_ids = strategies or self.DEFAULT_STRATEGIES
-        strategies_obj = _build_strategies(strategy_ids)
+        strategies_obj = _build_strategies(strategy_ids, self._scalping_provider)
 
         trades: list[TradeRecord] = []
         pnl_by_strategy: dict[str, Decimal] = {sid: Decimal(0) for sid in strategy_ids}
@@ -230,6 +277,8 @@ class IntradaySimulator:
         for strategy, sid in zip(strategies_obj, strategy_ids):
             position: Optional[PositionState] = None
             pending_entry: bool = False     # OPS-35: 시그널 캔들 → 다음 open 진입
+            # 진입 시점에 1회 결정 → 청산까지 유지. 전략별 분기 (sf_zone=ATR, 그 외=고정).
+            current_plan: Optional[ExitPlan] = None
             for i in range(self._warmup, len(candles)):
                 window = candles[: i + 1]
                 current = candles[i]
@@ -239,14 +288,20 @@ class IntradaySimulator:
                 if pending_entry and position is None:
                     raw_open = Decimal(str(current.open))
                     entry_price = raw_open * (Decimal("1") + self._slippage)
+                    qty = self._compute_entry_qty(entry_price)
+                    if qty <= 0:
+                        # 명목 가치 < 1주 가격 → 진입 거부 (S1 가드)
+                        pending_entry = False
+                        continue
                     position = PositionState(
                         symbol=symbol, entry_price=entry_price,
-                        qty=self._qty, initial_qty=self._qty,
+                        qty=qty, initial_qty=qty,
                         entry_time=current.timestamp,
                     )
+                    current_plan = _exit_plan_for_strategy(sid, entry_price, window)
                     trades.append(TradeRecord(
                         strategy_id=sid, symbol=symbol, side="buy",
-                        qty=self._qty, price=entry_price,
+                        qty=qty, price=entry_price,
                         timestamp=current.timestamp, reason="entry",
                     ))
                     pending_entry = False
@@ -271,19 +326,23 @@ class IntradaySimulator:
                             # 즉시 진입 (next_open 비활성 또는 마지막 캔들)
                             raw_close = Decimal(str(current.close))
                             entry_price = raw_close * (Decimal("1") + self._slippage)
+                            qty = self._compute_entry_qty(entry_price)
+                            if qty <= 0:
+                                continue
                             position = PositionState(
                                 symbol=symbol, entry_price=entry_price,
-                                qty=self._qty, initial_qty=self._qty,
+                                qty=qty, initial_qty=qty,
                                 entry_time=current.timestamp,
                             )
+                            current_plan = _exit_plan_for_strategy(sid, entry_price, window)
                             trades.append(TradeRecord(
                                 strategy_id=sid, symbol=symbol, side="buy",
-                                qty=self._qty, price=entry_price,
+                                qty=qty, price=entry_price,
                                 timestamp=current.timestamp, reason="entry",
                             ))
                 else:
                     # 3. 청산 평가 — bar high/low 터치 (OPS-35 exit_on_intrabar)
-                    plan = _scaled_exit_plan(position.entry_price)
+                    plan = current_plan or _scaled_exit_plan(position.entry_price)
                     if self._exit_intrabar:
                         # high → TP 평가 / low → SL 평가
                         # 두 평가를 동일 캔들에서 — TP 우선 (보수적 가정: 위로 먼저 갔다고 봄)
@@ -334,6 +393,26 @@ class IntradaySimulator:
             win_rate_by_strategy=win_rate,
         )
 
+
+    def _compute_entry_qty(self, entry_price: Decimal) -> Decimal:
+        """진입 qty 결정.
+
+        - position_value None: position_qty 그대로 (기존 100주 고정 동작).
+        - 일반 종목 (entry_price ≤ high_price_threshold): floor(position_value / entry_price)
+        - 고가주 (entry_price > high_price_threshold): floor(high_price_budget / entry_price)
+          → 예: 1주당 100만원 초과 종목은 200만원 한도 (qty 1~2주).
+            price>budget 이면 qty=0 (진입 거부).
+        """
+        if self._position_value is None:
+            return self._qty
+        if entry_price <= 0:
+            return Decimal(0)
+        budget = (
+            self._high_price_budget
+            if entry_price > self._high_price_threshold
+            else self._position_value
+        )
+        return (budget / entry_price).quantize(Decimal("1"), rounding=ROUND_DOWN)
 
     def _evaluate_intrabar(
         self,
@@ -387,21 +466,105 @@ class IntradaySimulator:
         return pos, orders
 
 
-def _scaled_exit_plan(entry_price: Decimal) -> ExitPlan:
-    """entry_price 기준 +3/+5/+7% TP, -1.5% SL."""
+def _scaled_exit_plan(
+    entry_price: Decimal,
+    sl_pct: Decimal = Decimal("-0.015"),
+) -> ExitPlan:
+    """entry_price 기준 +3/+5/+7% TP, SL(default -1.5%). 고정 정책 — 대부분 전략 default."""
     return ExitPlan(
         take_profits=[
             TakeProfitTier(price=entry_price * Decimal("1.03"), qty_pct=Decimal("0.33")),
             TakeProfitTier(price=entry_price * Decimal("1.05"), qty_pct=Decimal("0.33")),
             TakeProfitTier(price=entry_price * Decimal("1.07"), qty_pct=Decimal("0.34")),
         ],
-        stop_loss=StopLoss(fixed_pct=Decimal("-0.015")),
+        stop_loss=StopLoss(fixed_pct=sl_pct),
         breakeven_trigger=Decimal("0.01"),
     )
 
 
+def _sfzone_atr_exit_plan(
+    entry_price: Decimal,
+    candles_window: list[OHLCV],
+    n: int = 14,
+    sl_multiplier: Decimal = Decimal("2.0"),
+    tp_multipliers: tuple[Decimal, Decimal, Decimal] = (
+        Decimal("1.5"), Decimal("2.5"), Decimal("3.5"),
+    ),
+    sl_floor_pct: Decimal = Decimal("0.015"),
+    sl_cap_pct: Decimal = Decimal("0.08"),
+) -> ExitPlan:
+    """SF존 전용 ExitPlan — TP·SL 모두 ATR 기반 (R:R 균형).
+
+    종목 변동성에 비례한 동적 TP/SL — fixed +3/+5/+7%와 −1.5%가 변동성 큰 종목에서
+    부적합한 문제를 종목별로 해소. sl_floor·sl_cap 으로 극단값 클램프.
+
+    SFZoneStrategy 전용 분기 — 다른 전략은 _scaled_exit_plan 그대로 사용.
+    """
+    atr_pct = _atr_pct(candles_window, n=n)
+    atr_clamped = max(sl_floor_pct, min(atr_pct, sl_cap_pct))
+    sl_pct = -atr_clamped * sl_multiplier
+    # 클램프: SL 도 [-floor×mult, -cap×mult] 안에. sf-zone 정상 SL 범위 −3~−16%.
+    if sl_pct < -sl_cap_pct * Decimal("2"):
+        sl_pct = -sl_cap_pct * Decimal("2")
+
+    tp1_pct, tp2_pct, tp3_pct = (atr_clamped * m for m in tp_multipliers)
+    return ExitPlan(
+        take_profits=[
+            TakeProfitTier(price=entry_price * (Decimal("1") + tp1_pct),
+                           qty_pct=Decimal("0.33"), condition="SF ATR TP1"),
+            TakeProfitTier(price=entry_price * (Decimal("1") + tp2_pct),
+                           qty_pct=Decimal("0.33"), condition="SF ATR TP2"),
+            TakeProfitTier(price=entry_price * (Decimal("1") + tp3_pct),
+                           qty_pct=Decimal("0.34"), condition="SF ATR TP3"),
+        ],
+        stop_loss=StopLoss(fixed_pct=sl_pct),
+        breakeven_trigger=Decimal("0.01"),
+    )
+
+
+def _exit_plan_for_strategy(
+    strategy_id: str,
+    entry_price: Decimal,
+    candles_window: list[OHLCV],
+) -> ExitPlan:
+    """전략별 ExitPlan 분기 — '100% 중복은 공유, 나머지는 별도' 원칙.
+
+    - sf_zone: ATR 기반 동적 TP·SL (변동성 적응)
+    - 그 외 (f_zone, gold_zone, swing_38, scalping_consensus): 고정 +3/+5/+7%, −1.5%
+    """
+    if strategy_id == "sf_zone":
+        return _sfzone_atr_exit_plan(entry_price, candles_window)
+    return _scaled_exit_plan(entry_price)
+
+
+def _atr_pct(candles_window: list[OHLCV], n: int = 14) -> Decimal:
+    """최근 n봉의 True Range 평균을 마지막 close 로 나눈 비율 (예: 0.025 = 2.5%).
+
+    분봉/일봉 무관 동일 공식. 종목별 변동성 적응 SL 계산에 사용.
+    """
+    if len(candles_window) < 2:
+        return Decimal("0")
+    n = min(n, len(candles_window) - 1)
+    trs = []
+    for i in range(1, n + 1):
+        c = candles_window[-i]
+        prev = candles_window[-i - 1]
+        tr = max(
+            c.high - c.low,
+            abs(c.high - prev.close),
+            abs(c.low - prev.close),
+        )
+        trs.append(tr)
+    atr = sum(trs) / len(trs) if trs else 0.0
+    last_close = candles_window[-1].close
+    if last_close <= 0:
+        return Decimal("0")
+    return Decimal(str(atr / last_close))
+
+
 __all__ = [
     "IntradaySimulator",
+    "ScalpingProvider",
     "SimulationResult",
     "TradeRecord",
     "load_csv_candles",

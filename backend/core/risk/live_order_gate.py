@@ -51,6 +51,14 @@ class DailyOrderLimitExceeded(RuntimeError):
     """일일 거래수 한도 초과."""
 
 
+class InvalidOrderQty(ValueError):
+    """qty ≤ 0 으로 주문 시도. executor 단의 ValueError 가 audit 에 'FAILED' 로
+    남는 것을 방지하기 위해 게이트에서 'BLOCKED' 로 사전 차단한다.
+
+    원인: DCA 분할 비율 계산 시 보유 1주 × 25% = 0주 같은 floor=0 케이스
+    (2026-05-13 운영 로그에서 ValueError 2건 발견)."""
+
+
 @dataclass(frozen=True)
 class GatePolicy:
     daily_loss_limit_pct: Decimal = Decimal("-3.0")     # -3% 도달 시 차단
@@ -117,6 +125,15 @@ class LiveOrderGate:
         self, side: OrderSide, symbol: str, qty: int,
         price: Optional[Decimal], daily_pnl_pct: Decimal,
     ) -> OrderResult:
+        # 0) qty 검증 — 호출자(DCA 분할 등) 에서 0/음수가 들어와도 executor 진입 전 차단.
+        #    이전엔 executor 측 ValueError 가 audit 에 'FAILED' 로 남아 추적 어려웠음.
+        if qty <= 0:
+            err = InvalidOrderQty(f"qty must be > 0, got {qty}")
+            self._audit("BLOCKED", side, symbol, qty, price, None, None,
+                        blocked=True, reason=str(err))
+            await self._notify_blocked(side, symbol, str(err))
+            raise err
+
         try:
             self._preflight(side, daily_pnl_pct)
         except (TradingDisabled, DailyLossLimitExceeded, DailyOrderLimitExceeded) as e:

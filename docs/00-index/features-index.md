@@ -107,4 +107,4 @@ tags: [index, features]
 
 ---
 
-*[[../README|← 홈으로]] | 최종 업데이트: 2026-05-08 (OPS-35 완료, 운영 가능)*
+*[[../README|← 홈으로]] | 최종 업데이트: 2026-05-14 (OPS-09 후속 — 전략 시그널·청산 분리 + S1 정규화, [[../04-report/features/BAR-OPS-09-strategy-refactor-2026-05-14.report|보고서]])*

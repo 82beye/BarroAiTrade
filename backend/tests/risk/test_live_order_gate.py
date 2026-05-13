@@ -18,6 +18,7 @@ from backend.core.risk.live_order_gate import (
     DailyLossLimitExceeded,
     DailyOrderLimitExceeded,
     GatePolicy,
+    InvalidOrderQty,
     LiveOrderGate,
     TradingDisabled,
 )
@@ -135,3 +136,43 @@ async def test_audit_logs_blocked_with_reason(tmp_path, monkeypatch):
     # blocked=1, reason 포함
     assert ",BLOCKED,buy,005930,1," in content
     assert ",1,LIVE_TRADING_ENABLED" in content
+
+
+# -- qty<=0 사전 차단 (2026-05-13 DCA ValueError 회귀 방지) ------------------
+
+
+@pytest.mark.asyncio
+async def test_qty_zero_buy_blocked_before_executor(tmp_path):
+    """qty=0 매수 시도 → InvalidOrderQty + audit BLOCKED, executor 미호출."""
+    policy = GatePolicy(require_env_flag=False)
+    exec = KiwoomNativeOrderExecutor(oauth=_oauth_mock(), dry_run=True)
+    exec.place_buy = AsyncMock()  # 호출되면 안 됨
+    gate = LiveOrderGate(executor=exec, audit_path=tmp_path / "audit.csv", policy=policy)
+
+    with pytest.raises(InvalidOrderQty, match="qty must be > 0"):
+        await gate.place_buy(symbol="012860", qty=0)
+
+    exec.place_buy.assert_not_called()
+    content = (tmp_path / "audit.csv").read_text(encoding="utf-8")
+    assert ",BLOCKED,buy,012860,0," in content
+    assert "qty must be > 0" in content
+
+
+@pytest.mark.asyncio
+async def test_qty_negative_sell_blocked(tmp_path):
+    """qty=-1 매도 시도 → 동일하게 InvalidOrderQty."""
+    policy = GatePolicy(require_env_flag=False)
+    gate = _make_gate(tmp_path, dry_run=True, policy=policy)
+    with pytest.raises(InvalidOrderQty):
+        await gate.place_sell(symbol="005930", qty=-1)
+    content = (tmp_path / "audit.csv").read_text(encoding="utf-8")
+    assert ",BLOCKED,sell,005930,-1," in content
+
+
+@pytest.mark.asyncio
+async def test_qty_positive_passes(tmp_path):
+    """정상 qty 는 게이트 통과 후 executor 호출 — 회귀 방지."""
+    policy = GatePolicy(require_env_flag=False)
+    gate = _make_gate(tmp_path, dry_run=True, policy=policy)
+    result = await gate.place_buy(symbol="005930", qty=1)
+    assert result.dry_run is True

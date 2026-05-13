@@ -1,0 +1,3 @@
+trade_no,entry_ts,entry_price,exit_ts,exit_price,exit_qty,reason,leg_pnl
+1,2024-06-25,111300,2024-06-26,109630,100,stop_loss,-166950
+2,2026-02-27,144700,2026-03-03,142530,100,stop_loss,-217050

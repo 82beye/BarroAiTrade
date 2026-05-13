@@ -35,7 +35,9 @@ class SFZoneStrategy(Strategy):
     STRATEGY_ID = "sf_zone_v1"
 
     def __init__(self, params: Optional[FZoneParams] = None) -> None:
-        # FZoneStrategy 인스턴스 보유 (옵션 A delegate)
+        # FZoneStrategy 인스턴스 보유 (옵션 A delegate).
+        # f_zone default 가 max=1.0(무제한)이라 별도 override 불요 — 시그널 분리는
+        # exit_plan(IntradaySimulator._exit_plan_for_strategy) 레벨에서 처리.
         self._inner = FZoneStrategy(params=params)
 
     def _analyze_v2(self, ctx: AnalysisContext) -> Optional[EntrySignal]:

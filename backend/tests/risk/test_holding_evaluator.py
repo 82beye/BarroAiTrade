@@ -45,7 +45,8 @@ def test_stop_loss_signal_at_threshold():
 
 
 def test_stop_loss_signal_below_threshold():
-    d = evaluate_holding(_h(pnl_rate="-3.5"))
+    # main 9c4ed24: default SL -4% (이전 -2%) — pnl_rate -4.5 로 SL 트리거
+    d = evaluate_holding(_h(pnl_rate="-4.5"))
     assert d.signal == SellSignal.STOP_LOSS
 
 
@@ -61,7 +62,8 @@ def test_hold_at_exactly_zero():
 
 
 def test_evaluate_all_returns_list():
-    holdings = [_h(symbol="A", pnl_rate="5.5"), _h(symbol="B", pnl_rate="-3.0"), _h(symbol="C", pnl_rate="1.0")]
+    # main 9c4ed24: SL -4% — B pnl_rate -4.5 로 SL 트리거
+    holdings = [_h(symbol="A", pnl_rate="5.5"), _h(symbol="B", pnl_rate="-4.5"), _h(symbol="C", pnl_rate="1.0")]
     decisions = evaluate_all(holdings)
     assert [d.signal for d in decisions] == [
         SellSignal.TAKE_PROFIT, SellSignal.STOP_LOSS, SellSignal.HOLD,

@@ -41,6 +41,7 @@ tags: [index, ops, runbook]
 |-----|-------|-----------|--------|
 | OPS-08 | IntradaySimulator | 슬라이딩 윈도우 5 전략 + ExitEngine | [[../04-report/features/BAR-OPS-08-report]] |
 | OPS-09 | KiwoomCandleFetcher (KIS) | 일봉/분봉 KIS API | [[../04-report/features/BAR-OPS-09-report]] |
+| OPS-09+ | 전략 시그널·청산 정책 분리 (2026-05-14) | scalping_consensus provider · LiveOrderGate qty 차단 · 전략별 exit_plan 분리 · f_zone 변동성 필터 · 명목 가치 진입 (S1) | [[../04-report/features/BAR-OPS-09-strategy-refactor-2026-05-14.report]] |
 
 ---
 
