@@ -154,8 +154,11 @@ def _build_strategies(strategy_ids: Sequence[str]):
             from backend.core.strategy.scalping_consensus import (
                 ScalpingConsensusStrategy,
             )
+            from backend.legacy_scalping._provider import build_scalping_provider
 
-            out.append(ScalpingConsensusStrategy())
+            sc = ScalpingConsensusStrategy()
+            sc.set_analysis_provider(build_scalping_provider())
+            out.append(sc)
         else:
             raise ValueError(f"unknown strategy: {sid}")
     return out
