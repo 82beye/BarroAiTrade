@@ -165,7 +165,7 @@ class FZoneStrategy(Strategy):
             return None
 
         signal_type = "sf_zone" if analysis.is_sf_zone else "f_zone"
-        current_price = candles[0].close
+        current_price = candles[-1].close
 
         return EntrySignal(
             symbol=symbol,
@@ -451,7 +451,7 @@ class FZoneStrategy(Strategy):
 
     @staticmethod
     def _to_dataframe(candles: List[OHLCV]) -> pd.DataFrame:
-        """OHLCV 리스트 → pandas DataFrame (오래된 순)"""
+        """OHLCV 리스트 → pandas DataFrame (오래된→최신 순)"""
         rows = [
             {
                 "timestamp": c.timestamp,
@@ -461,7 +461,7 @@ class FZoneStrategy(Strategy):
                 "close": c.close,
                 "volume": c.volume,
             }
-            for c in reversed(candles)  # 최신→오래된 순 → 오래된→최신 순으로 변환
+            for c in candles  # API 반환 순서 = 오래된→최신 (그대로 사용)
         ]
         df = pd.DataFrame(rows)
         df.set_index("timestamp", inplace=True)
