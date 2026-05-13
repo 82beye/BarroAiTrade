@@ -361,6 +361,43 @@ class TestAtrDynamicSL:
         # ATR≈0.001, floor 0.015 적용 → SL = -0.015×2 = -0.03
         assert plan.stop_loss.fixed_pct == Decimal("-0.030")
 
+    def test_position_value_default_disabled(self):
+        """position_value 미지정 → position_qty 그대로 (기존 100주 고정)."""
+        sim = IntradaySimulator(position_qty=Decimal("100"))
+        assert sim._compute_entry_qty(Decimal("10000")) == Decimal("100")
+
+    def test_position_value_normal_price(self):
+        """가격 ≤ 100만원 → 1M 한도. price=1000 → qty=1000, price=50000 → qty=20."""
+        sim = IntradaySimulator(position_value=Decimal("1000000"))
+        assert sim._compute_entry_qty(Decimal("1000")) == Decimal("1000")
+        assert sim._compute_entry_qty(Decimal("50000")) == Decimal("20")
+        assert sim._compute_entry_qty(Decimal("111300")) == Decimal("8")  # LG전자 8주
+
+    def test_position_value_high_price_threshold(self):
+        """가격 > 100만원 → 200만원 한도 적용."""
+        sim = IntradaySimulator(position_value=Decimal("1000000"))
+        # price = 1,500,000 (>1M) → budget 2M → qty = 1 (floor(2M/1.5M))
+        assert sim._compute_entry_qty(Decimal("1500000")) == Decimal("1")
+        # price = 2,000,000 → qty = 1 (floor(2M/2M))
+        assert sim._compute_entry_qty(Decimal("2000000")) == Decimal("1")
+        # price = 2,500,000 → qty = 0 (>200만원 한도 → 진입 거부)
+        assert sim._compute_entry_qty(Decimal("2500000")) == Decimal("0")
+
+    def test_position_value_exactly_at_threshold(self):
+        """가격 = 100만원 정확히 → 일반 분기 (1M 한도) → qty=1."""
+        sim = IntradaySimulator(position_value=Decimal("1000000"))
+        assert sim._compute_entry_qty(Decimal("1000000")) == Decimal("1")
+
+    def test_position_value_custom_threshold(self):
+        """threshold/budget 커스텀."""
+        sim = IntradaySimulator(
+            position_value=Decimal("500000"),
+            high_price_threshold=Decimal("100000"),
+            high_price_budget=Decimal("1000000"),
+        )
+        assert sim._compute_entry_qty(Decimal("50000")) == Decimal("10")  # 일반
+        assert sim._compute_entry_qty(Decimal("200000")) == Decimal("5")  # 고가주: 1M/200k=5
+
     def test_sfzone_atr_cap_clamp(self):
         """sf_zone — 극도로 변동성 큰 캔들이면 SL cap (×2 = −16%) 로 클램프."""
         out = []

@@ -13,7 +13,7 @@ from __future__ import annotations
 import csv
 import logging
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
@@ -230,6 +230,9 @@ class IntradaySimulator:
         tax_pct_on_sell: float = 0.0,
         slippage_pct: float = 0.0,
         scalping_provider: Optional[ScalpingProvider] = None,
+        position_value: Optional[Decimal] = None,
+        high_price_threshold: Decimal = Decimal("1000000"),
+        high_price_budget: Decimal = Decimal("2000000"),
     ) -> None:
         self._exit = exit_engine or ExitEngine()
         self._warmup = warmup_candles
@@ -240,6 +243,13 @@ class IntradaySimulator:
         self._tax = Decimal(str(tax_pct_on_sell)) / Decimal("100")
         self._slippage = Decimal(str(slippage_pct)) / Decimal("100")
         self._scalping_provider = scalping_provider
+        # S1: 종목당 명목 가치 기준 진입 — 지정 시 qty = floor(value / entry_price).
+        # None 시 position_qty 고정 (기존 동작 보존).
+        # 고가주 (price > high_price_threshold) 는 high_price_budget 한도 사용 —
+        # 예: 1주당 100만원 초과 시 최대 200만원 한도 (즉 qty 1~2).
+        self._position_value = position_value
+        self._high_price_threshold = high_price_threshold
+        self._high_price_budget = high_price_budget
 
     def run(
         self,
@@ -275,15 +285,20 @@ class IntradaySimulator:
                 if pending_entry and position is None:
                     raw_open = Decimal(str(current.open))
                     entry_price = raw_open * (Decimal("1") + self._slippage)
+                    qty = self._compute_entry_qty(entry_price)
+                    if qty <= 0:
+                        # 명목 가치 < 1주 가격 → 진입 거부 (S1 가드)
+                        pending_entry = False
+                        continue
                     position = PositionState(
                         symbol=symbol, entry_price=entry_price,
-                        qty=self._qty, initial_qty=self._qty,
+                        qty=qty, initial_qty=qty,
                         entry_time=current.timestamp,
                     )
                     current_plan = _exit_plan_for_strategy(sid, entry_price, window)
                     trades.append(TradeRecord(
                         strategy_id=sid, symbol=symbol, side="buy",
-                        qty=self._qty, price=entry_price,
+                        qty=qty, price=entry_price,
                         timestamp=current.timestamp, reason="entry",
                     ))
                     pending_entry = False
@@ -308,15 +323,18 @@ class IntradaySimulator:
                             # 즉시 진입 (next_open 비활성 또는 마지막 캔들)
                             raw_close = Decimal(str(current.close))
                             entry_price = raw_close * (Decimal("1") + self._slippage)
+                            qty = self._compute_entry_qty(entry_price)
+                            if qty <= 0:
+                                continue
                             position = PositionState(
                                 symbol=symbol, entry_price=entry_price,
-                                qty=self._qty, initial_qty=self._qty,
+                                qty=qty, initial_qty=qty,
                                 entry_time=current.timestamp,
                             )
                             current_plan = _exit_plan_for_strategy(sid, entry_price, window)
                             trades.append(TradeRecord(
                                 strategy_id=sid, symbol=symbol, side="buy",
-                                qty=self._qty, price=entry_price,
+                                qty=qty, price=entry_price,
                                 timestamp=current.timestamp, reason="entry",
                             ))
                 else:
@@ -372,6 +390,26 @@ class IntradaySimulator:
             win_rate_by_strategy=win_rate,
         )
 
+
+    def _compute_entry_qty(self, entry_price: Decimal) -> Decimal:
+        """진입 qty 결정.
+
+        - position_value None: position_qty 그대로 (기존 100주 고정 동작).
+        - 일반 종목 (entry_price ≤ high_price_threshold): floor(position_value / entry_price)
+        - 고가주 (entry_price > high_price_threshold): floor(high_price_budget / entry_price)
+          → 예: 1주당 100만원 초과 종목은 200만원 한도 (qty 1~2주).
+            price>budget 이면 qty=0 (진입 거부).
+        """
+        if self._position_value is None:
+            return self._qty
+        if entry_price <= 0:
+            return Decimal(0)
+        budget = (
+            self._high_price_budget
+            if entry_price > self._high_price_threshold
+            else self._position_value
+        )
+        return (budget / entry_price).quantize(Decimal("1"), rounding=ROUND_DOWN)
 
     def _evaluate_intrabar(
         self,
