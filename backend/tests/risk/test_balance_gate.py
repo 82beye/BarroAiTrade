@@ -62,9 +62,10 @@ def test_qty_calculation_per_position_limit():
     assert gate.available == Decimal("45000000")
 
 
-def test_qty_consumes_available_across_candidates():
-    # cash 10M, per 30% = 3M, total 90% = 9M, 가격 1M → 종목당 3주
-    # 후보 4개 모두 매수 시 12주(12M) 필요하지만 available=9M → 마지막 종목 일부 차단
+def test_qty_distributes_evenly_across_candidates():
+    # cash 10M, per 30% = 3M, total 90% = 9M, available = 9M
+    # 후보 4개 → per_slot = 9M / 4 = 2.25M → 종목당 2주 (2.25M/1M ROUND_DOWN)
+    # 순차 그리디(앞 종목 예산 독식) 대신 균등 분배 — 4종목 모두 진입
     gate = evaluate_risk_gate(
         deposit=_deposit(10_000_000), balance=_balance(),
         candidates=[
@@ -75,9 +76,9 @@ def test_qty_consumes_available_across_candidates():
         ],
     )
     qtys = [r.recommended_qty for r in gate.recommendations]
-    # 3 + 3 + 3 + 0 = 9 (가용 9M 정확히 소진)
+    assert qtys == [2, 2, 2, 2]
+    assert all(not r.blocked for r in gate.recommendations)
     assert sum(q * 1_000_000 for q in qtys) <= 9_000_000
-    assert gate.recommendations[-1].blocked is True
 
 
 def test_existing_holdings_reduce_available():

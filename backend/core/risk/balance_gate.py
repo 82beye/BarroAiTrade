@@ -5,6 +5,7 @@
 정책 (조정 가능):
 - 종목당 최대 비중: deposit.cash * max_per_position_ratio (기본 30%)
 - 총 보유 최대 비중: deposit.cash * max_total_position_ratio (기본 90%)
+- 진입 가능액을 유효 후보 수로 균등 분배 (종목당 비중은 상한 캡)
 
 산출: 종목별 추천 매수 qty + 자금 부족 여부.
 """
@@ -50,6 +51,7 @@ def evaluate_risk_gate(
     """잔고 + 한도 정책 → 종목별 추천 qty.
 
     candidates: [(symbol, name, cur_price)] — LeaderPicker 의 출력에서 추출.
+    진입 가능액을 유효 후보 수로 균등 분배하고, 종목당 한도를 상한 캡으로 적용.
     """
     if not (Decimal("0") < max_per_position_ratio <= Decimal("1")):
         raise ValueError(f"max_per_position_ratio must be in (0, 1], got {max_per_position_ratio}")
@@ -65,8 +67,14 @@ def evaluate_risk_gate(
         available = Decimal("0")
 
     recommendations: list[PositionRecommendation] = []
-    consumed = Decimal("0")
 
+    # 균등 분배 — 유효 후보(price>0) 수로 진입 가능액을 나눠 종목마다 동일 슬롯 배정.
+    # 종목당 한도(max_per)는 상한 캡으로만 작동 (소수 종목일 때 과집중 방지).
+    # 순차 그리디(앞 종목이 한도껏 예산 독식 → 뒤 종목 차단)를 제거.
+    valid_count = sum(1 for _, _, price in candidates if price > 0)
+    per_slot = available / valid_count if valid_count > 0 else Decimal("0")
+
+    consumed = Decimal("0")
     for sym, name, price in candidates:
         if price <= 0:
             recommendations.append(PositionRecommendation(
@@ -76,9 +84,8 @@ def evaluate_risk_gate(
             ))
             continue
 
-        # 종목당 한도 + 남은 가용 자금 중 작은 값
-        slot_remaining = available - consumed
-        slot = min(max_per, slot_remaining)
+        # 균등 슬롯 + 종목당 한도 캡 + 남은 가용 자금 가드
+        slot = min(max_per, per_slot, available - consumed)
         if slot <= 0:
             recommendations.append(PositionRecommendation(
                 symbol=sym, name=name, cur_price=price,
