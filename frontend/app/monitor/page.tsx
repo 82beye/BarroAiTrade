@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 
-const API = 'http://localhost:8000/api';
+const API = '/api';
 const POLL_MS = 1_000;
 const LOG_POLL_MS = 10_000;
 

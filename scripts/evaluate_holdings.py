@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import os
 import sys
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -34,6 +35,7 @@ from backend.core.journal.policy_config import PolicyConfigStore
 from backend.core.notify.telegram import TelegramNotifier, format_sell_alert
 from backend.core.risk.holding_evaluator import (
     ExitPolicy,
+    PositionContext,
     SellSignal,
     evaluate_all,
     render_decisions_table,
@@ -69,9 +71,42 @@ async def _run(args) -> int:
     policy = ExitPolicy(
         take_profit_pct=Decimal(str(tp)),
         stop_loss_pct=Decimal(str(sl)),
+        trailing_start_pct=Decimal(str(cfg.trailing_start_pct)),
+        trailing_offset_pct=Decimal(str(cfg.trailing_offset_pct)),
+        breakeven_trigger_pct=Decimal(str(cfg.breakeven_trigger_pct)),
+        partial_tp_pct=Decimal(str(cfg.partial_tp_pct)),
+        partial_tp_ratio=Decimal(str(cfg.partial_tp_ratio)),
+        hold_days_tighten=cfg.hold_days_tighten,
+        tightened_sl_pct=Decimal(str(cfg.tightened_sl_pct)),
     )
-    decisions = evaluate_all(balance.holdings, policy)
-    print(f"== 보유 종목 평가 ({len(decisions)} 종목, TP={tp}%, SL={sl}%) [policy.json] ==\n")
+
+    # ActivePosition 컨텍스트 로드 + peak 업데이트
+    pos_store = ActivePositionStore(args.pos_log)
+    active_positions = pos_store.load_all()
+    contexts: dict[str, PositionContext] = {}
+    for h in balance.holdings:
+        pos = active_positions.get(h.symbol)
+        if pos:
+            # peak 수익률 갱신
+            cur_rate = float(h.pnl_rate)
+            if cur_rate > pos.peak_pnl_rate:
+                pos.peak_pnl_rate = cur_rate
+                pos.peak_updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                pos_store.upsert(pos)
+            contexts[h.symbol] = PositionContext(
+                peak_pnl_rate=pos.peak_pnl_rate,
+                partial_tp_done=pos.partial_tp_done,
+                entry_time=pos.entry_time,
+                strategy=pos.strategy,
+            )
+
+    decisions = evaluate_all(balance.holdings, policy, contexts)
+    mode_label = "적응형" if contexts else "기본"
+    print(
+        f"== 보유 종목 평가 ({len(decisions)} 종목, TP={tp}%, SL={sl}%, "
+        f"트레일링={cfg.trailing_start_pct}%/-{cfg.trailing_offset_pct}%, "
+        f"BE={cfg.breakeven_trigger_pct}%) [{mode_label}] ==\n"
+    )
     print(render_decisions_table(decisions))
 
     executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
@@ -81,11 +116,13 @@ async def _run(args) -> int:
         policy=GatePolicy(daily_max_orders=args.daily_max_orders),
         notifier=notifier,
     )
-    pos_store = ActivePositionStore(args.pos_log)
 
-    # ── DCA 2·3분할 매수 체크 (SL 대상은 DCA 스킵) ─────────────────────────
-    # SL 종목에 추가매수하면 즉시 손절되므로, SL 대상을 먼저 파악 후 제외
-    sl_symbols = {d.symbol for d in decisions if d.signal == SellSignal.STOP_LOSS}
+    # ── DCA 2·3분할 매수 체크 (매도 대상은 DCA 스킵) ─────────────────────────
+    _SELL_SIGNALS = {
+        SellSignal.STOP_LOSS, SellSignal.TRAILING_STOP,
+        SellSignal.BREAKEVEN_STOP, SellSignal.TIME_TIGHTENED_SL,
+    }
+    sl_symbols = {d.symbol for d in decisions if d.signal in _SELL_SIGNALS}
 
     if args.auto_sell:
         active_positions = pos_store.load_all()
@@ -121,7 +158,6 @@ async def _run(args) -> int:
                     tranche.status = "filled"
                     tranche.order_no = r.order_no
                     tranche.filled_price = cur_price
-                    from datetime import datetime, timezone
                     tranche.filled_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
                     pos_store.upsert(pos)
                     dca_executed += 1
@@ -140,24 +176,31 @@ async def _run(args) -> int:
 
     print(f"\n== 자동 매도 ({len(sell_targets)} 종목, dry_run={args.dry_run}) ==")
     for d in sell_targets:
+        sell_qty = d.sell_qty if d.sell_qty > 0 else d.qty
         try:
-            r = await gate.place_sell(symbol=d.symbol, qty=d.qty)
+            r = await gate.place_sell(symbol=d.symbol, qty=sell_qty)
             tag = "DRY_RUN" if r.dry_run else "ORDERED"
             print(
-                f"  [{tag}] {d.symbol} {d.name:<14} qty={d.qty:>5} "
-                f"signal={d.signal.value:<12} order_no={r.order_no}"
+                f"  [{tag}] {d.symbol} {d.name:<14} qty={sell_qty:>5}/{d.qty} "
+                f"signal={d.signal.value:<16} order_no={r.order_no}"
             )
+            # 분할 익절 시 partial_tp_done 업데이트 (전량 청산 X)
+            if d.signal == SellSignal.PARTIAL_TP:
+                pos = active_positions.get(d.symbol)
+                if pos:
+                    pos.partial_tp_done = True
+                    pos_store.upsert(pos)
             # 전량 매도 시 active_positions 정리
-            if d.signal == SellSignal.STOP_LOSS or d.signal == SellSignal.TAKE_PROFIT:
+            elif sell_qty >= d.qty:
                 pos_store.remove(d.symbol)
             if notifier:
                 try:
                     await notifier.send(format_sell_alert(
-                        d.symbol, d.name, d.qty, d.signal.value,
+                        d.symbol, d.name, sell_qty, d.signal.value,
                         float(d.pnl_rate), r.order_no, r.dry_run,
                     ))
                 except Exception as te:
-                    print(f"    ⚠️ telegram 알림 실패: {te}")
+                    print(f"    telegram 알림 실패: {te}")
         except Exception as e:
             print(f"  [BLOCKED] {d.symbol} {d.name:<14}: {type(e).__name__}: {e}")
 

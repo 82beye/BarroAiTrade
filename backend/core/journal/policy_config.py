@@ -20,6 +20,14 @@ class PolicyConfig:
     max_total_position: float = 0.90
     daily_loss_limit: float = -3.0
     daily_max_orders: int = 50
+    # 적응형 매도 정책
+    trailing_start_pct: float = 3.0       # 트레일링 시작 수익률 (%)
+    trailing_offset_pct: float = 1.5      # 고점 대비 하락 허용폭 (%)
+    breakeven_trigger_pct: float = 2.5    # 브레이크이븐 전환 수익률 (%)
+    partial_tp_pct: float = 3.5           # 1차 분할 익절 기준 (%)
+    partial_tp_ratio: float = 0.5         # 1차 익절 매도 비율
+    hold_days_tighten: int = 5            # N일 이상 보유 시 SL 강화
+    tightened_sl_pct: float = -2.0        # 장기 보유 시 강화 SL (%)
     history: list[dict] = field(default_factory=list)         # 변경 이력
 
     def as_dict(self) -> dict:

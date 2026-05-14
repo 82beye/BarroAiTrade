@@ -279,6 +279,12 @@ async def _run(args) -> int:
                     key=lambda s: per_strategy_pnl.get(s, 0.0),
                 ) if per_strategy_pnl else "swing_38"
                 leader = next((c for c in filtered_leaders if c.symbol == r.symbol), None)
+                # 전략별 SL 자동 적용
+                from backend.core.risk.holding_evaluator import STRATEGY_EXIT_PROFILES
+                _profile = STRATEGY_EXIT_PROFILES.get(
+                    best_strategy.replace("_v1", "").replace("_v2", ""), {}
+                )
+                _sl = float(_profile.get("stop_loss_pct", args.sl))
                 pos_store.create_from_order(
                     symbol=r.symbol,
                     name=r.name,
@@ -286,7 +292,7 @@ async def _run(args) -> int:
                     entry_price=float(r.cur_price),
                     total_recommended_qty=r.recommended_qty,
                     order_no=result.order_no,
-                    sl_pct=args.sl,
+                    sl_pct=_sl,
                     flu_rate=float(leader.flu_rate) if leader else 0.0,
                     score=float(leader.score) if leader else 0.0,
                 )

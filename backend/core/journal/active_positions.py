@@ -60,6 +60,10 @@ class ActivePosition:
     flu_rate: float = 0.0
     score: float = 0.0
     tranches: list[Tranche] = field(default_factory=list)
+    # 적응형 매도 정책용 추적 필드
+    peak_pnl_rate: float = 0.0            # 보유 기간 중 최고 수익률
+    peak_updated_at: str = ""             # peak 갱신 시점
+    partial_tp_done: bool = False         # 1차 분할 익절 완료 여부
 
     # ── 계산 헬퍼 ───────────────────────────────────────────────
 
