@@ -44,6 +44,10 @@ async def main() -> None:
     ap.add_argument("--max-total", type=float, default=0.90, help="총 보유 한도 비중 (기본 0.90)")
     ap.add_argument("--max-concurrent", type=int, default=10, help="동시 보유 종목 수 (기본 10)")
     ap.add_argument(
+        "--slippage", type=float, default=0.0,
+        help="슬리피지 %% — 진입·청산 양방향 (기본 0.0, BAR-OPS-35 운영 권장 0.05)",
+    )
+    ap.add_argument(
         "--strategies",
         default="f_zone,sf_zone,gold_zone,swing_38,scalping_consensus",
         help="실행 전략 (comma-separated)",
@@ -82,6 +86,7 @@ async def main() -> None:
         warmup_candles=31,
         commission_pct=0.015,
         tax_pct_on_sell=0.18,
+        slippage_pct=args.slippage,
     )
     result = sim.run(candles_by_symbol, strategies=strategies)
 
