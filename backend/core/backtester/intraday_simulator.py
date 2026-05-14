@@ -53,6 +53,7 @@ class TradeRecord(BaseModel):
     price: Decimal
     timestamp: datetime
     reason: str = ""  # entry / tp1 / tp2 / sl / time_exit
+    pnl: Decimal = Decimal("0")  # sell 의 실현손익 (수수료·세금 차감 후). buy 는 0.
 
 
 class SimulationResult(BaseModel):
@@ -356,16 +357,19 @@ class IntradaySimulator:
                             current.timestamp,
                         )
                     for eo in exit_orders:
+                        # 청산도 슬리피지 적용 — 매도는 불리하게 낮은 가격 (양방향, P3 갭8)
+                        exit_price = eo.target_price * (Decimal("1") - self._slippage)
                         # 매도 시 commission + tax 차감
-                        gross = (eo.target_price - position.entry_price) * eo.qty
-                        commission = (eo.target_price + position.entry_price) * eo.qty * self._commission
-                        tax = eo.target_price * eo.qty * self._tax
+                        gross = (exit_price - position.entry_price) * eo.qty
+                        commission = (exit_price + position.entry_price) * eo.qty * self._commission
+                        tax = exit_price * eo.qty * self._tax
                         pnl = gross - commission - tax
                         trades.append(TradeRecord(
                             strategy_id=sid, symbol=symbol, side="sell",
-                            qty=eo.qty, price=eo.target_price,
+                            qty=eo.qty, price=exit_price,
                             timestamp=current.timestamp,
                             reason=eo.reason.value,
+                            pnl=pnl,
                         ))
                         pnl_by_strategy[sid] += pnl
                         completed_by_strategy[sid] += 1
@@ -422,8 +426,8 @@ class IntradaySimulator:
     ) -> tuple[PositionState, list[ExitOrder]]:
         """OPS-35 — bar high/low 터치 시 체결.
 
-        TP 우선 (위로 먼저 갔다고 가정 — 보수 X / 낙관). 동일 bar 에서
-        TP+SL 동시 터치 가능 — 둘 다 발생.
+        SL 우선 (보수적 — 봉 내 가격 경로 미상 시 worst-case 가정). 동일 bar 에서
+        SL 이 닿으면 TP 평가 없이 SL 체결. 트레이딩뷰 표준(bar magnifier off)과 동일.
         """
         high = Decimal(str(candle.high))
         low = Decimal(str(candle.low))
@@ -431,7 +435,23 @@ class IntradaySimulator:
         pos = position
         orders: list[ExitOrder] = []
 
-        # TP 평가 — 각 tier 의 절대가격이 high 이하면 체결
+        # SL 평가 우선 — low 가 효과적 SL 이하면 체결 (보수적: 하락 먼저 가정).
+        # sl_eff 는 ExitEngine._effective_sl 과 동일 — breakeven 갱신된 sl_at 우선.
+        if pos.qty > 0 and plan.stop_loss is not None:
+            sl_eff = (
+                pos.sl_at
+                if pos.sl_at is not None
+                else pos.entry_price * (Decimal("1") + plan.stop_loss.fixed_pct)
+            )
+            if low <= sl_eff:
+                new_pos, exit_orders = self._exit.evaluate(pos, plan, sl_eff, ts)
+                for eo in exit_orders:
+                    if eo.reason == ExitReason.STOP_LOSS:
+                        orders.append(eo)
+                pos = new_pos
+                return pos, orders
+
+        # TP 평가 — 각 tier 의 절대가격이 high 이상이면 체결
         for tier in plan.take_profits:
             tp_price = tier.price                       # _scaled_exit_plan 에서 절대가
             if pos.qty <= 0 or high < tp_price:
@@ -445,22 +465,13 @@ class IntradaySimulator:
             if pos.qty <= 0:
                 return pos, orders
 
-        # SL 평가 — low 가 SL 이하면 체결
-        if pos.qty > 0 and plan.stop_loss is not None:
-            sl_price = pos.entry_price * (Decimal("1") + plan.stop_loss.fixed_pct)
-            if low <= sl_price:
-                new_pos, exit_orders = self._exit.evaluate(pos, plan, sl_price, ts)
-                for eo in exit_orders:
-                    if eo.reason == ExitReason.STOP_LOSS:
-                        orders.append(eo)
-                pos = new_pos
-                return pos, orders
-
-        # 마지막 — close 기반 breakeven 트리거 등 잔여 평가
+        # 마지막 — close 기반 잔여 평가. TP1 발동으로 breakeven 상향된 sl_at 이
+        # close 에서 발동하는 등 청산이 생기면 orders 에 반영해야 한다.
+        # (누락 시 포지션은 사라지는데 청산 기록이 없어 cash 불일치 — BAR 버그픽스)
         if pos.qty > 0:
             close_p = Decimal(str(candle.close))
             new_pos, exit_orders = self._exit.evaluate(pos, plan, close_p, ts)
-            # close 기반 추가 청산 X (위에서 이미 TP/SL 처리). breakeven 만 trigger.
+            orders.extend(exit_orders)
             pos = new_pos
 
         return pos, orders

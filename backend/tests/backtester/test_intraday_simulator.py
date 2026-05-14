@@ -151,6 +151,69 @@ class TestTradeRecord:
         )
         assert t.side == "sell"
 
+    def test_pnl_default_zero(self):
+        """buy 거래 — pnl 기본값 0."""
+        t = TradeRecord(
+            strategy_id="x", symbol="y", side="buy",
+            qty=Decimal("10"), price=Decimal("100"),
+            timestamp=datetime.now(),
+        )
+        assert t.pnl == Decimal("0")
+
+    def test_pnl_field_set(self):
+        """sell 거래 — pnl 주입 가능."""
+        t = TradeRecord(
+            strategy_id="x", symbol="y", side="sell",
+            qty=Decimal("5"), price=Decimal("110"),
+            timestamp=datetime.now(), pnl=Decimal("123.45"),
+        )
+        assert t.pnl == Decimal("123.45")
+
+
+class TestIntrabarSLPriority:
+    """갭1 — SL 우선: 동일 봉 TP·SL 동시 터치 시 SL 체결 (보수적, 트레이딩뷰 표준)."""
+
+    def _pos(self, entry: str = "100"):
+        from backend.models.exit_order import PositionState
+
+        return PositionState(
+            symbol="TEST", entry_price=Decimal(entry),
+            qty=Decimal("10"), initial_qty=Decimal("10"),
+            entry_time=datetime(2026, 5, 1, 9, 0),
+        )
+
+    def test_sl_priority_when_both_touched(self):
+        """high 가 TP1·low 가 SL 동시 터치 → SL 체결, TP 미발동."""
+        from backend.core.backtester.intraday_simulator import _scaled_exit_plan
+        from backend.models.exit_order import ExitReason
+
+        sim = IntradaySimulator()
+        plan = _scaled_exit_plan(Decimal("100"))  # TP +3/+5/+7%, SL -1.5% (98.5)
+        candle = OHLCV(
+            symbol="TEST", timestamp=datetime(2026, 5, 1, 9, 1),
+            open=100, high=104, low=98, close=99, volume=1000,
+            market_type=MarketType.STOCK,
+        )
+        new_pos, orders = sim._evaluate_intrabar(self._pos(), plan, candle)
+        assert len(orders) == 1
+        assert orders[0].reason == ExitReason.STOP_LOSS
+        assert new_pos.qty == Decimal("0")
+
+    def test_tp_fires_when_sl_not_touched(self):
+        """low 가 SL 미터치 → TP1 정상 발동."""
+        from backend.core.backtester.intraday_simulator import _scaled_exit_plan
+        from backend.models.exit_order import ExitReason
+
+        sim = IntradaySimulator()
+        plan = _scaled_exit_plan(Decimal("100"))
+        candle = OHLCV(
+            symbol="TEST", timestamp=datetime(2026, 5, 1, 9, 1),
+            open=100, high=104, low=99.5, close=103, volume=1000,
+            market_type=MarketType.STOCK,
+        )
+        new_pos, orders = sim._evaluate_intrabar(self._pos(), plan, candle)
+        assert any(o.reason == ExitReason.TP1 for o in orders)
+
 
 # ─── BAR-OPS-09: scalping_consensus provider 주입 ──────────────────────────
 
@@ -411,3 +474,39 @@ class TestAtrDynamicSL:
         plan = _exit_plan_for_strategy("sf_zone", Decimal("100"), out)
         # ATR≈0.60, cap 0.08 적용 → SL = -0.08×2 = -0.16
         assert plan.stop_loss.fixed_pct == Decimal("-0.16")
+
+
+class TestBidirectionalSlippage:
+    """P3 갭8 — 청산에도 슬리피지 적용 (양방향)."""
+
+    def test_exit_slippage_below_target(self):
+        """slippage>0 → tp1 청산가 = 진입가 * 1.03 * (1 - slippage)."""
+        candles = _synthetic_candles(120)
+        sim = IntradaySimulator(
+            warmup_candles=15, position_qty=Decimal("10"), slippage_pct=1.0,
+        )
+        result = sim.run(candles, symbol="005930", strategies=["gold_zone"])
+        # gold_zone → _scaled_exit_plan: tp1 = entry * 1.03
+        for i, t in enumerate(result.trades):
+            if t.side == "sell" and t.reason == "tp1":
+                buy = next(
+                    b for b in reversed(result.trades[:i]) if b.side == "buy"
+                )
+                # 청산가 = tp1_raw(entry*1.03) * (1 - 0.01)
+                assert t.price == buy.price * Decimal("1.03") * Decimal("0.99")
+                break
+
+    def test_slippage_zero_unchanged(self):
+        """slippage=0 → 청산가 슬리피지 영향 없음 (회귀 안전)."""
+        candles = _synthetic_candles(120)
+        sim = IntradaySimulator(
+            warmup_candles=15, position_qty=Decimal("10"), slippage_pct=0.0,
+        )
+        result = sim.run(candles, symbol="005930", strategies=["gold_zone"])
+        for i, t in enumerate(result.trades):
+            if t.side == "sell" and t.reason == "tp1":
+                buy = next(
+                    b for b in reversed(result.trades[:i]) if b.side == "buy"
+                )
+                assert t.price == buy.price * Decimal("1.03")
+                break

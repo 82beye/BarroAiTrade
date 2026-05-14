@@ -7,6 +7,14 @@ from backend.core.backtester.intraday_simulator import (
     TradeRecord,
     load_csv_candles,
 )
+from backend.core.backtester.performance import (
+    PerformanceMetrics,
+    compute_metrics,
+)
+from backend.core.backtester.portfolio_simulator import (
+    PortfolioResult,
+    PortfolioSimulator,
+)
 
 __all__ = [
     "IntradaySimulator",
@@ -14,4 +22,8 @@ __all__ = [
     "SimulationResult",
     "TradeRecord",
     "load_csv_candles",
+    "PerformanceMetrics",
+    "compute_metrics",
+    "PortfolioResult",
+    "PortfolioSimulator",
 ]
