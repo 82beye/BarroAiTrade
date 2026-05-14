@@ -80,13 +80,13 @@ pmset -g | grep -E "sleep|hibernate|autorestart"
 
 ```bash
 # 환경변수 wrapper 스크립트
-cat > ~/BarroAiTrade/scripts/run_bot_with_env.sh <<'EOF'
+cat > ~/workspace/BarroAiTrade/scripts/run_bot_with_env.sh <<'EOF'
 #!/bin/bash
 cd /Users/beye/BarroAiTrade
 set -a; . ./.env.local; set +a
 exec ./.venv/bin/python scripts/run_telegram_bot.py
 EOF
-chmod +x ~/BarroAiTrade/scripts/run_bot_with_env.sh
+chmod +x ~/workspace/BarroAiTrade/scripts/run_bot_with_env.sh
 
 # launchd plist
 sudo tee ~/Library/LaunchAgents/com.barroai.telegram-bot.plist <<'EOF'
@@ -203,7 +203,7 @@ gh pr merge --squash
 ### D) 운영 머신 동기 (PR 머지 후, 인텔 머신에서)
 
 ```bash
-cd ~/BarroAiTrade
+cd ~/workspace/BarroAiTrade
 git pull origin main
 
 # 봇 재시작 (코드 변경 반영)
@@ -270,8 +270,8 @@ sudo tailscale up
 
 ```bash
 # M4 에서 인텔 로그 직접 보기
-ssh beye@home-mac "tail -50 ~/BarroAiTrade/logs/morning.log"
-ssh beye@home-mac "grep BLOCKED ~/BarroAiTrade/data/order_audit.csv | tail -20"
+ssh beye@home-mac "tail -50 ~/workspace/BarroAiTrade/logs/morning.log"
+ssh beye@home-mac "grep BLOCKED ~/workspace/BarroAiTrade/data/order_audit.csv | tail -20"
 ```
 
 ### C) 데이터 백업 — git 외 채널 (선택)
@@ -281,14 +281,14 @@ ssh beye@home-mac "grep BLOCKED ~/BarroAiTrade/data/order_audit.csv | tail -20"
 | 옵션 | 명령 | 빈도 |
 |------|------|------|
 | **iCloud Drive** | 심볼릭 링크 | 자동 |
-| rsync to M4 | `rsync -av beye@home:~/BarroAiTrade/data/ ~/Backup/` | 매주 cron |
+| rsync to M4 | `rsync -av beye@home:~/workspace/BarroAiTrade/data/ ~/Backup/` | 매주 cron |
 | S3/Dropbox | aws s3 sync 또는 rclone | 매일 |
 
 권장: **iCloud Drive 심볼릭 링크**:
 ```bash
 # 인텔에서
-mv ~/BarroAiTrade/data ~/Library/Mobile\ Documents/com~apple~CloudDocs/BarroAiTrade-data
-ln -s ~/Library/Mobile\ Documents/com~apple~CloudDocs/BarroAiTrade-data ~/BarroAiTrade/data
+mv ~/workspace/BarroAiTrade/data ~/Library/Mobile\ Documents/com~apple~CloudDocs/BarroAiTrade-data
+ln -s ~/Library/Mobile\ Documents/com~apple~CloudDocs/BarroAiTrade-data ~/workspace/BarroAiTrade/data
 
 # M4 에서 동일 위치 자동 동기 → 분석 가능
 ```
