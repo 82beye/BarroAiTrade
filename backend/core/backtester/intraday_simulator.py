@@ -37,6 +37,12 @@ logger = logging.getLogger(__name__)
 # 가 받을 수 있는 형식이면 됨.
 ScalpingProvider = Callable[[AnalysisContext], Optional[Any]]
 
+# BAR-OPS-10: 일봉 백테스트에서 신호 미발화가 설계상 정상인 전략 목록.
+# ScalpingConsensusStrategy 는 ScalpingCoordinator 진입 구간 필터 (당일 change_pct ≥ 5%)
+# 와 거래대금·시간대 필터로 인해 일봉 데이터에서 0건이 정상이다 — 급등주 인트라데이 전용.
+# 참조: backend/legacy_scalping/strategy/scalping_team/coordinator.py:213
+INTRADAY_ONLY_STRATEGIES: frozenset[str] = frozenset({"scalping_consensus"})
+
 
 # ─── 결과 모델 ────────────────────────────────────────────
 
@@ -140,6 +146,8 @@ _DEFAULT_EXIT_PLAN = ExitPlan(
 def _build_strategies(
     strategy_ids: Sequence[str],
     scalping_provider: Optional[ScalpingProvider] = None,
+    *,
+    daily_backtest: bool = False,
 ):
     """strategy_id → 인스턴스 lazy import.
 
@@ -147,7 +155,20 @@ def _build_strategies(
     미주입 상태에서 scalping_consensus 가 포함되면 warning 로그를 남김 — analyze()
     가 항상 None 을 반환해 trades=0 이 보장되므로 호출측이 조용히 0건을 받는 것을
     방지하기 위함.
+
+    daily_backtest=True 이면 INTRADAY_ONLY_STRATEGIES 를 info 로그로 안내한다.
+    해당 전략은 제거되지 않으며 0건 결과가 정상임을 문서화한다.
     """
+    if daily_backtest:
+        for sid in strategy_ids:
+            if sid in INTRADAY_ONLY_STRATEGIES:
+                logger.info(
+                    "%s: 일봉 백테스트 포함 — ScalpingCoordinator 진입 구간 필터 "
+                    "(change_pct ≥ 5%%, 거래대금·시간대) 로 인해 0건이 정상. "
+                    "급등주 인트라데이 전용 전략 (INTRADAY_ONLY_STRATEGIES).",
+                    sid,
+                )
+
     out = []
     for sid in strategy_ids:
         if sid == "f_zone":

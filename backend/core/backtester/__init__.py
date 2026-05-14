@@ -1,6 +1,7 @@
 """BAR-OPS-08 — 당일 캔들 시뮬레이터."""
 
 from backend.core.backtester.intraday_simulator import (
+    INTRADAY_ONLY_STRATEGIES,
     IntradaySimulator,
     ScalpingProvider,
     SimulationResult,
@@ -17,6 +18,7 @@ from backend.core.backtester.portfolio_simulator import (
 )
 
 __all__ = [
+    "INTRADAY_ONLY_STRATEGIES",
     "IntradaySimulator",
     "ScalpingProvider",
     "SimulationResult",
