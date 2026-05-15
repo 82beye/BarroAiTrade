@@ -108,6 +108,9 @@ async def get_positions(
     }
     ```
     """
+    from backend.core.journal.active_positions import ActivePositionStore
+    active = ActivePositionStore("data/active_positions.json").load_all()
+
     try:
         fetcher = _build_kiwoom_fetcher()
         balance = await fetcher.fetch_balance()
@@ -115,13 +118,11 @@ async def get_positions(
         if symbol:
             holdings = [h for h in holdings if h.symbol == symbol]
 
-        # active_positions 에서 전략 정보 로드
-        from backend.core.journal.active_positions import ActivePositionStore
-        active = ActivePositionStore("data/active_positions.json").load_all()
-
         positions = []
+        seen_symbols = set()
         for h in holdings:
             pos_meta = active.get(h.symbol)
+            seen_symbols.add(h.symbol)
             positions.append({
                 "symbol": h.symbol,
                 "name": getattr(h, "name", ""),
@@ -132,8 +133,38 @@ async def get_positions(
                 "strategy": pos_meta.strategy if pos_meta else "",
                 "tranche": f"{sum(1 for t in pos_meta.tranches if t.status == 'filled')}/{len(pos_meta.tranches)}" if pos_meta else "",
             })
+
+        # active_positions에 있지만 브로커 잔고에 없는 종목 보충
+        for sym, pos in active.items():
+            if sym not in seen_symbols and (not symbol or sym == symbol):
+                positions.append({
+                    "symbol": sym,
+                    "name": pos.name,
+                    "quantity": pos.total_recommended_qty,
+                    "avg_price": pos.entry_price,
+                    "cur_price": pos.entry_price,
+                    "pnl_rate": 0.0,
+                    "strategy": pos.strategy,
+                    "tranche": f"{sum(1 for t in pos.tranches if t.status == 'filled')}/{len(pos.tranches)}",
+                })
+
         logger.info("포지션 목록 조회: %d 종목", len(positions))
         return {"positions": positions, "count": len(positions), "status": "ok"}
     except Exception as e:
-        logger.error(f"포지션 조회 실패: {e}")
-        return {"positions": [], "count": 0, "status": "error", "detail": str(e)}
+        logger.warning(f"브로커 잔고 조회 실패, active_positions 폴백: {e}")
+        # 폴백: active_positions.json 기반
+        positions = []
+        for sym, pos in active.items():
+            if symbol and sym != symbol:
+                continue
+            positions.append({
+                "symbol": sym,
+                "name": pos.name,
+                "quantity": pos.total_recommended_qty,
+                "avg_price": pos.entry_price,
+                "cur_price": pos.entry_price,
+                "pnl_rate": 0.0,
+                "strategy": pos.strategy,
+                "tranche": f"{sum(1 for t in pos.tranches if t.status == 'filled')}/{len(pos.tranches)}",
+            })
+        return {"positions": positions, "count": len(positions), "status": "fallback"}

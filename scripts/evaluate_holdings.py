@@ -80,25 +80,29 @@ async def _run(args) -> int:
         tightened_sl_pct=Decimal(str(cfg.tightened_sl_pct)),
     )
 
+    # CLI에서 TP/SL 명시 지정 시 (강제청산 등) 전략 override 비활성
+    force_mode = (args.tp != 5.0 or args.sl != -4.0)
+
     # ActivePosition 컨텍스트 로드 + peak 업데이트
     pos_store = ActivePositionStore(args.pos_log)
     active_positions = pos_store.load_all()
     contexts: dict[str, PositionContext] = {}
-    for h in balance.holdings:
-        pos = active_positions.get(h.symbol)
-        if pos:
-            # peak 수익률 갱신
-            cur_rate = float(h.pnl_rate)
-            if cur_rate > pos.peak_pnl_rate:
-                pos.peak_pnl_rate = cur_rate
-                pos.peak_updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-                pos_store.upsert(pos)
-            contexts[h.symbol] = PositionContext(
-                peak_pnl_rate=pos.peak_pnl_rate,
-                partial_tp_done=pos.partial_tp_done,
-                entry_time=pos.entry_time,
-                strategy=pos.strategy,
-            )
+    if not force_mode:
+        for h in balance.holdings:
+            pos = active_positions.get(h.symbol)
+            if pos:
+                # peak 수익률 갱신
+                cur_rate = float(h.pnl_rate)
+                if cur_rate > pos.peak_pnl_rate:
+                    pos.peak_pnl_rate = cur_rate
+                    pos.peak_updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                    pos_store.upsert(pos)
+                contexts[h.symbol] = PositionContext(
+                    peak_pnl_rate=pos.peak_pnl_rate,
+                    partial_tp_done=pos.partial_tp_done,
+                    entry_time=pos.entry_time,
+                    strategy=pos.strategy,
+                )
 
     decisions = evaluate_all(balance.holdings, policy, contexts)
     mode_label = "적응형" if contexts else "기본"
