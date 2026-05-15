@@ -175,9 +175,10 @@ class ReportService:
         if overall_return < -5:
             warnings.append("⚠️ 오늘 수익률이 -5% 이하입니다. 포트폴리오 점검이 필요합니다.")
 
-        # 내일 전망 (임시)
+        # 내일 전망 — 당일 거래 중 수익이 있는 상위 종목
+        watch_stocks = self._extract_top_performing_stocks(daily_trades)
         tomorrow_forecast = {
-            "watch_stocks": [],
+            "watch_stocks": watch_stocks,
             "ai_insight": "시장 분석 데이터 준비 중"
         }
 
@@ -358,6 +359,34 @@ class ReportService:
                 "top_stock": "NAVER"
             },
         ]
+
+    def _extract_top_performing_stocks(self, trades: List[Dict[str, Any]]) -> List[str]:
+        """당일 거래 중 수익이 있는 상위 2개 종목 추출
+
+        Args:
+            trades: 당일 거래 내역
+
+        Returns:
+            상위 수익 종목 코드 리스트 (최대 2개)
+        """
+        if not trades:
+            return []
+
+        # PnL > 0인 거래만 필터링
+        profitable_trades = [t for t in trades if t.get("pnl", 0) > 0]
+        if not profitable_trades:
+            return []
+
+        # 종목별 총 PnL 계산
+        symbol_pnl: Dict[str, float] = {}
+        for trade in profitable_trades:
+            symbol = trade.get("symbol", "")
+            if symbol:
+                symbol_pnl[symbol] = symbol_pnl.get(symbol, 0) + trade.get("pnl", 0)
+
+        # PnL 순으로 정렬하여 상위 2개 추출
+        sorted_symbols = sorted(symbol_pnl.items(), key=lambda x: x[1], reverse=True)
+        return [symbol for symbol, _ in sorted_symbols[:2]]
 
 
 # 전역 인스턴스
