@@ -378,7 +378,7 @@ class TestAtrDynamicSL:
         assert plan.stop_loss.fixed_pct == Decimal("-0.04")
 
     def test_exit_plan_fzone_uses_fixed(self):
-        """f_zone → 고정 _scaled_exit_plan (BEFORE 동작 보존)."""
+        """f_zone (기본 f_zone_atr=False) → 고정 _scaled_exit_plan (BEFORE 동작 보존)."""
         plan = _exit_plan_for_strategy(
             "f_zone", Decimal("100"), self._flat_then_volatile(30),
         )
@@ -387,6 +387,29 @@ class TestAtrDynamicSL:
         assert plan.take_profits[0].price == Decimal("103")
         assert plan.take_profits[1].price == Decimal("105")
         assert plan.take_profits[2].price == Decimal("107")
+
+    def test_exit_plan_fzone_atr_when_enabled(self):
+        """f_zone_atr=True → f_zone 도 sf_zone 과 동일 ATR plan (실험 옵션)."""
+        candles = self._flat_then_volatile(30)
+        plan = _exit_plan_for_strategy(
+            "f_zone", Decimal("100"), candles, f_zone_atr=True,
+        )
+        sf_plan = _exit_plan_for_strategy("sf_zone", Decimal("100"), candles)
+        # ATR plan: SL 고정 -0.015 가 아니라 sf_zone 결과와 동일
+        assert plan.stop_loss.fixed_pct == sf_plan.stop_loss.fixed_pct
+        assert plan.take_profits[0].price == sf_plan.take_profits[0].price
+        assert plan.stop_loss.fixed_pct != Decimal("-0.015")
+
+    def test_simulator_f_zone_atr_exit_flag(self):
+        """IntradaySimulator(f_zone_atr_exit=True) — run() 정상 완료, 회귀 안전."""
+        sim = IntradaySimulator(
+            warmup_candles=15, position_qty=Decimal("10"),
+            f_zone_atr_exit=True,
+        )
+        result = sim.run(
+            _synthetic_candles(80), symbol="005930", strategies=["f_zone"],
+        )
+        assert isinstance(result, SimulationResult)
 
     def test_exit_plan_sfzone_uses_atr(self):
         """sf_zone → ATR 기반 동적 TP·SL. R:R 균형 유지 (SL=2×ATR, TP=1.5/2.5/3.5×ATR)."""

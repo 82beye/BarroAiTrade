@@ -258,6 +258,7 @@ class IntradaySimulator:
         position_value: Optional[Decimal] = None,
         high_price_threshold: Decimal = Decimal("1000000"),
         high_price_budget: Decimal = Decimal("2000000"),
+        f_zone_atr_exit: bool = False,
     ) -> None:
         self._exit = exit_engine or ExitEngine()
         self._warmup = warmup_candles
@@ -275,6 +276,8 @@ class IntradaySimulator:
         self._position_value = position_value
         self._high_price_threshold = high_price_threshold
         self._high_price_budget = high_price_budget
+        # f_zone 백테스트 청산 — True 시 sf_zone 과 동일 ATR plan 사용 (실험 옵션)
+        self._f_zone_atr = f_zone_atr_exit
 
     def run(
         self,
@@ -320,7 +323,7 @@ class IntradaySimulator:
                         qty=qty, initial_qty=qty,
                         entry_time=current.timestamp,
                     )
-                    current_plan = _exit_plan_for_strategy(sid, entry_price, window)
+                    current_plan = _exit_plan_for_strategy(sid, entry_price, window, f_zone_atr=self._f_zone_atr)
                     trades.append(TradeRecord(
                         strategy_id=sid, symbol=symbol, side="buy",
                         qty=qty, price=entry_price,
@@ -356,7 +359,7 @@ class IntradaySimulator:
                                 qty=qty, initial_qty=qty,
                                 entry_time=current.timestamp,
                             )
-                            current_plan = _exit_plan_for_strategy(sid, entry_price, window)
+                            current_plan = _exit_plan_for_strategy(sid, entry_price, window, f_zone_atr=self._f_zone_atr)
                             trades.append(TradeRecord(
                                 strategy_id=sid, symbol=symbol, side="buy",
                                 qty=qty, price=entry_price,
@@ -558,13 +561,18 @@ def _exit_plan_for_strategy(
     strategy_id: str,
     entry_price: Decimal,
     candles_window: list[OHLCV],
+    *,
+    f_zone_atr: bool = False,
 ) -> ExitPlan:
     """전략별 ExitPlan 분기 — '100% 중복은 공유, 나머지는 별도' 원칙.
 
     - sf_zone: ATR 기반 동적 TP·SL (변동성 적응)
-    - 그 외 (f_zone, gold_zone, swing_38, scalping_consensus): 고정 +3/+5/+7%, −1.5%
+    - f_zone + f_zone_atr=True: sf_zone 과 동일 ATR plan (실험 옵션)
+    - 그 외 (f_zone 기본, gold_zone, swing_38, scalping_consensus): 고정 +3/+5/+7%, −1.5%
     """
     if strategy_id == "sf_zone":
+        return _sfzone_atr_exit_plan(entry_price, candles_window)
+    if strategy_id == "f_zone" and f_zone_atr:
         return _sfzone_atr_exit_plan(entry_price, candles_window)
     return _scaled_exit_plan(entry_price)
 
