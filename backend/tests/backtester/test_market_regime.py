@@ -3,7 +3,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from backend.core.backtester import MarketRegime, classify_regime, regime_weights
+from backend.core.backtester import (
+    MarketRegime,
+    classify_regime,
+    regime_f_zone_atr,
+    regime_weights,
+)
 from backend.models.market import MarketType, OHLCV
 
 
@@ -87,3 +92,21 @@ def test_regime_weights_returns_copy():
     w["swing_38"] = 99.0
     fresh = regime_weights(MarketRegime.SIDEWAYS)
     assert fresh["swing_38"] == 0.3
+
+
+# ─── regime_f_zone_atr — BULL 에서만 True ──────────────────────
+
+
+def test_regime_f_zone_atr_bull():
+    """BULL → f_zone_atr_exit True (강세 종목 실험에서 +10.63M 이익 검증)."""
+    assert regime_f_zone_atr(MarketRegime.BULL) is True
+
+
+def test_regime_f_zone_atr_sideways():
+    """SIDEWAYS → False (박스권에서 ATR SL 폭이 손실 비례 확대)."""
+    assert regime_f_zone_atr(MarketRegime.SIDEWAYS) is False
+
+
+def test_regime_f_zone_atr_bearish():
+    """BEARISH → False (하락장도 ATR SL 폭 위험)."""
+    assert regime_f_zone_atr(MarketRegime.BEARISH) is False

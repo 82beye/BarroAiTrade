@@ -381,6 +381,15 @@ def test_strategy_weight_above_one_capped_by_max_per():
     assert alloc["A"] == Decimal("1000000")
 
 
+def test_f_zone_atr_exit_flag_invariant():
+    """PortfolioSimulator(f_zone_atr_exit=True) — 정상 완료 + cash 흐름 불변식."""
+    sim = PortfolioSimulator(
+        Decimal("10000000"), warmup_candles=15, f_zone_atr_exit=True,
+    )
+    result = sim.run({"A": _candles("A", 100)}, strategies=["f_zone"])
+    _assert_invariants(result)
+
+
 def test_strategy_weight_below_one_unaffected_by_cap():
     """weight < 1.0 — per_slot 이 max_per 보다 커도 cap 에 안 닿음 (정상 축소)."""
     sim = PortfolioSimulator(

@@ -101,4 +101,26 @@ def regime_weights(regime: MarketRegime) -> dict[str, float]:
     return dict(REGIME_WEIGHTS[regime])
 
 
-__all__ = ["MarketRegime", "REGIME_WEIGHTS", "classify_regime", "regime_weights"]
+# 국면별 f_zone ATR 청산 토글 — F존 ATR 실험(2026-05-16)에서 강세 종목 +10.63M
+# 추가 이익, 박스권/변동성 -1.64M 손해 확인. BULL 만 활성화.
+# 참조: docs/04-report/features/F-zone-atr-exit-experiment.md
+REGIME_F_ZONE_ATR: Mapping[MarketRegime, bool] = {
+    MarketRegime.BULL: True,
+    MarketRegime.SIDEWAYS: False,
+    MarketRegime.BEARISH: False,
+}
+
+
+def regime_f_zone_atr(regime: MarketRegime) -> bool:
+    """국면에 대응하는 f_zone_atr_exit 권장값 (BULL 만 True)."""
+    return REGIME_F_ZONE_ATR[regime]
+
+
+__all__ = [
+    "MarketRegime",
+    "REGIME_WEIGHTS",
+    "REGIME_F_ZONE_ATR",
+    "classify_regime",
+    "regime_weights",
+    "regime_f_zone_atr",
+]

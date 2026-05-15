@@ -28,6 +28,7 @@ from pydantic import SecretStr
 from backend.core.backtester import (
     PortfolioSimulator,
     classify_regime,
+    regime_f_zone_atr,
     regime_weights,
 )
 from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
@@ -71,6 +72,14 @@ async def main() -> None:
         help="picker 우회 — 콤마 구분 종목 코드 직접 지정 (예: 252670,080220). "
              "지정 시 --top/--min-flu/--min-score 무시.",
     )
+    ap.add_argument(
+        "--f-zone-atr", dest="f_zone_atr", action="store_const", const=True,
+        default=None, help="F존 ATR 청산 활성화 (수동). 미지정 시 --auto-weights 결정.",
+    )
+    ap.add_argument(
+        "--no-f-zone-atr", dest="f_zone_atr", action="store_const", const=False,
+        help="F존 ATR 청산 명시 OFF (--auto-weights BULL 자동 토글 무시).",
+    )
     args = ap.parse_args()
 
     weights: dict[str, float] = {}
@@ -113,13 +122,21 @@ async def main() -> None:
         print("시뮬 대상 종목 없음")
         return
 
-    # auto-weights: 시장 국면 분류 → 권장 가중치 적용 (명시 --strategy-weights 가 우선)
+    # auto-weights: 시장 국면 분류 → 권장 가중치 + f_zone_atr 자동 토글
+    # 명시 --strategy-weights / --f-zone-atr / --no-f-zone-atr 가 우선.
+    f_zone_atr_final = args.f_zone_atr if args.f_zone_atr is not None else False
     if args.auto_weights:
         regime = classify_regime(candles_by_symbol)
         auto = regime_weights(regime)
-        print(f"시장 국면 자동 분류: {regime.value.upper()}  권장 가중치 {auto}")
+        auto_atr = regime_f_zone_atr(regime)
+        print(
+            f"시장 국면 자동 분류: {regime.value.upper()}  "
+            f"가중치 {auto}  f_zone_atr={auto_atr}"
+        )
         for k, v in auto.items():
             weights.setdefault(k, v)
+        if args.f_zone_atr is None:
+            f_zone_atr_final = auto_atr
 
     sim = PortfolioSimulator(
         initial_capital=Decimal(str(args.capital)),
@@ -131,6 +148,7 @@ async def main() -> None:
         tax_pct_on_sell=0.18,
         slippage_pct=args.slippage,
         strategy_weights=weights or None,
+        f_zone_atr_exit=f_zone_atr_final,
     )
     result = sim.run(candles_by_symbol, strategies=strategies)
 

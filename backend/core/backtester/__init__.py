@@ -9,9 +9,11 @@ from backend.core.backtester.intraday_simulator import (
     load_csv_candles,
 )
 from backend.core.backtester.market_regime import (
+    REGIME_F_ZONE_ATR,
     REGIME_WEIGHTS,
     MarketRegime,
     classify_regime,
+    regime_f_zone_atr,
     regime_weights,
 )
 from backend.core.backtester.performance import (
@@ -34,4 +36,10 @@ __all__ = [
     "compute_metrics",
     "PortfolioResult",
     "PortfolioSimulator",
+    "MarketRegime",
+    "REGIME_WEIGHTS",
+    "REGIME_F_ZONE_ATR",
+    "classify_regime",
+    "regime_weights",
+    "regime_f_zone_atr",
 ]

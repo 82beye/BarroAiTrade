@@ -115,6 +115,7 @@ class PortfolioSimulator:
         exit_on_intrabar: bool = True,
         scalping_provider: Optional[ScalpingProvider] = None,
         strategy_weights: Optional[dict[str, float]] = None,
+        f_zone_atr_exit: bool = False,
     ) -> None:
         if initial_capital <= 0:
             raise ValueError(f"initial_capital must be > 0, got {initial_capital}")
@@ -132,6 +133,8 @@ class PortfolioSimulator:
         self._strategy_weights: dict[str, Decimal] = {
             k: Decimal(str(v)) for k, v in (strategy_weights or {}).items()
         }
+        # f_zone 백테스트 청산 — True 시 sf_zone 과 동일 ATR plan 사용 (BULL 권장)
+        self._f_zone_atr = f_zone_atr_exit
         # 청산 평가 헬퍼 — _evaluate_intrabar 호출 전용. 수수료는 0 (PortfolioSimulator
         # 가 cash 연동해 자체 계산). run() 루프는 사용하지 않음.
         self._exec_helper = IntradaySimulator(
@@ -233,7 +236,9 @@ class PortfolioSimulator:
                     continue  # cash 가드 — 갭상승 등으로 추정 초과 시 거부
                 cash -= cost
                 window = candles_by_symbol[sym][: ptr[sym] + 1]
-                plan = _exit_plan_for_strategy(sid, entry_price, window)
+                plan = _exit_plan_for_strategy(
+                    sid, entry_price, window, f_zone_atr=self._f_zone_atr,
+                )
                 positions[sym] = _OpenPosition(
                     strategy_id=sid,
                     pos=PositionState(
