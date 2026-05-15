@@ -377,8 +377,10 @@ class PortfolioSimulator:
                 continue
             # cash - consumed 가드 — balance_gate 대비 추가: 손실로 cash 가 줄면
             # available(initial 기준)만으로는 실제 현금 초과 매수가 가능해짐.
+            # base_slot 에 max_per 포함 cap → weight<1.0 도 정상 축소. weight 적용
+            # 후 max_per 로 다시 cap → weight>1.0 이 종목당 한도를 깨지 못하게.
             base_slot = min(max_per, per_slot, available - consumed, cash - consumed)
-            slot = base_slot * weight
+            slot = min(base_slot * weight, max_per)
             if slot <= 0:
                 continue
             qty = (slot / est_price).quantize(Decimal("1"), rounding=ROUND_DOWN)

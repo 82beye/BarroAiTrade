@@ -364,3 +364,34 @@ def test_strategy_weight_invariant():
     )
     result = sim.run({"A": _candles("A", 100)}, strategies=["gold_zone"])
     _assert_invariants(result)
+
+
+def test_strategy_weight_above_one_capped_by_max_per():
+    """weight > 1.0 — slot 은 max_per 로 cap (종목당 한도 보존)."""
+    sim = PortfolioSimulator(
+        Decimal("10000000"),
+        max_per_position=Decimal("0.1"),    # max_per = 1M
+        max_total_position=Decimal("0.9"),  # available = 9M
+        strategy_weights={"gold_zone": 1.5},
+    )
+    ranked = [("A", ("gold_zone", _SigStub(1000, 0.9)))]
+    alloc = sim._allocate(ranked, Decimal("10000000"), Decimal("0"), 0)
+    # base_slot = min(1M, 9M, ...) = 1M. slot = min(1M*1.5, 1M) = 1M.
+    # weight 1.5 가 max_per 1M 에서 cap — 종목당 한도 깨짐 방지.
+    assert alloc["A"] == Decimal("1000000")
+
+
+def test_strategy_weight_below_one_unaffected_by_cap():
+    """weight < 1.0 — per_slot 이 max_per 보다 커도 cap 에 안 닿음 (정상 축소)."""
+    sim = PortfolioSimulator(
+        Decimal("10000000"),
+        max_per_position=Decimal("0.5"),    # max_per = 5M
+        max_total_position=Decimal("0.9"),  # available = 9M
+        strategy_weights={"swing_38": 0.3},
+    )
+    # 단일 후보 → per_slot = 9M (max_per 5M 보다 큼)
+    ranked = [("A", ("swing_38", _SigStub(1000, 0.9)))]
+    alloc = sim._allocate(ranked, Decimal("10000000"), Decimal("0"), 0)
+    # base_slot = min(5M, 9M, ...) = 5M. slot = min(5M * 0.3, 5M) = 1.5M.
+    # weight 0.3 정상 축소 — per_slot 이 커도 cap 에 무력화 안 됨.
+    assert alloc["A"] == Decimal("1500000")
