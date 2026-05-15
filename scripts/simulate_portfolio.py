@@ -26,6 +26,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 from pydantic import SecretStr
 
 from backend.core.backtester import (
+    MarketRegime,
     PortfolioSimulator,
     classify_regime,
     regime_f_zone_atr,
@@ -80,6 +81,11 @@ async def main() -> None:
         "--no-f-zone-atr", dest="f_zone_atr", action="store_const", const=False,
         help="F존 ATR 청산 명시 OFF (--auto-weights BULL 자동 토글 무시).",
     )
+    ap.add_argument(
+        "--avoid-bearish", action="store_true",
+        help="종목별 classify_regime BEARISH 종목 제외 — picker 후처리 필터. "
+             "하락 추세 종목 노출 차단.",
+    )
     args = ap.parse_args()
 
     weights: dict[str, float] = {}
@@ -117,6 +123,17 @@ async def main() -> None:
                 candles_by_symbol[c.symbol] = candles
             else:
                 print(f"[SKIP] {c.symbol} {c.name} 캔들 부족 ({len(candles)}봉)")
+
+    # avoid-bearish: 종목별 분류 후 BEARISH 제외 (picker 후처리 필터)
+    if args.avoid_bearish and candles_by_symbol:
+        filtered: dict[str, list] = {}
+        for sym, candles in candles_by_symbol.items():
+            sym_regime = classify_regime({sym: candles})
+            if sym_regime == MarketRegime.BEARISH:
+                print(f"[BEARISH-SKIP] {sym}")
+            else:
+                filtered[sym] = candles
+        candles_by_symbol = filtered
 
     if not candles_by_symbol:
         print("시뮬 대상 종목 없음")
