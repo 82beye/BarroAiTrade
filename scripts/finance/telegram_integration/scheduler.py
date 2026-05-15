@@ -22,20 +22,29 @@ _scheduler: Optional[AsyncIOScheduler] = None
 # ── 스케줄 작업 ───────────────────────────────────────────────────────────────
 
 async def _daily_report_job() -> None:
-    """매일 09:00 KST 실행: 일일 손익 리포트 Telegram 전송"""
+    """매일 18:00 KST 실행: 일일 성과 리포트 Telegram 전송 (BAR-49)"""
     try:
         from backend.core.monitoring.report_service import report_service
-        from backend.core.monitoring.alert_service import alert_service
         from backend.core.state import app_state
 
+        # 거래 히스토리 수집
         position_manager = getattr(app_state, "position_manager", None)
         trades = position_manager.get_trade_history() if position_manager else []
 
-        report = report_service.build_daily_report(trades)
-        await report_service.send_daily_report(report, alert_service)
-        logger.info("일일 리포트 스케줄 전송 완료")
+        # TODO: 활성 사용자 수를 실제 데이터에서 조회
+        active_users = 0
+
+        # BAR-44 스펙에 맞는 comprehensive 리포트 빌드
+        report = report_service.build_comprehensive_daily_report(
+            trades=trades,
+            active_users=active_users,
+        )
+
+        # Telegram으로 리포트 전송
+        await report_service.send_daily_report(report, None)
+        logger.info("일일 성과 리포트 전송 완료 (BAR-49)")
     except Exception as e:
-        logger.error("일일 리포트 스케줄 전송 실패: %s", e)
+        logger.error("일일 성과 리포트 전송 실패: %s", e)
 
 
 # ── 공개 인터페이스 ───────────────────────────────────────────────────────────
@@ -54,10 +63,10 @@ def start_scheduler() -> AsyncIOScheduler:
     global _scheduler
     _scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
 
-    # 매일 오전 9시 KST — 일일 리포트
+    # 매일 오후 6시 KST — 일일 리포트 (거래 종료 1시간 후)
     _scheduler.add_job(
         _daily_report_job,
-        CronTrigger(hour=9, minute=0, timezone="Asia/Seoul"),
+        CronTrigger(hour=18, minute=0, timezone="Asia/Seoul"),
         id="daily_report",
         name="일일 리포트 전송",
         replace_existing=True,
@@ -65,7 +74,7 @@ def start_scheduler() -> AsyncIOScheduler:
     )
 
     _scheduler.start()
-    logger.info("스케줄러 시작: 매일 09:00 KST 일일 리포트 전송")
+    logger.info("스케줄러 시작: 매일 18:00 KST 일일 리포트 전송")
     return _scheduler
 
 

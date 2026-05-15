@@ -68,6 +68,21 @@ class TelegramNotifier:
         except Exception as exc:
             logger.error("Telegram 전송 실패: %s", exc)
 
+    async def send_raw_message(self, text: str) -> None:
+        """형식된 텍스트 직접 전송 (emoji/title 자동 추가 없음)"""
+        if not self._enabled:
+            logger.warning("Telegram 비활성화 — 메시지 전송 건너뜀")
+            return
+        try:
+            await self._bot.send_message(
+                chat_id=self._chat_id,
+                text=text,
+                parse_mode="Markdown",
+            )
+            logger.debug("Telegram 메시지 전송 완료")
+        except Exception as exc:
+            logger.error("Telegram 전송 실패: %s", exc)
+
     async def notify_entry_signal(self, symbol: str, strategy: str, price: float, qty: int) -> None:
         await self.send(
             AlertLevel.TRADE,
