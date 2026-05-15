@@ -25,7 +25,11 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 from pydantic import SecretStr
 
-from backend.core.backtester import PortfolioSimulator
+from backend.core.backtester import (
+    PortfolioSimulator,
+    classify_regime,
+    regime_weights,
+)
 from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
 from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
@@ -56,6 +60,11 @@ async def main() -> None:
         "--strategy-weights", default="",
         help="전략별 자금 비중 (예: swing_38=0.5,f_zone=0.8). "
              "미지정 전략은 1.0. weight 0 이면 진입 제외.",
+    )
+    ap.add_argument(
+        "--auto-weights", action="store_true",
+        help="시장 국면 자동 분류(BULL/SIDEWAYS/BEARISH) 후 REGIME_WEIGHTS 적용. "
+             "--strategy-weights 명시 시 개별 키는 명시값이 우선.",
     )
     args = ap.parse_args()
 
@@ -89,6 +98,14 @@ async def main() -> None:
     if not candles_by_symbol:
         print("시뮬 대상 종목 없음")
         return
+
+    # auto-weights: 시장 국면 분류 → 권장 가중치 적용 (명시 --strategy-weights 가 우선)
+    if args.auto_weights:
+        regime = classify_regime(candles_by_symbol)
+        auto = regime_weights(regime)
+        print(f"시장 국면 자동 분류: {regime.value.upper()}  권장 가중치 {auto}")
+        for k, v in auto.items():
+            weights.setdefault(k, v)
 
     sim = PortfolioSimulator(
         initial_capital=Decimal(str(args.capital)),

@@ -8,6 +8,12 @@ from backend.core.backtester.intraday_simulator import (
     TradeRecord,
     load_csv_candles,
 )
+from backend.core.backtester.market_regime import (
+    REGIME_WEIGHTS,
+    MarketRegime,
+    classify_regime,
+    regime_weights,
+)
 from backend.core.backtester.performance import (
     PerformanceMetrics,
     compute_metrics,
