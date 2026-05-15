@@ -66,6 +66,11 @@ async def main() -> None:
         help="시장 국면 자동 분류(BULL/SIDEWAYS/BEARISH) 후 REGIME_WEIGHTS 적용. "
              "--strategy-weights 명시 시 개별 키는 명시값이 우선.",
     )
+    ap.add_argument(
+        "--symbols", default="",
+        help="picker 우회 — 콤마 구분 종목 코드 직접 지정 (예: 252670,080220). "
+             "지정 시 --top/--min-flu/--min-score 무시.",
+    )
     args = ap.parse_args()
 
     weights: dict[str, float] = {}
@@ -80,20 +85,29 @@ async def main() -> None:
         app_secret=SecretStr(os.environ["KIWOOM_APP_SECRET"]),
         base_url=os.environ.get("KIWOOM_BASE_URL", "https://mockapi.kiwoom.com"),
     )
-    picker = KiwoomNativeLeaderPicker(
-        oauth=oauth, min_flu_rate=args.min_flu, min_score=args.min_score,
-    )
     fetcher = KiwoomNativeCandleFetcher(oauth=oauth)
     strategies = args.strategies.split(",")
 
-    leaders = await picker.pick(top_n=args.top)
     candles_by_symbol: dict[str, list] = {}
-    for c in leaders:
-        candles = await fetcher.fetch_daily(symbol=c.symbol)
-        if len(candles) >= 32:
-            candles_by_symbol[c.symbol] = candles
-        else:
-            print(f"[SKIP] {c.symbol} {c.name} 캔들 부족 ({len(candles)}봉)")
+    if args.symbols:
+        sym_list = [s.strip() for s in args.symbols.split(",") if s.strip()]
+        for sym in sym_list:
+            candles = await fetcher.fetch_daily(symbol=sym)
+            if len(candles) >= 32:
+                candles_by_symbol[sym] = candles
+            else:
+                print(f"[SKIP] {sym} 캔들 부족 ({len(candles)}봉)")
+    else:
+        picker = KiwoomNativeLeaderPicker(
+            oauth=oauth, min_flu_rate=args.min_flu, min_score=args.min_score,
+        )
+        leaders = await picker.pick(top_n=args.top)
+        for c in leaders:
+            candles = await fetcher.fetch_daily(symbol=c.symbol)
+            if len(candles) >= 32:
+                candles_by_symbol[c.symbol] = candles
+            else:
+                print(f"[SKIP] {c.symbol} {c.name} 캔들 부족 ({len(candles)}봉)")
 
     if not candles_by_symbol:
         print("시뮬 대상 종목 없음")
