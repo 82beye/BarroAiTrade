@@ -26,10 +26,8 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 from pydantic import SecretStr
 
 from backend.core.backtester import (
-    MarketRegime,
     PortfolioSimulator,
     classify_regime,
-    compute_universe,
     regime_f_zone_atr,
     regime_weights,
 )
@@ -83,25 +81,8 @@ async def main() -> None:
         help="F존 ATR 청산 명시 OFF (--auto-weights BULL 자동 토글 무시).",
     )
     ap.add_argument(
-        "--avoid-bearish", action="store_true",
-        help="종목별 classify_regime BEARISH 종목 제외 (picker·--symbols 모두 적용). "
-             "picker 시간축 충돌은 --regime-lookback 단축으로 정합 시도.",
-    )
-    ap.add_argument(
         "--regime-lookback", type=int, default=30,
-        help="classify_regime / avoid-bearish 의 lookback 봉 수 (기본 30). "
-             "짧을수록 picker(당일 ranking) 시간축과 정합 — 7~10 권장.",
-    )
-    ap.add_argument(
-        "--universe-filter", action="store_true",
-        help="전략별 종목 후보군 사전 필터 (compute_universe, 정적). swing_38=강세, "
-             "gold_zone=박스권, f_zone/sf_zone=강세+조정, scalping=변동성. "
-             "각 전략은 자기 후보군에만 analyze() 호출.",
-    )
-    ap.add_argument(
-        "--dynamic-universe", action="store_true",
-        help="동적 universe — 시뮬 매 봉마다 종목별 window 로 후보군 재계산 "
-             "(시간축 정합). 정적 universe 와 양립.",
+        help="classify_regime lookback 봉 수 (기본 30). --auto-weights 분류에 사용.",
     )
     args = ap.parse_args()
 
@@ -141,20 +122,6 @@ async def main() -> None:
             else:
                 print(f"[SKIP] {c.symbol} {c.name} 캔들 부족 ({len(candles)}봉)")
 
-    # avoid-bearish: 종목별 분류 후 BEARISH 제외. picker·--symbols 모두 적용.
-    # picker 시간축 충돌은 --regime-lookback 단축으로 정합.
-    if args.avoid_bearish and candles_by_symbol:
-        filtered: dict[str, list] = {}
-        for sym, candles in candles_by_symbol.items():
-            sym_regime = classify_regime(
-                {sym: candles}, lookback=args.regime_lookback,
-            )
-            if sym_regime == MarketRegime.BEARISH:
-                print(f"[BEARISH-SKIP] {sym}")
-            else:
-                filtered[sym] = candles
-        candles_by_symbol = filtered
-
     if not candles_by_symbol:
         print("시뮬 대상 종목 없음")
         return
@@ -175,14 +142,6 @@ async def main() -> None:
         if args.f_zone_atr is None:
             f_zone_atr_final = auto_atr
 
-    # universe 필터: 활성 시 전략별 후보군 계산 + 통계 출력
-    universe = None
-    if args.universe_filter:
-        universe = compute_universe(candles_by_symbol, lookback=args.regime_lookback)
-        print("전략별 후보군 (universe):")
-        for sid, syms in universe.items():
-            print(f"  {sid:<22}: {len(syms)}/{len(candles_by_symbol)}  {sorted(syms)}")
-
     sim = PortfolioSimulator(
         initial_capital=Decimal(str(args.capital)),
         max_per_position=Decimal(str(args.max_per)),
@@ -194,9 +153,6 @@ async def main() -> None:
         slippage_pct=args.slippage,
         strategy_weights=weights or None,
         f_zone_atr_exit=f_zone_atr_final,
-        strategy_universe=universe,
-        dynamic_universe=args.dynamic_universe,
-        universe_lookback=args.regime_lookback,
     )
     result = sim.run(candles_by_symbol, strategies=strategies)
 

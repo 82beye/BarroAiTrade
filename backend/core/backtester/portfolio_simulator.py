@@ -28,7 +28,6 @@ from backend.core.backtester.intraday_simulator import (
     _exit_plan_for_strategy,
 )
 from backend.core.backtester.performance import PerformanceMetrics, compute_metrics
-from backend.core.backtester.strategy_universe import compute_universe
 from backend.models.exit_order import PositionState
 from backend.models.market import MarketType, OHLCV
 from backend.models.strategy import AnalysisContext, ExitPlan
@@ -117,9 +116,6 @@ class PortfolioSimulator:
         scalping_provider: Optional[ScalpingProvider] = None,
         strategy_weights: Optional[dict[str, float]] = None,
         f_zone_atr_exit: bool = False,
-        strategy_universe: Optional[dict[str, set[str]]] = None,
-        dynamic_universe: bool = False,
-        universe_lookback: int = 30,
     ) -> None:
         if initial_capital <= 0:
             raise ValueError(f"initial_capital must be > 0, got {initial_capital}")
@@ -139,11 +135,6 @@ class PortfolioSimulator:
         }
         # f_zone 백테스트 청산 — True 시 sf_zone 과 동일 ATR plan 사용 (BULL 권장)
         self._f_zone_atr = f_zone_atr_exit
-        # 전략별 종목 후보군 — {strategy_id: set(symbol)}. None 이면 모든 종목 모든 전략.
-        self._universe: Optional[dict[str, set[str]]] = strategy_universe
-        # 동적 universe — 매 t 시점마다 종목별 window 로 compute_universe 재계산 (시간축 정합)
-        self._dynamic_universe = dynamic_universe
-        self._universe_lookback = universe_lookback
         # 청산 평가 헬퍼 — _evaluate_intrabar 호출 전용. 수수료는 0 (PortfolioSimulator
         # 가 cash 연동해 자체 계산). run() 루프는 사용하지 않음.
         self._exec_helper = IntradaySimulator(
@@ -276,27 +267,9 @@ class PortfolioSimulator:
                 ctx = AnalysisContext(
                     symbol=sym, candles=window, market_type=market_type,
                 )
-                # 동적 universe: 이 시점의 종목 window 로 universe 재계산 (시간축 정합)
-                dyn_universe: Optional[dict[str, set[str]]] = None
-                if self._dynamic_universe:
-                    dyn_universe = compute_universe(
-                        {sym: window}, lookback=self._universe_lookback,
-                    )
                 best_sid: Optional[str] = None
                 best_sig = None
                 for sid, strat in strat_pairs:
-                    # 정적 universe 필터 — 전략별 후보군에 없으면 skip
-                    if (
-                        self._universe is not None
-                        and sym not in self._universe.get(sid, set())
-                    ):
-                        continue
-                    # 동적 universe 필터 — 이 시점에 이 종목이 그 전략 후보인지
-                    if (
-                        dyn_universe is not None
-                        and sym not in dyn_universe.get(sid, set())
-                    ):
-                        continue
                     try:
                         sig = strat.analyze(ctx)
                     except Exception:  # noqa: BLE001 — 전략 분석 실패는 신호 없음으로

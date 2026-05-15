@@ -24,10 +24,6 @@ from backend.core.backtester.portfolio_simulator import (
     PortfolioResult,
     PortfolioSimulator,
 )
-from backend.core.backtester.strategy_universe import (
-    STRATEGY_IDS,
-    compute_universe,
-)
 
 __all__ = [
     "INTRADAY_ONLY_STRATEGIES",
@@ -46,6 +42,4 @@ __all__ = [
     "classify_regime",
     "regime_weights",
     "regime_f_zone_atr",
-    "STRATEGY_IDS",
-    "compute_universe",
 ]
