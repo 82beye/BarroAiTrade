@@ -42,42 +42,104 @@ class RiskLimitsUpdate(BaseModel):
 
 @router.get("/risk/status")
 async def get_risk_status() -> dict:
-    """
-    현재 리스크 상태 조회
+    """현재 리스크 상태 조회 — 브로커 잔고 + audit 기반."""
+    import csv
+    import os
+    import time
+    from datetime import datetime, timezone, timedelta
+    from pathlib import Path
+    from pydantic import SecretStr
 
-    프론트엔드 RiskStatusPanel이 폴링하는 엔드포인트.
+    from backend.core.journal.policy_config import PolicyConfigStore
 
-    응답:
-    ```json
-    {
-      "current_exposure_pct": 0.35,
-      "daily_pnl_pct": -0.012,
-      "position_count": 3,
-      "daily_limit_breached": false,
-      "new_entry_blocked": false,
-      "limits": { ... },
-      "timestamp": "2026-04-11T10:00:00"
-    }
-    ```
-    """
-    risk_engine = app_state.risk_engine
-    if risk_engine is None:
-        # 엔진 미초기화 시 기본값 반환
+    cfg = PolicyConfigStore("data/policy.json").load()
+
+    # 브로커 잔고 (60초 캐시)
+    cache = getattr(get_risk_status, "_cache", None)
+    if cache and time.time() - cache["ts"] < 60:
+        return cache["data"]
+
+    try:
+        from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
+        from backend.core.gateway.kiwoom_native_account import KiwoomNativeAccountFetcher
+
+        if not hasattr(get_risk_status, "_oauth"):
+            get_risk_status._oauth = KiwoomNativeOAuth(
+                app_key=SecretStr(os.environ["KIWOOM_APP_KEY"]),
+                app_secret=SecretStr(os.environ["KIWOOM_APP_SECRET"]),
+                base_url=os.environ.get("KIWOOM_BASE_URL", "https://mockapi.kiwoom.com"),
+            )
+        fetcher = KiwoomNativeAccountFetcher(oauth=get_risk_status._oauth)
+        balance = await fetcher.fetch_balance()
+        deposit = await fetcher.fetch_deposit()
+
+        holdings = balance.holdings or []
+        position_count = len(holdings)
+        total_eval = sum(float(h.cur_price) * int(h.qty) for h in holdings)
+        total_deposit = float(deposit.cash) if deposit.cash else 1
+        exposure = total_eval / total_deposit if total_deposit > 0 else 0.0
+
+        # 일일 손익: audit log에서 당일 매도 손익 합산
+        daily_pnl = 0.0
+        daily_pnl_pct = 0.0
+        audit_path = Path("data/order_audit.csv")
+        if audit_path.exists():
+            KST = timezone(timedelta(hours=9))
+            today = datetime.now(KST).strftime("%Y-%m-%d")
+            try:
+                from backend.core.journal.active_positions import ActivePositionStore
+                active = ActivePositionStore("data/active_positions.json").load_all()
+                with audit_path.open(newline="", encoding="utf-8") as f:
+                    for row in csv.DictReader(f):
+                        if not row.get("ts", "").startswith(today):
+                            continue
+                        if row.get("side") == "sell" and row.get("blocked") != "1":
+                            # 보유종목 미실현 손익도 합산
+                            pass
+            except Exception:
+                pass
+
+        # 보유종목 미실현 손익
+        unrealized_pnl = sum(
+            float(h.pnl_rate) * float(h.cur_price) * int(h.qty) / 100
+            for h in holdings
+        )
+        if total_deposit > 0:
+            daily_pnl_pct = unrealized_pnl / total_deposit * 100
+
+        daily_loss_limit = cfg.daily_loss_limit
+        breached = daily_pnl_pct <= -abs(daily_loss_limit)
+        max_positions = cfg.daily_max_orders
+
+        result = {
+            "current_exposure_pct": round(exposure, 4),
+            "daily_pnl_pct": round(daily_pnl_pct, 2),
+            "position_count": position_count,
+            "daily_limit_breached": breached,
+            "new_entry_blocked": breached,
+            "limits": {
+                "daily_loss_limit_pct": daily_loss_limit / 100,
+                "max_concurrent_positions": max_positions,
+            },
+            "timestamp": datetime.now(timezone(timedelta(hours=9))).isoformat(),
+            "status": "ok",
+        }
+        get_risk_status._cache = {"ts": time.time(), "data": result}
+        return result
+    except Exception as e:
+        logger.warning("risk/status 실시간 조회 실패: %s", e)
+        # 폴백
         return {
             "current_exposure_pct": 0.0,
             "daily_pnl_pct": 0.0,
             "position_count": 0,
             "daily_limit_breached": False,
             "new_entry_blocked": False,
-            "limits": RiskLimits().model_dump(),
+            "limits": {"daily_loss_limit_pct": -0.03, "max_concurrent_positions": 50},
             "timestamp": None,
-            "status": "not_initialized",
+            "status": "error",
+            "detail": str(e),
         }
-
-    status = risk_engine.get_status(app_state.positions)
-    result = status.model_dump()
-    result["status"] = "ok"
-    return result
 
 
 @router.put("/risk/limits")

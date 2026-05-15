@@ -62,44 +62,44 @@ class ExitPolicy:
 # 각 전략의 exit_plan() 과 동일한 기준을 적응형 매도에 매핑
 STRATEGY_EXIT_PROFILES: dict[str, dict] = {
     "f_zone": {
-        "stop_loss_pct": Decimal("-2.0"),
-        "take_profit_pct": Decimal("5.0"),       # TP2 기준
-        "partial_tp_pct": Decimal("3.0"),         # TP1 기준
-        "partial_tp_ratio": Decimal("0.5"),       # TP1 50%
-        "trailing_start_pct": Decimal("2.5"),
-        "trailing_offset_pct": Decimal("1.0"),
-        "breakeven_trigger_pct": Decimal("1.5"),
-        "tightened_sl_pct": Decimal("-1.5"),
-    },
-    "sf_zone": {
-        "stop_loss_pct": Decimal("-1.5"),
-        "take_profit_pct": Decimal("7.0"),       # TP3 기준
-        "partial_tp_pct": Decimal("3.0"),         # TP1 기준
-        "partial_tp_ratio": Decimal("0.33"),      # TP1 33%
-        "trailing_start_pct": Decimal("3.0"),
-        "trailing_offset_pct": Decimal("1.5"),
-        "breakeven_trigger_pct": Decimal("1.0"),
-        "tightened_sl_pct": Decimal("-1.0"),
-    },
-    "gold_zone": {
-        "stop_loss_pct": Decimal("-1.5"),
-        "take_profit_pct": Decimal("4.0"),       # TP2 기준
-        "partial_tp_pct": Decimal("2.0"),         # TP1 기준
-        "partial_tp_ratio": Decimal("0.5"),       # TP1 50%
-        "trailing_start_pct": Decimal("2.0"),
-        "trailing_offset_pct": Decimal("1.0"),
-        "breakeven_trigger_pct": Decimal("1.0"),
-        "tightened_sl_pct": Decimal("-1.0"),
-    },
-    "swing_38": {
-        "stop_loss_pct": Decimal("-3.0"),
+        "stop_loss_pct": Decimal("-4.0"),
         "take_profit_pct": Decimal("5.0"),
         "partial_tp_pct": Decimal("3.0"),
         "partial_tp_ratio": Decimal("0.5"),
+        "trailing_start_pct": Decimal("3.5"),
+        "trailing_offset_pct": Decimal("1.0"),
+        "breakeven_trigger_pct": Decimal("2.5"),
+        "tightened_sl_pct": Decimal("-2.5"),
+    },
+    "sf_zone": {
+        "stop_loss_pct": Decimal("-4.0"),
+        "take_profit_pct": Decimal("7.0"),
+        "partial_tp_pct": Decimal("3.0"),
+        "partial_tp_ratio": Decimal("0.33"),
         "trailing_start_pct": Decimal("3.0"),
         "trailing_offset_pct": Decimal("1.5"),
         "breakeven_trigger_pct": Decimal("2.0"),
-        "tightened_sl_pct": Decimal("-2.0"),
+        "tightened_sl_pct": Decimal("-2.5"),
+    },
+    "gold_zone": {
+        "stop_loss_pct": Decimal("-4.0"),
+        "take_profit_pct": Decimal("4.0"),
+        "partial_tp_pct": Decimal("2.0"),
+        "partial_tp_ratio": Decimal("0.5"),
+        "trailing_start_pct": Decimal("3.0"),
+        "trailing_offset_pct": Decimal("1.0"),
+        "breakeven_trigger_pct": Decimal("2.5"),
+        "tightened_sl_pct": Decimal("-3.0"),
+    },
+    "swing_38": {
+        "stop_loss_pct": Decimal("-5.0"),
+        "take_profit_pct": Decimal("5.0"),
+        "partial_tp_pct": Decimal("3.0"),
+        "partial_tp_ratio": Decimal("0.5"),
+        "trailing_start_pct": Decimal("4.0"),
+        "trailing_offset_pct": Decimal("1.5"),
+        "breakeven_trigger_pct": Decimal("3.0"),
+        "tightened_sl_pct": Decimal("-3.0"),
     },
 }
 

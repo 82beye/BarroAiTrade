@@ -36,7 +36,7 @@ from backend.core.notify.telegram import TelegramNotifier, format_buy_alert, for
 from backend.core.risk.balance_gate import evaluate_risk_gate
 from backend.core.risk.holding_evaluator import (
     ExitPolicy, PositionContext, SellSignal, STRATEGY_EXIT_PROFILES,
-    evaluate_all,
+    evaluate_all, resolve_policy,
 )
 from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
 
@@ -66,11 +66,29 @@ def _build_oauth() -> KiwoomNativeOAuth:
     )
 
 
+async def _sync_positions(pos_store: ActivePositionStore, held_symbols: set[str]) -> int:
+    """브로커 잔고와 active_positions 동기화. 잔고에 없는 종목은 제거."""
+    active = pos_store.load_all()
+    removed = 0
+    for sym in list(active.keys()):
+        if sym not in held_symbols:
+            pos_store.remove(sym)
+            ts = _now_kst().strftime("%H:%M:%S")
+            print(f"  [{ts}][SYNC] {sym} {active[sym].name} — 잔고에 없음, active_positions 제거")
+            removed += 1
+    return removed
+
+
 async def _evaluate_and_sell(args, oauth, notifier) -> int:
     """보유 종목 매도 평가 + DCA. 매도 건수 반환."""
     cfg = PolicyConfigStore("data/policy.json").load()
     account = KiwoomNativeAccountFetcher(oauth=oauth)
     balance = await account.fetch_balance()
+
+    # 브로커 잔고 ↔ active_positions 동기화
+    pos_store = ActivePositionStore(args.pos_log)
+    held_symbols = {h.symbol for h in (balance.holdings or [])}
+    await _sync_positions(pos_store, held_symbols)
 
     if not balance.holdings:
         return 0
@@ -87,7 +105,6 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
         tightened_sl_pct=Decimal(str(cfg.tightened_sl_pct)),
     )
 
-    pos_store = ActivePositionStore(args.pos_log)
     active_positions = pos_store.load_all()
     contexts: dict[str, PositionContext] = {}
 

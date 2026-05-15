@@ -96,7 +96,7 @@ async def get_recent_signals(
     logger.info("최근 신호 %d개 조회", limit)
 
     import os
-    from datetime import datetime, timezone
+    from datetime import datetime, timezone, timedelta
     from pydantic import SecretStr
     try:
         from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
@@ -118,7 +118,8 @@ async def get_recent_signals(
 
         picker = KiwoomNativeLeaderPicker(oauth=oauth, min_score=0.5)
         leaders = await picker.pick(top_n=limit)
-        now_iso = datetime.now(timezone.utc).isoformat()
+        KST = timezone(timedelta(hours=9))
+        now_iso = datetime.now(KST).isoformat()
         signals = [
             {
                 "symbol": l.symbol,
