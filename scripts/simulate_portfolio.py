@@ -94,9 +94,14 @@ async def main() -> None:
     )
     ap.add_argument(
         "--universe-filter", action="store_true",
-        help="전략별 종목 후보군 사전 필터 (compute_universe). swing_38=강세, "
+        help="전략별 종목 후보군 사전 필터 (compute_universe, 정적). swing_38=강세, "
              "gold_zone=박스권, f_zone/sf_zone=강세+조정, scalping=변동성. "
              "각 전략은 자기 후보군에만 analyze() 호출.",
+    )
+    ap.add_argument(
+        "--dynamic-universe", action="store_true",
+        help="동적 universe — 시뮬 매 봉마다 종목별 window 로 후보군 재계산 "
+             "(시간축 정합). 정적 universe 와 양립.",
     )
     args = ap.parse_args()
 
@@ -190,6 +195,8 @@ async def main() -> None:
         strategy_weights=weights or None,
         f_zone_atr_exit=f_zone_atr_final,
         strategy_universe=universe,
+        dynamic_universe=args.dynamic_universe,
+        universe_lookback=args.regime_lookback,
     )
     result = sim.run(candles_by_symbol, strategies=strategies)
 

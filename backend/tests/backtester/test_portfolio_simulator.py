@@ -392,6 +392,25 @@ def test_strategy_universe_empty_excludes_all():
     assert len(result.trades) == 0
 
 
+def test_dynamic_universe_default_disabled():
+    """dynamic_universe=False (default) — 시점별 필터 미적용 (회귀 안전)."""
+    sim = PortfolioSimulator(
+        Decimal("10000000"), warmup_candles=15, dynamic_universe=False,
+    )
+    result = sim.run({"A": _candles("A", 80)}, strategies=["gold_zone"])
+    _assert_invariants(result)
+
+
+def test_dynamic_universe_enabled_invariant():
+    """dynamic_universe=True — 시뮬 정상 완료 + cash 불변식."""
+    sim = PortfolioSimulator(
+        Decimal("10000000"), warmup_candles=15,
+        dynamic_universe=True, universe_lookback=15,
+    )
+    result = sim.run({"A": _candles("A", 100)}, strategies=["gold_zone"])
+    _assert_invariants(result)
+
+
 def test_strategy_universe_none_unrestricted():
     """strategy_universe=None → 모든 종목 모든 전략 (기존 동작 보존)."""
     sim = PortfolioSimulator(
