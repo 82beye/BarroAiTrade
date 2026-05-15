@@ -68,8 +68,8 @@ class FZoneParams:
     bounce_min_gain_pct: float = 0.005        # 반등 최소 상승: 0.5%
     bounce_volume_ratio: float = 1.2          # 반등 시 거래량 증가 비율 (눌림 평균 대비)
 
-    # SF존 추가 조건
-    sf_impulse_min_gain_pct: float = 0.05     # SF존 기준봉 최소 상승: 5%
+    # SF존 추가 조건 (2026-05-16 튜닝 — 신호 희소 완화)
+    sf_impulse_min_gain_pct: float = 0.045    # SF존 기준봉 최소 상승: 4.5% (5% → 4.5%)
     sf_volume_ratio: float = 3.0              # SF존 거래량 배율: 300%
 
     # 이동평균선 계산용 데이터 최소 수
@@ -464,14 +464,15 @@ class FZoneStrategy(Strategy):
         )
 
         analysis.score = min(score, 10.0)
-        analysis.is_f_zone = analysis.score >= 4.0
+        # 2026-05-16 튜닝 — 점수 임계 4.0 → 5.0 (진입 정밀도 ↑, F존 600봉 승률 51.9% 개선 목적)
+        analysis.is_f_zone = analysis.score >= 5.0
 
-        # SF존: 기준봉이 특히 강하고 점수가 높을 때
+        # SF존: 기준봉이 특히 강하고 점수가 높을 때 (score 7.0 → 6.5 완화로 신호 빈도 ↑)
         analysis.is_sf_zone = (
             analysis.is_f_zone
             and analysis.impulse_gain_pct >= p.sf_impulse_min_gain_pct
             and analysis.impulse_volume_ratio >= p.sf_volume_ratio
-            and analysis.score >= 7.0
+            and analysis.score >= 6.5
         )
 
         zone_label = "SF존(슈퍼존)" if analysis.is_sf_zone else "F존"

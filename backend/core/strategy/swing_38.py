@@ -36,13 +36,13 @@ from backend.models.strategy import (
 
 @dataclass
 class Swing38Params:
-    """38스윙 파라미터."""
+    """38스윙 파라미터 (2026-05-16 튜닝 — 박스권 손실 -1.43M 발생, 진입 조건 강화)."""
 
     impulse_lookback: int = 30
-    impulse_min_gain_pct: float = 0.05
-    impulse_volume_ratio: float = 2.0
+    impulse_min_gain_pct: float = 0.07     # 5% → 7% (강한 임펄스만)
+    impulse_volume_ratio: float = 3.0      # 2x → 3x (거래량 거짓신호 차단)
     fib_target: float = 0.382
-    fib_tolerance: float = 0.075
+    fib_tolerance: float = 0.05            # ±7.5% → ±5% (Fib 0.382 정밀도 ↑)
     bounce_lookback: int = 5
     min_candles: int = 60
 

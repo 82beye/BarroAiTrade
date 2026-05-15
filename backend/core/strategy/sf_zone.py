@@ -99,12 +99,13 @@ class SFZoneStrategy(Strategy):
         return (max_invest / price).quantize(Decimal("1"))
 
     def health_check(self) -> dict[str, Any]:
-        """SF존 health_check — F존 inner ready + sf_impulse_min_gain_pct ≥ 0.05."""
+        """SF존 health_check — F존 inner ready + sf_impulse_min_gain_pct ≥ 0.045
+        (2026-05-16 튜닝: 0.05 → 0.045, 신호 희소 완화)."""
         inner_h = self._inner.health_check()
         p = self._inner.params
         return {
             "strategy_id": self.STRATEGY_ID,
-            "ready": inner_h["ready"] and p.sf_impulse_min_gain_pct >= 0.05,
+            "ready": inner_h["ready"] and p.sf_impulse_min_gain_pct >= 0.045,
             "inner_ready": inner_h["ready"],
             "sf_impulse_min_gain_pct": p.sf_impulse_min_gain_pct,
         }

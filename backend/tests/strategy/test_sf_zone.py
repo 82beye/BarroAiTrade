@@ -116,7 +116,8 @@ class TestSFZoneHealthCheck:
         assert h["strategy_id"] == "sf_zone_v1"
         assert h["ready"] is True
         assert h["inner_ready"] is True
-        assert h["sf_impulse_min_gain_pct"] >= 0.05
+        # 2026-05-16 튜닝: sf_impulse_min_gain_pct 0.05 → 0.045 (신호 희소 완화)
+        assert h["sf_impulse_min_gain_pct"] >= 0.045
 
 
 class TestSFZoneBaselineRegression:
