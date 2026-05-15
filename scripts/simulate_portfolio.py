@@ -83,9 +83,13 @@ async def main() -> None:
     )
     ap.add_argument(
         "--avoid-bearish", action="store_true",
-        help="종목별 classify_regime BEARISH 종목 제외. "
-             "⚠️ --symbols 명시 시에만 적용 — picker 모드는 시간축 충돌(당일 ranking "
-             "vs 30봉 추세)로 미적용 (5/16 검증 결과 picker 결과엔 -2.12%p 부작용).",
+        help="종목별 classify_regime BEARISH 종목 제외 (picker·--symbols 모두 적용). "
+             "picker 시간축 충돌은 --regime-lookback 단축으로 정합 시도.",
+    )
+    ap.add_argument(
+        "--regime-lookback", type=int, default=30,
+        help="classify_regime / avoid-bearish 의 lookback 봉 수 (기본 30). "
+             "짧을수록 picker(당일 ranking) 시간축과 정합 — 7~10 권장.",
     )
     args = ap.parse_args()
 
@@ -125,23 +129,19 @@ async def main() -> None:
             else:
                 print(f"[SKIP] {c.symbol} {c.name} 캔들 부족 ({len(candles)}봉)")
 
-    # avoid-bearish: 종목별 분류 후 BEARISH 제외 — --symbols 명시 시만 적용
-    # (picker 모드는 시간축 충돌로 부작용 검증됨 — 5/16 -2.12%p)
+    # avoid-bearish: 종목별 분류 후 BEARISH 제외. picker·--symbols 모두 적용.
+    # picker 시간축 충돌은 --regime-lookback 단축으로 정합.
     if args.avoid_bearish and candles_by_symbol:
-        if not args.symbols:
-            print(
-                "⚠️ --avoid-bearish 는 --symbols 사용 시만 적용 — picker 모드 무시 "
-                "(당일 ranking vs 30봉 추세 시간축 충돌 회피)"
+        filtered: dict[str, list] = {}
+        for sym, candles in candles_by_symbol.items():
+            sym_regime = classify_regime(
+                {sym: candles}, lookback=args.regime_lookback,
             )
-        else:
-            filtered: dict[str, list] = {}
-            for sym, candles in candles_by_symbol.items():
-                sym_regime = classify_regime({sym: candles})
-                if sym_regime == MarketRegime.BEARISH:
-                    print(f"[BEARISH-SKIP] {sym}")
-                else:
-                    filtered[sym] = candles
-            candles_by_symbol = filtered
+            if sym_regime == MarketRegime.BEARISH:
+                print(f"[BEARISH-SKIP] {sym}")
+            else:
+                filtered[sym] = candles
+        candles_by_symbol = filtered
 
     if not candles_by_symbol:
         print("시뮬 대상 종목 없음")
@@ -151,7 +151,7 @@ async def main() -> None:
     # 명시 --strategy-weights / --f-zone-atr / --no-f-zone-atr 가 우선.
     f_zone_atr_final = args.f_zone_atr if args.f_zone_atr is not None else False
     if args.auto_weights:
-        regime = classify_regime(candles_by_symbol)
+        regime = classify_regime(candles_by_symbol, lookback=args.regime_lookback)
         auto = regime_weights(regime)
         auto_atr = regime_f_zone_atr(regime)
         print(
