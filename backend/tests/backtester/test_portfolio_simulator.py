@@ -308,3 +308,59 @@ def test_exit_slippage_lowers_sell_price():
             buy = next(b for b in reversed(result.trades[:i]) if b.side == "buy")
             assert t.price == buy.price * Decimal("1.03") * Decimal("0.99")
             break
+
+
+# ─── strategy_weights — 전략별 자금 비중 ──────────────────────
+
+
+def test_strategy_weight_halves_slot():
+    """weight 0.5 → 그 전략 slot 이 다른 전략 대비 절반."""
+    sim = PortfolioSimulator(
+        Decimal("10000000"),
+        max_per_position=Decimal("0.5"),    # max_per = 5M
+        max_total_position=Decimal("0.9"),  # available = 9M
+        strategy_weights={"swing_38": 0.5},
+    )
+    ranked = [
+        ("A", ("swing_38", _SigStub(1000, 0.9))),
+        ("B", ("f_zone", _SigStub(1000, 0.8))),
+    ]
+    alloc = sim._allocate(ranked, Decimal("10000000"), Decimal("0"), 0)
+    # per_slot = 9M / 2 = 4.5M, max_per 5M → base_slot = 4.5M
+    # A (swing_38 weight 0.5) → 2.25M, B (f_zone weight 1.0) → 4.5M
+    assert alloc["A"] == Decimal("2250000")
+    assert alloc["B"] == Decimal("4500000")
+
+
+def test_strategy_weight_zero_excludes():
+    """weight 0 → 진입 제외 (alloc 에 없음)."""
+    sim = PortfolioSimulator(
+        Decimal("10000000"),
+        strategy_weights={"swing_38": 0.0},
+    )
+    ranked = [("A", ("swing_38", _SigStub(1000, 0.9)))]
+    alloc = sim._allocate(ranked, Decimal("10000000"), Decimal("0"), 0)
+    assert "A" not in alloc
+
+
+def test_strategy_weight_default_one():
+    """미지정 전략은 weight 1.0 — 기본 동작 보존."""
+    sim = PortfolioSimulator(
+        Decimal("10000000"),
+        max_per_position=Decimal("0.5"),
+        strategy_weights={"swing_38": 0.5},  # f_zone 미지정 → 1.0
+    )
+    ranked = [("A", ("f_zone", _SigStub(1000, 0.9)))]
+    alloc = sim._allocate(ranked, Decimal("10000000"), Decimal("0"), 0)
+    # per_slot = 9M, max_per 5M → 5M * 1.0 = 5M
+    assert alloc["A"] == Decimal("5000000")
+
+
+def test_strategy_weight_invariant():
+    """weight 적용 시뮬도 cash 흐름 불변식 유지."""
+    sim = PortfolioSimulator(
+        Decimal("10000000"), warmup_candles=15,
+        strategy_weights={"gold_zone": 0.3},
+    )
+    result = sim.run({"A": _candles("A", 100)}, strategies=["gold_zone"])
+    _assert_invariants(result)

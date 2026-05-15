@@ -52,7 +52,19 @@ async def main() -> None:
         default="f_zone,sf_zone,gold_zone,swing_38,scalping_consensus",
         help="실행 전략 (comma-separated)",
     )
+    ap.add_argument(
+        "--strategy-weights", default="",
+        help="전략별 자금 비중 (예: swing_38=0.5,f_zone=0.8). "
+             "미지정 전략은 1.0. weight 0 이면 진입 제외.",
+    )
     args = ap.parse_args()
+
+    weights: dict[str, float] = {}
+    if args.strategy_weights:
+        for pair in args.strategy_weights.split(","):
+            k, _, v = pair.partition("=")
+            if k and v:
+                weights[k.strip()] = float(v.strip())
 
     oauth = KiwoomNativeOAuth(
         app_key=SecretStr(os.environ["KIWOOM_APP_KEY"]),
@@ -87,6 +99,7 @@ async def main() -> None:
         commission_pct=0.015,
         tax_pct_on_sell=0.18,
         slippage_pct=args.slippage,
+        strategy_weights=weights or None,
     )
     result = sim.run(candles_by_symbol, strategies=strategies)
 

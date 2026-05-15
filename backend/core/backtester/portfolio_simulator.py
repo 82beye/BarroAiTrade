@@ -114,6 +114,7 @@ class PortfolioSimulator:
         entry_on_next_open: bool = True,
         exit_on_intrabar: bool = True,
         scalping_provider: Optional[ScalpingProvider] = None,
+        strategy_weights: Optional[dict[str, float]] = None,
     ) -> None:
         if initial_capital <= 0:
             raise ValueError(f"initial_capital must be > 0, got {initial_capital}")
@@ -127,6 +128,10 @@ class PortfolioSimulator:
         self._slippage = Decimal(str(slippage_pct)) / Decimal("100")
         self._entry_next_open = entry_on_next_open
         self._scalping_provider = scalping_provider
+        # 전략별 자금 비중 — slot * weight. weight 0 = 진입 제외. 미지정 = 1.0.
+        self._strategy_weights: dict[str, Decimal] = {
+            k: Decimal(str(v)) for k, v in (strategy_weights or {}).items()
+        }
         # 청산 평가 헬퍼 — _evaluate_intrabar 호출 전용. 수수료는 0 (PortfolioSimulator
         # 가 cash 연동해 자체 계산). run() 루프는 사용하지 않음.
         self._exec_helper = IntradaySimulator(
@@ -362,13 +367,18 @@ class PortfolioSimulator:
 
         consumed = Decimal("0")
         out: dict[str, Decimal] = {}
-        for sym, (_sid, sig) in eligible:
+        for sym, (sid, sig) in eligible:
+            # 전략별 가중치 — weight 0 이면 이 전략 신호 진입 제외.
+            weight = self._strategy_weights.get(sid, Decimal("1"))
+            if weight <= 0:
+                continue
             est_price = Decimal(str(sig.price)) * (Decimal("1") + self._slippage)
             if est_price <= 0:
                 continue
             # cash - consumed 가드 — balance_gate 대비 추가: 손실로 cash 가 줄면
             # available(initial 기준)만으로는 실제 현금 초과 매수가 가능해짐.
-            slot = min(max_per, per_slot, available - consumed, cash - consumed)
+            base_slot = min(max_per, per_slot, available - consumed, cash - consumed)
+            slot = base_slot * weight
             if slot <= 0:
                 continue
             qty = (slot / est_price).quantize(Decimal("1"), rounding=ROUND_DOWN)
