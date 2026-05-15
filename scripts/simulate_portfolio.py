@@ -29,6 +29,7 @@ from backend.core.backtester import (
     MarketRegime,
     PortfolioSimulator,
     classify_regime,
+    compute_universe,
     regime_f_zone_atr,
     regime_weights,
 )
@@ -90,6 +91,12 @@ async def main() -> None:
         "--regime-lookback", type=int, default=30,
         help="classify_regime / avoid-bearish 의 lookback 봉 수 (기본 30). "
              "짧을수록 picker(당일 ranking) 시간축과 정합 — 7~10 권장.",
+    )
+    ap.add_argument(
+        "--universe-filter", action="store_true",
+        help="전략별 종목 후보군 사전 필터 (compute_universe). swing_38=강세, "
+             "gold_zone=박스권, f_zone/sf_zone=강세+조정, scalping=변동성. "
+             "각 전략은 자기 후보군에만 analyze() 호출.",
     )
     args = ap.parse_args()
 
@@ -163,6 +170,14 @@ async def main() -> None:
         if args.f_zone_atr is None:
             f_zone_atr_final = auto_atr
 
+    # universe 필터: 활성 시 전략별 후보군 계산 + 통계 출력
+    universe = None
+    if args.universe_filter:
+        universe = compute_universe(candles_by_symbol, lookback=args.regime_lookback)
+        print("전략별 후보군 (universe):")
+        for sid, syms in universe.items():
+            print(f"  {sid:<22}: {len(syms)}/{len(candles_by_symbol)}  {sorted(syms)}")
+
     sim = PortfolioSimulator(
         initial_capital=Decimal(str(args.capital)),
         max_per_position=Decimal(str(args.max_per)),
@@ -174,6 +189,7 @@ async def main() -> None:
         slippage_pct=args.slippage,
         strategy_weights=weights or None,
         f_zone_atr_exit=f_zone_atr_final,
+        strategy_universe=universe,
     )
     result = sim.run(candles_by_symbol, strategies=strategies)
 

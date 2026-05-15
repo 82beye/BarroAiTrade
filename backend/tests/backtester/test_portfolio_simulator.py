@@ -381,6 +381,26 @@ def test_strategy_weight_above_one_capped_by_max_per():
     assert alloc["A"] == Decimal("1000000")
 
 
+def test_strategy_universe_empty_excludes_all():
+    """모든 전략 universe 가 빈 set → 거래 0 (analyze() 호출 안 함)."""
+    sim = PortfolioSimulator(
+        Decimal("10000000"), warmup_candles=15,
+        strategy_universe={"f_zone": set(), "gold_zone": set(), "sf_zone": set(),
+                           "swing_38": set(), "scalping_consensus": set()},
+    )
+    result = sim.run({"A": _candles("A", 80)}, strategies=["f_zone", "gold_zone"])
+    assert len(result.trades) == 0
+
+
+def test_strategy_universe_none_unrestricted():
+    """strategy_universe=None → 모든 종목 모든 전략 (기존 동작 보존)."""
+    sim = PortfolioSimulator(
+        Decimal("10000000"), warmup_candles=15, strategy_universe=None,
+    )
+    result = sim.run({"A": _candles("A", 80)}, strategies=["gold_zone"])
+    _assert_invariants(result)
+
+
 def test_f_zone_atr_exit_flag_invariant():
     """PortfolioSimulator(f_zone_atr_exit=True) — 정상 완료 + cash 흐름 불변식."""
     sim = PortfolioSimulator(
