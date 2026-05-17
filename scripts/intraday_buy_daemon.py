@@ -41,7 +41,7 @@ from backend.core.risk.holding_evaluator import (
 from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
 
 KST = timezone(timedelta(hours=9))
-MARKET_OPEN = time(9, 30)
+MARKET_OPEN = time(8, 58)
 MARKET_CLOSE = time(15, 20)
 
 

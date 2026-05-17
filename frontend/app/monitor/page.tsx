@@ -270,44 +270,6 @@ export default function MonitorPage() {
           )}
         </Card>
 
-        {/* Audit Log */}
-        <Card title="최근 주문 (audit)">
-          {audit.length === 0 ? (
-            <p className="text-sm text-slate-500">주문 내역 없음</p>
-          ) : (
-            <div className="space-y-1.5">
-              {audit.map((row, i) => {
-                const isBlocked = row.blocked === '1';
-                const isDryRun = row.action === 'DRY_RUN';
-                const actionColor = isBlocked
-                  ? 'text-red-400'
-                  : isDryRun
-                  ? 'text-yellow-400'
-                  : 'text-emerald-400';
-                return (
-                  <div key={i} className="rounded border border-slate-700 bg-slate-900 px-2 py-1">
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className={`font-semibold ${actionColor}`}>{row.action}</span>
-                      <span className="text-slate-300">
-                        {row.side} {row.symbol} {row.qty}주
-                      </span>
-                      {row.strategy && (
-                        <span className="rounded bg-slate-700 px-1 py-0.5 text-sky-400">{row.strategy}</span>
-                      )}
-                      <span className="ml-auto text-slate-500">
-                        {row.ts?.slice(11, 16)}
-                      </span>
-                    </div>
-                    {isBlocked && row.reason && (
-                      <p className="mt-0.5 truncate text-xs text-red-400">{row.reason}</p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-
         {/* Signals */}
         <Card title="최근 시그널">
           {signals.length === 0 ? (
@@ -363,6 +325,44 @@ export default function MonitorPage() {
                         </span>
                       )}
                     </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+
+        {/* Audit Log */}
+        <Card title="최근 주문 (audit)">
+          {audit.length === 0 ? (
+            <p className="text-sm text-slate-500">주문 내역 없음</p>
+          ) : (
+            <div className="space-y-1.5">
+              {audit.map((row, i) => {
+                const isBlocked = row.blocked === '1';
+                const isDryRun = row.action === 'DRY_RUN';
+                const actionColor = isBlocked
+                  ? 'text-red-400'
+                  : isDryRun
+                  ? 'text-yellow-400'
+                  : 'text-emerald-400';
+                return (
+                  <div key={i} className="rounded border border-slate-700 bg-slate-900 px-2 py-1">
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className={`font-semibold ${actionColor}`}>{row.action}</span>
+                      <span className="text-slate-300">
+                        {row.side} {row.symbol} {row.qty}주
+                      </span>
+                      {row.strategy && (
+                        <span className="rounded bg-slate-700 px-1 py-0.5 text-sky-400">{row.strategy}</span>
+                      )}
+                      <span className="ml-auto text-slate-500">
+                        {row.ts?.slice(11, 16)}
+                      </span>
+                    </div>
+                    {isBlocked && row.reason && (
+                      <p className="mt-0.5 truncate text-xs text-red-400">{row.reason}</p>
+                    )}
                   </div>
                 );
               })}

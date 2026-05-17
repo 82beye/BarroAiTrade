@@ -93,16 +93,28 @@ async def get_recent_signals(
     }
     ```
     """
+    import os
+    import time as _time
+    from datetime import datetime, timezone, timedelta, time as dtime
+    from pydantic import SecretStr
+
+    KST = timezone(timedelta(hours=9))
+    now_kst = datetime.now(KST)
+    market_open = dtime(8, 58)
+    market_close = dtime(15, 30)
+
+    # 장 외 시간: 빈 시그널 반환
+    if not (market_open <= now_kst.time() <= market_close):
+        # 주말 체크 (토=5, 일=6)
+        if now_kst.weekday() >= 5 or not (market_open <= now_kst.time() <= market_close):
+            return {"signals": [], "timestamp": now_kst.isoformat(), "status": "closed"}
+
     logger.info("최근 신호 %d개 조회", limit)
 
-    import os
-    from datetime import datetime, timezone, timedelta
-    from pydantic import SecretStr
     try:
         from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
         from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
 
-        # 모듈 수준 싱글톤 — 토큰 캐시 유지
         if not hasattr(get_recent_signals, "_oauth"):
             get_recent_signals._oauth = KiwoomNativeOAuth(
                 app_key=SecretStr(os.environ["KIWOOM_APP_KEY"]),
@@ -110,16 +122,15 @@ async def get_recent_signals(
                 base_url=os.environ.get("KIWOOM_BASE_URL", "https://mockapi.kiwoom.com"),
             )
         oauth = get_recent_signals._oauth
-        # 60초 캐시 — rank API rate limit 방어
-        import time
+
+        # 60초 캐시
         cache = getattr(get_recent_signals, "_cache", None)
-        if cache and time.time() - cache["ts"] < 60:
+        if cache and _time.time() - cache["ts"] < 60:
             return cache["data"]
 
         picker = KiwoomNativeLeaderPicker(oauth=oauth, min_score=0.5)
         leaders = await picker.pick(top_n=limit)
-        KST = timezone(timedelta(hours=9))
-        now_iso = datetime.now(KST).isoformat()
+        now_iso = now_kst.isoformat()
         signals = [
             {
                 "symbol": l.symbol,
@@ -137,11 +148,10 @@ async def get_recent_signals(
             "timestamp": now_iso,
             "status": "ok",
         }
-        get_recent_signals._cache = {"ts": time.time(), "data": result}
+        get_recent_signals._cache = {"ts": _time.time(), "data": result}
         return result
     except Exception as e:
         logger.warning("시그널 조회 실패: %s", e)
-        # 캐시된 데이터 있으면 반환
         cache = getattr(get_recent_signals, "_cache", None)
         if cache:
             return cache["data"]
