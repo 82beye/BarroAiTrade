@@ -9,14 +9,15 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 
 export function OrderForm() {
-  const { addOrder } = useTradingStore();
+  const { addOrder, tickers } = useTradingStore();
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [formData, setFormData] = useState({
-    symbol: 'AAPL',
+    symbol: '005930',
     side: 'BUY',
     type: 'LIMIT',
     quantity: 1,
-    price: 150,
+    price: 70000,
   });
 
   const handleChange = (
@@ -26,7 +27,9 @@ export function OrderForm() {
     setFormData((prev) => ({
       ...prev,
       [name]:
-        name === 'quantity' || name === 'price' ? parseFloat(value) : value,
+        name === 'quantity' ? parseInt(value, 10) || 1
+        : name === 'price' ? parseFloat(value)
+        : value,
     }));
   };
 
@@ -35,24 +38,34 @@ export function OrderForm() {
     setLoading(true);
 
     try {
-      const response = await api.placeOrder(formData);
+      const response = await api.placeOrder({
+        symbol: formData.symbol,
+        side: formData.side.toLowerCase(),
+        order_type: formData.type.toLowerCase(),
+        quantity: formData.quantity,
+        price: formData.type === 'LIMIT' ? formData.price : undefined,
+        strategy_id: 'manual',
+      });
       const order = response.data;
 
       addOrder({
         id: order.order_id || Date.now().toString(),
         symbol: order.symbol,
-        side: order.side,
-        type: order.type,
-        quantity: order.quantity,
-        price: order.price,
-        status: order.status || 'PENDING',
-        timestamp: new Date().toISOString(),
+        side: (order.side?.toUpperCase() ?? formData.side) as 'BUY' | 'SELL',
+        type: formData.type as 'MARKET' | 'LIMIT',
+        quantity: order.filled_quantity ?? formData.quantity,
+        price: order.avg_price ?? formData.price,
+        status: order.status === 'pending' ? 'PENDING'
+               : order.status === 'filled' ? 'FILLED'
+               : order.status === 'cancelled' ? 'CANCELED'
+               : 'PENDING',
+        timestamp: order.timestamp ?? new Date().toISOString(),
       });
 
-      alert('주문이 실행되었습니다');
+      setStatus({ type: 'success', message: `${formData.symbol} 주문이 실행되었습니다.` });
+      setTimeout(() => setStatus(null), 4000);
     } catch (error) {
-      console.error('주문 실패:', error);
-      alert('주문 실패');
+      setStatus({ type: 'error', message: error instanceof Error ? error.message : '주문 실패' });
     } finally {
       setLoading(false);
     }
@@ -74,8 +87,23 @@ export function OrderForm() {
               value={formData.symbol}
               onChange={handleChange}
               className="border-slate-700 bg-slate-800 text-slate-50"
-              placeholder="AAPL"
+              placeholder="종목코드 (예: 005930)"
             />
+            {(() => {
+              const live = tickers.get(formData.symbol.toUpperCase());
+              if (!live) return null;
+              return (
+                <p className="mt-1 text-xs text-slate-400">
+                  현재가{' '}
+                  <span className="font-semibold text-slate-200">
+                    {live.price.toLocaleString()}원
+                  </span>
+                  <span className={`ml-2 ${live.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {live.change >= 0 ? '+' : ''}{live.change.toFixed(2)}%
+                  </span>
+                </p>
+              );
+            })()}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -120,30 +148,42 @@ export function OrderForm() {
               value={formData.quantity}
               onChange={handleChange}
               className="border-slate-700 bg-slate-800 text-slate-50"
-              min="0.01"
-              step="0.01"
+              min="1"
+              step="1"
             />
           </div>
 
-          <div>
-            <label className="mb-2 block text-sm font-medium text-slate-300">
-              가격
-            </label>
-            <Input
-              type="number"
-              name="price"
-              value={formData.price}
-              onChange={handleChange}
-              className="border-slate-700 bg-slate-800 text-slate-50"
-              min="0.01"
-              step="0.01"
-            />
-          </div>
+          {formData.type === 'LIMIT' && (
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-300">
+                가격 (원)
+              </label>
+              <Input
+                type="number"
+                name="price"
+                value={formData.price}
+                onChange={handleChange}
+                className="border-slate-700 bg-slate-800 text-slate-50"
+                min="1"
+                step="1"
+              />
+            </div>
+          )}
+
+          {status && (
+            <div className={`rounded-lg border px-3 py-2 text-sm ${
+              status.type === 'success'
+                ? 'border-green-700 bg-green-900 bg-opacity-30 text-green-300'
+                : 'border-red-700 bg-red-900 bg-opacity-30 text-red-300'
+            }`}>
+              {status.message}
+            </div>
+          )}
 
           <Button
             type="submit"
             disabled={loading}
-            className="w-full button-primary"
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
           >
             {loading ? '실행 중...' : '주문 실행'}
           </Button>
