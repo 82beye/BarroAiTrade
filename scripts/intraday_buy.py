@@ -209,7 +209,10 @@ async def _run(args) -> int:
 def main():
     ap = argparse.ArgumentParser(description="장중 시그널 기반 매수")
     ap.add_argument("--top", type=int, default=5, help="스캔 후보 수 (기본 5)")
-    ap.add_argument("--min-flu", type=float, default=3.0, help="최소 등락률 (기본 3.0%)")
+    ap.add_argument(
+        "--min-flu", type=float, default=1.0,
+        help="최소 등락률%% (기본 1.0 — 2026-05-18 시뮬 검증 후 3.0→1.0 완화)",
+    )
     ap.add_argument("--execute", action="store_true", help="실제 주문 실행")
     ap.add_argument("--dry-run", action="store_true", default=True)
     ap.add_argument("--no-dry-run", action="store_false", dest="dry_run")

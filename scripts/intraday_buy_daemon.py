@@ -391,10 +391,18 @@ async def _daemon(args):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="장중 시그널 매수 데몬 (3분 간격)")
+    ap = argparse.ArgumentParser(description="장중 시그널 매수 데몬 (동적 universe: 매 interval picker 재호출)")
     ap.add_argument("--interval", type=int, default=60, help="스캔 간격 초 (기본 60=1분)")
-    ap.add_argument("--top", type=int, default=5, help="스캔 후보 수 (기본 5)")
-    ap.add_argument("--min-flu", type=float, default=3.0, help="최소 등락률 (기본 3.0%%)")
+    ap.add_argument(
+        "--top", type=int, default=5,
+        help="스캔 후보 수 (기본 5, 시뮬 검증 — 후보 10 시 매매 빈도↑·net +0)",
+    )
+    ap.add_argument(
+        "--min-flu", type=float, default=1.0,
+        help="최소 등락률%% (기본 1.0 — 2026-05-18 시뮬 검증 후 3.0→1.0 완화. "
+             "동적 universe 시뮬: min_flu 1.0 매매 10/승률 50%%, 0.0 매매 12/승률 58.3%%. "
+             "운영 안전 마진 위해 1.0 default. 더 공격적이면 --min-flu 0 명시.)",
+    )
     ap.add_argument("--dry-run", action="store_true", default=True)
     ap.add_argument("--no-dry-run", action="store_false", dest="dry_run")
     ap.add_argument("--telegram", action="store_true", help="텔레그램 알림")
