@@ -100,12 +100,15 @@ def simulate_one(
                 continue
             entry_bar = day_min[0]
             entry_price = Decimal(str(entry_bar.open))
-            plan = _exit_plan_for_strategy(
-                sid, entry_price, window, f_zone_atr=False,
-                trail_stages=TRAIL_STAGES_AITRADE if use_trail else None,
-                time_stages=TIME_SL_STAGES if use_time_sl else None,
-                high_momentum_sl_mult=high_mom_sl_mult,
-            )
+            # trail_stages 명시 인자: --no-trail 일 때만 None 강제, 그 외엔 default(ON)
+            plan_kwargs = dict(f_zone_atr=False)
+            if not use_trail:
+                plan_kwargs["trail_stages"] = None
+            if use_time_sl:
+                plan_kwargs["time_stages"] = TIME_SL_STAGES
+            if high_mom_sl_mult is not None:
+                plan_kwargs["high_momentum_sl_mult"] = high_mom_sl_mult
+            plan = _exit_plan_for_strategy(sid, entry_price, window, **plan_kwargs)
             pos = PositionState(
                 symbol=sym, entry_price=entry_price, qty=QTY, initial_qty=QTY,
                 entry_time=entry_bar.timestamp,
@@ -163,8 +166,11 @@ async def main():
     ap.add_argument("--days", type=int, default=15)
     ap.add_argument("--min-flu", type=float, default=1.0)
     ap.add_argument("--min-score", type=float, default=0.5)
-    ap.add_argument("--trail", action="store_true",
-                    help="B. 5단계 트레일링 (TRAIL_STAGES_AITRADE)")
+    # trail 은 2026-05-17 default ON 변경됨. 명시 OFF 가능.
+    ap.add_argument(
+        "--trail", action=argparse.BooleanOptionalAction, default=True,
+        help="B. 5단계 트레일링 (default ON, --no-trail 로 OFF)",
+    )
     ap.add_argument("--time-sl", dest="time_sl", action="store_true",
                     help="A. 시간별 단계 SL (0~2분-1.5%/2~5분-2%/5분+-2.5%)")
     ap.add_argument("--high-mom-sl-mult", type=float, default=None,

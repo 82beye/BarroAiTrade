@@ -188,7 +188,9 @@ class TestIntrabarSLPriority:
         from backend.models.exit_order import ExitReason
 
         sim = IntradaySimulator()
-        plan = _scaled_exit_plan(Decimal("100"))  # TP +3/+5/+7%, SL -1.5% (98.5)
+        # 본 테스트는 SL 우선 평가 검증 — trail 명시 OFF
+        # (2026-05-17 trail default ON 변경 이후, fixed SL 동작만 검증 목적)
+        plan = _scaled_exit_plan(Decimal("100"), trail_stages=None)
         candle = OHLCV(
             symbol="TEST", timestamp=datetime(2026, 5, 1, 9, 1),
             open=100, high=104, low=98, close=99, volume=1000,
@@ -205,7 +207,8 @@ class TestIntrabarSLPriority:
         from backend.models.exit_order import ExitReason
 
         sim = IntradaySimulator()
-        plan = _scaled_exit_plan(Decimal("100"))
+        # trail 명시 OFF — 본 테스트는 TP 우선 평가 검증 목적
+        plan = _scaled_exit_plan(Decimal("100"), trail_stages=None)
         candle = OHLCV(
             symbol="TEST", timestamp=datetime(2026, 5, 1, 9, 1),
             open=100, high=104, low=99.5, close=103, volume=1000,

@@ -527,21 +527,27 @@ class IntradaySimulator:
 # 향후 종목별·전략별 명시 적용 가능. _scaled_exit_plan default 자동 적용은 제외.
 
 
+_UNSET = object()
+
+
 def _scaled_exit_plan(
     entry_price: Decimal,
     sl_pct: Decimal = Decimal("-0.015"),
     time_stages: Optional[list[tuple[int, Decimal]]] = None,
-    trail_stages: Optional[list[tuple[Decimal, Decimal]]] = None,
+    trail_stages=_UNSET,  # default ON 이지만 명시 None 으로 OFF 가능
     high_momentum_sl_mult: Optional[Decimal] = None,
     sl_mult: Optional[Decimal] = None,
 ) -> ExitPlan:
     """entry_price 기준 +3/+5/+7% TP, SL fixed (default -1.5%).
 
-    옵션 (모두 None 이면 기존 동작 보존):
-    - time_stages: 시간별 단계 SL (A)
-    - trail_stages: 5단계 변동성 트레일링 (B)
+    옵션:
+    - time_stages: 시간별 단계 SL (A, default OFF)
+    - trail_stages: 5단계 변동성 트레일링 (B, 2026-05-17 default ON = TRAIL_STAGES_AITRADE).
+      ledger 시뮬 +314k 효과 입증으로 default 활성화. 명시 None 전달 시 OFF.
     - high_momentum_sl_mult + sl_mult: high_momentum_sl_mult ≥ 0.15 시 sl_pct ×sl_mult (C)
     """
+    if trail_stages is _UNSET:
+        trail_stages = TRAIL_STAGES_AITRADE
     eff_sl_pct = sl_pct
     if (
         high_momentum_sl_mult is not None and sl_mult is not None
@@ -570,7 +576,7 @@ def _sfzone_atr_exit_plan(
     ),
     sl_floor_pct: Decimal = Decimal("0.015"),
     sl_cap_pct: Decimal = Decimal("0.08"),
-    trail_stages: Optional[list[tuple[Decimal, Decimal]]] = None,
+    trail_stages=_UNSET,
     high_momentum_sl_mult: Optional[Decimal] = None,
 ) -> ExitPlan:
     """SF존 전용 ExitPlan — TP·SL 모두 ATR 기반 (R:R 균형).
@@ -580,6 +586,8 @@ def _sfzone_atr_exit_plan(
 
     SFZoneStrategy 전용 분기 — 다른 전략은 _scaled_exit_plan 그대로 사용.
     """
+    if trail_stages is _UNSET:
+        trail_stages = TRAIL_STAGES_AITRADE
     atr_pct = _atr_pct(candles_window, n=n)
     atr_clamped = max(sl_floor_pct, min(atr_pct, sl_cap_pct))
     sl_pct = -atr_clamped * sl_multiplier
@@ -616,7 +624,7 @@ def _exit_plan_for_strategy(
     candles_window: list[OHLCV],
     *,
     f_zone_atr: bool = False,
-    trail_stages: Optional[list[tuple[Decimal, Decimal]]] = None,
+    trail_stages=_UNSET,   # default ON (=TRAIL_STAGES_AITRADE), 명시 None 시 OFF
     time_stages: Optional[list[tuple[int, Decimal]]] = None,
     high_momentum_sl_mult: Optional[Decimal] = None,
 ) -> ExitPlan:
