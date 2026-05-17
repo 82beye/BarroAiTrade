@@ -4,22 +4,22 @@ import { useTradingStore } from '@/lib/store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
+const STATUS_COLORS: Record<string, string> = {
+  FILLED: 'bg-green-900 text-green-200',
+  PENDING: 'bg-yellow-900 text-yellow-200',
+  CANCELED: 'bg-red-900 text-red-200',
+  REJECTED: 'bg-red-900 text-red-200',
+};
+
+const STATUS_KO: Record<string, string> = {
+  FILLED: '체결',
+  PENDING: '대기',
+  CANCELED: '취소',
+  REJECTED: '거부',
+};
+
 export function RecentOrders() {
   const orders = useTradingStore((state) => state.orders);
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'FILLED':
-        return 'bg-green-900 text-green-200';
-      case 'PENDING':
-        return 'bg-yellow-900 text-yellow-200';
-      case 'CANCELED':
-      case 'REJECTED':
-        return 'bg-red-900 text-red-200';
-      default:
-        return 'bg-slate-700 text-slate-200';
-    }
-  };
 
   if (orders.length === 0) {
     return (
@@ -49,15 +49,17 @@ export function RecentOrders() {
               <div>
                 <p className="font-medium text-slate-50">{order.symbol}</p>
                 <p className="text-slate-400">
-                  {order.side === 'BUY' ? '매수' : '매도'} {order.quantity}@
-                  ${order.price.toFixed(2)}
+                  {order.side === 'BUY' ? '매수' : '매도'} {order.quantity}주
+                  {order.type === 'MARKET'
+                    ? ' @ 시장가'
+                    : ` @ ${order.price.toLocaleString()}원`}
                 </p>
               </div>
               <Badge
                 variant="secondary"
-                className={getStatusColor(order.status)}
+                className={STATUS_COLORS[order.status] ?? 'bg-slate-700 text-slate-200'}
               >
-                {order.status}
+                {STATUS_KO[order.status] ?? order.status}
               </Badge>
             </div>
           ))}

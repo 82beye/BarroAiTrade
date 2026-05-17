@@ -30,9 +30,10 @@ export function StatusBar() {
         </div>
       )}
 
-      {systemStatus && (
+      {systemStatus?.started_at && (
         <div className="text-sm text-slate-400">
-          업타임: {Math.floor(systemStatus.uptime / 3600)}h
+          업타임:{' '}
+          {Math.floor((Date.now() - new Date(systemStatus.started_at).getTime()) / 3_600_000)}h
         </div>
       )}
     </div>

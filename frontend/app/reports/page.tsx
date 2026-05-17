@@ -1,301 +1,225 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Button } from '@/components/ui/button';
+import { useState, useEffect, useCallback } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 
-interface DailyReport {
-  date: string;
-  totalPnL: number;
-  pnlRatio: number;
-  maxDrawdown: number;
-  tradeCount: number;
-  winRate: number;
+interface DailySummary {
+  trades_count: number;
+  win_count: number;
+  loss_count: number;
+  win_rate: number;
+  pnl: number;
+  pnl_pct: number;
 }
 
 interface TradeRecord {
-  id: string;
-  timestamp: string;
   symbol: string;
-  orderType: 'BUY' | 'SELL';
-  quantity: number;
-  entryPrice: number;
-  exitPrice?: number;
+  side: 'buy' | 'sell';
+  entry_price: number;
+  exit_price?: number;
   pnl?: number;
-  pnlRatio?: number;
+  entry_time: string;
+  exit_time?: string;
 }
 
-interface ChartDataPoint {
+interface DailyReport {
   date: string;
-  pnlRatio: number;
+  summary: DailySummary;
+  trades: TradeRecord[];
 }
 
-// Mock data
-const MOCK_REPORTS: DailyReport[] = [
-  {
-    date: '2026-04-08',
-    totalPnL: 1250,
-    pnlRatio: 2.15,
-    maxDrawdown: -890,
-    tradeCount: 12,
-    winRate: 75,
-  },
-  {
-    date: '2026-04-09',
-    totalPnL: 850,
-    pnlRatio: 1.45,
-    maxDrawdown: -650,
-    tradeCount: 8,
-    winRate: 62.5,
-  },
-  {
-    date: '2026-04-10',
-    totalPnL: 2100,
-    pnlRatio: 3.65,
-    maxDrawdown: -1200,
-    tradeCount: 15,
-    winRate: 80,
-  },
-  {
-    date: '2026-04-11',
-    totalPnL: 1800,
-    pnlRatio: 3.10,
-    maxDrawdown: -950,
-    tradeCount: 10,
-    winRate: 70,
-  },
-];
+interface ChartPoint {
+  date: string;
+  pnl_pct: number;
+}
 
-const MOCK_TRADES: TradeRecord[] = [
-  {
-    id: '1',
-    timestamp: '2026-04-11T14:05:00Z',
-    symbol: 'AAPL',
-    orderType: 'BUY',
-    quantity: 10,
-    entryPrice: 185.2,
-    exitPrice: 186.5,
-    pnl: 130,
-    pnlRatio: 0.7,
-  },
-  {
-    id: '2',
-    timestamp: '2026-04-11T13:20:00Z',
-    symbol: 'MSFT',
-    orderType: 'BUY',
-    quantity: 5,
-    entryPrice: 420.1,
-    exitPrice: 422.8,
-    pnl: 135,
-    pnlRatio: 0.64,
-  },
-  {
-    id: '3',
-    timestamp: '2026-04-11T12:45:00Z',
-    symbol: 'GOOGL',
-    orderType: 'SELL',
-    quantity: 8,
-    entryPrice: 142.9,
-    exitPrice: 141.5,
-    pnl: 112,
-    pnlRatio: 0.98,
-  },
-  {
-    id: '4',
-    timestamp: '2026-04-11T11:30:00Z',
-    symbol: 'NVDA',
-    orderType: 'BUY',
-    quantity: 3,
-    entryPrice: 892.1,
-    exitPrice: 885.5,
-    pnl: -198,
-    pnlRatio: -0.74,
-  },
-];
+function today() {
+  return new Date().toISOString().split('T')[0];
+}
 
 export default function ReportsPage() {
-  const [selectedDate, setSelectedDate] = useState('2026-04-11');
-  const [currentReport, setCurrentReport] = useState<DailyReport | null>(null);
-  const [trades, setTrades] = useState<TradeRecord[]>([]);
-  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(today());
+  const [report, setReport] = useState<DailyReport | null>(null);
+  const [chartData, setChartData] = useState<ChartPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'time' | 'pnl'>('time');
 
-  // 초기 데이터 로드
-  useEffect(() => {
-    const loadReports = async () => {
-      try {
-        setIsLoading(true);
-        // TODO: API 엔드포인트 (현재 Mock data)
-        // const response = await fetch(`/api/reports?date=${selectedDate}`);
-        // const data = await response.json();
+  const fetchReport = useCallback(async (date: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/reports/daily?date_str=${date}`);
+      if (!res.ok) throw new Error(`${res.status}`);
+      const data: DailyReport = await res.json();
+      setReport(data);
 
-        const report = MOCK_REPORTS.find((r) => r.date === selectedDate) || MOCK_REPORTS[MOCK_REPORTS.length - 1];
-        setCurrentReport(report);
+      // 최근 7일 차트 데이터 병렬 조회
+      const days = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(date);
+        d.setDate(d.getDate() - i);
+        return d.toISOString().split('T')[0];
+      }).reverse();
 
-        // Mock trades
-        setTrades(MOCK_TRADES);
-
-        // Chart data
-        setChartData(MOCK_REPORTS.map((r) => ({
-          date: r.date.split('-')[2],
-          pnlRatio: r.pnlRatio,
-        })));
-      } catch (error) {
-        console.error('Failed to load reports:', error);
-        setCurrentReport(MOCK_REPORTS[MOCK_REPORTS.length - 1]);
-        setTrades(MOCK_TRADES);
-        setChartData(MOCK_REPORTS.map((r) => ({
-          date: r.date.split('-')[2],
-          pnlRatio: r.pnlRatio,
-        })));
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadReports();
-  }, [selectedDate]);
-
-  const sortedTrades = [...trades].sort((a, b) => {
-    if (sortBy === 'time') {
-      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-    } else {
-      return (b.pnlRatio || 0) - (a.pnlRatio || 0);
+      const results = await Promise.allSettled(
+        days.map((d) =>
+          fetch(`/api/reports/daily?date_str=${d}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d2): ChartPoint | null =>
+              d2 ? { date: d2.date?.slice(5), pnl_pct: d2.summary?.pnl_pct ?? 0 } : null
+            )
+        )
+      );
+      setChartData(
+        results
+          .filter((r): r is PromiseFulfilledResult<ChartPoint> => r.status === 'fulfilled' && r.value !== null)
+          .map((r) => r.value)
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '조회 실패');
+      setReport(null);
+    } finally {
+      setLoading(false);
     }
-  });
+  }, []);
+
+  useEffect(() => { fetchReport(selectedDate); }, [selectedDate, fetchReport]);
+
+  const sortedTrades = report
+    ? [...report.trades].sort((a, b) => {
+        if (sortBy === 'time') return new Date(b.entry_time).getTime() - new Date(a.entry_time).getTime();
+        return (b.pnl ?? 0) - (a.pnl ?? 0);
+      })
+    : [];
 
   return (
-    <div className="flex-1 space-y-6 p-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">리포트</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          일일 손익 분석 및 매매 내역 조회
-        </p>
+    <div className="min-h-screen bg-slate-900 p-8">
+      <div className="mb-8">
+        <h1 className="text-4xl font-bold text-slate-50">리포트</h1>
+        <p className="mt-2 text-slate-400">일일 손익 분석 및 매매 내역 조회</p>
       </div>
 
-      {/* Date Selector */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex gap-4 items-center">
-            <label className="text-sm font-medium">날짜 선택:</label>
+      {/* 날짜 선택 */}
+      <Card className="mb-6 border-slate-700 bg-slate-800">
+        <CardContent className="pt-4">
+          <div className="flex items-center gap-4">
+            <label className="text-sm font-medium text-slate-300">날짜 선택:</label>
             <input
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="px-3 py-2 border border-input rounded-md text-sm bg-slate-900 text-slate-50"
+              className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-slate-200"
             />
-            <select
-              defaultValue="daily"
-              className="px-3 py-2 border border-input rounded-md text-sm bg-slate-900 text-slate-50 w-32"
-            >
-              <option value="daily">일일</option>
-              <option value="weekly">주간</option>
-              <option value="monthly">월간</option>
-            </select>
           </div>
         </CardContent>
       </Card>
 
-      {/* Summary Cards */}
-      {currentReport && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          {/* Total PnL */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">일일 수익</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                ${currentReport.totalPnL > 0 ? '+' : ''}{currentReport.totalPnL}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {currentReport.date} 기준
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* PnL Ratio */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">수익률</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className={`text-2xl font-bold ${currentReport.pnlRatio > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {currentReport.pnlRatio > 0 ? '+' : ''}{currentReport.pnlRatio.toFixed(2)}%
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {currentReport.tradeCount} 건 거래
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Max Drawdown */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">최대낙폭</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-red-600">
-                ${currentReport.maxDrawdown}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                승률: {currentReport.winRate}%
-              </p>
-            </CardContent>
-          </Card>
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-700 bg-red-900 bg-opacity-30 px-4 py-3 text-sm text-red-300">
+          {error} — 해당 날짜에 리포트가 없거나 백엔드가 응답하지 않습니다.
         </div>
       )}
 
-      {/* PnL Chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle>손익률 추이</CardTitle>
-          <CardDescription>최근 4일간의 수익률 변화</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="w-full h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis label={{ value: '수익률 (%)', angle: -90, position: 'insideLeft' }} />
-                <Tooltip
-                  formatter={(value) => `${typeof value === 'number' ? value.toFixed(2) : value}%`}
-                  labelFormatter={(label) => `${label}일`}
-                />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="pnlRatio"
-                  stroke="#6366f1"
-                  name="수익률"
-                  strokeWidth={2}
-                  dot={{ fill: '#6366f1' }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </CardContent>
-      </Card>
+      {/* 요약 카드 */}
+      {loading ? (
+        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-24 rounded-lg" />)}
+        </div>
+      ) : report ? (
+        <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <Card className="border-slate-700 bg-slate-800">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-400">일일 수익</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className={`text-2xl font-bold ${report.summary.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {report.summary.pnl >= 0 ? '+' : ''}{report.summary.pnl.toLocaleString()}원
+              </div>
+              <p className="mt-1 text-xs text-slate-500">{report.date} 기준</p>
+            </CardContent>
+          </Card>
 
-      {/* Trade History Table */}
-      <Card>
+          <Card className="border-slate-700 bg-slate-800">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-400">수익률</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className={`text-2xl font-bold ${report.summary.pnl_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {report.summary.pnl_pct >= 0 ? '+' : ''}{report.summary.pnl_pct.toFixed(2)}%
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                {report.summary.trades_count}건 · 승률 {report.summary.win_rate.toFixed(1)}%
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-slate-700 bg-slate-800">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-400">승/패</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-slate-200">
+                <span className="text-green-400">{report.summary.win_count}승</span>
+                {' / '}
+                <span className="text-red-400">{report.summary.loss_count}패</span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">총 {report.summary.trades_count}건</p>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      {/* 수익률 차트 */}
+      {chartData.length > 0 && (
+        <Card className="mb-6 border-slate-700 bg-slate-800">
+          <CardHeader>
+            <CardTitle className="text-slate-200">최근 7일 수익률 추이</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 12 }} />
+                  <YAxis
+                    tickFormatter={(v) => `${v.toFixed(1)}%`}
+                    tick={{ fill: '#94a3b8', fontSize: 12 }}
+                  />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', color: '#e2e8f0' }}
+                    formatter={(v) => [typeof v === 'number' ? `${v.toFixed(2)}%` : '—', '수익률']}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="pnl_pct"
+                    stroke="#6366f1"
+                    strokeWidth={2}
+                    dot={{ fill: '#6366f1' }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 매매 내역 */}
+      <Card className="border-slate-700 bg-slate-800">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>매매 내역</CardTitle>
-              <CardDescription>
+              <CardTitle className="text-slate-200">매매 내역</CardTitle>
+              <CardDescription className="text-slate-500">
                 {selectedDate} 거래 기록 ({sortedTrades.length}건)
               </CardDescription>
             </div>
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as 'time' | 'pnl')}
-              className="px-3 py-2 border border-input rounded-md text-sm bg-slate-900 text-slate-50 w-32"
+              className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-slate-200"
             >
               <option value="time">시간순</option>
               <option value="pnl">수익순</option>
@@ -303,52 +227,49 @@ export default function ReportsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
-            <div className="text-center py-8">로딩 중...</div>
+          {loading ? (
+            <div className="space-y-2">
+              {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded" />)}
+            </div>
           ) : sortedTrades.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              거래 기록이 없습니다.
+            <div className="py-12 text-center text-slate-500">
+              {error ? '백엔드 연결 후 거래 내역이 표시됩니다.' : '해당 날짜의 거래 내역이 없습니다.'}
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="border-b border-slate-700">
-                  <tr>
-                    <th className="text-left px-4 py-3 font-semibold">시간</th>
-                    <th className="text-left px-4 py-3 font-semibold">종목</th>
-                    <th className="text-left px-4 py-3 font-semibold">주문타입</th>
-                    <th className="text-right px-4 py-3 font-semibold">수량</th>
-                    <th className="text-right px-4 py-3 font-semibold">진입가</th>
-                    <th className="text-right px-4 py-3 font-semibold">청산가</th>
-                    <th className="text-right px-4 py-3 font-semibold">수익금액</th>
-                    <th className="text-right px-4 py-3 font-semibold">수익률</th>
+                <thead>
+                  <tr className="border-b border-slate-700 text-left text-slate-400">
+                    <th className="pb-3 font-medium">시간</th>
+                    <th className="pb-3 font-medium">종목</th>
+                    <th className="pb-3 font-medium">방향</th>
+                    <th className="pb-3 text-right font-medium">진입가</th>
+                    <th className="pb-3 text-right font-medium">청산가</th>
+                    <th className="pb-3 text-right font-medium">수익금</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedTrades.map((trade) => (
-                    <tr key={trade.id} className="border-b border-slate-800 hover:bg-slate-800/30">
-                      <td className="px-4 py-3 text-sm">
-                        {new Date(trade.timestamp).toLocaleTimeString('ko-KR', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                  {sortedTrades.map((trade, i) => (
+                    <tr key={i} className="border-b border-slate-800 last:border-0 hover:bg-slate-700 hover:bg-opacity-30">
+                      <td className="py-3 font-mono text-xs text-slate-400">
+                        {new Date(trade.entry_time).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
                       </td>
-                      <td className="px-4 py-3 font-semibold">{trade.symbol}</td>
-                      <td className="px-4 py-3">
-                        <Badge variant={trade.orderType === 'BUY' ? 'default' : 'secondary'}>
-                          {trade.orderType === 'BUY' ? '매수' : '매도'}
+                      <td className="py-3 font-semibold text-slate-200">{trade.symbol}</td>
+                      <td className="py-3">
+                        <Badge className={trade.side === 'buy' ? 'bg-blue-600 text-white' : 'bg-orange-600 text-white'}>
+                          {trade.side === 'buy' ? '매수' : '매도'}
                         </Badge>
                       </td>
-                      <td className="text-right px-4 py-3">{trade.quantity}</td>
-                      <td className="text-right px-4 py-3">${trade.entryPrice.toFixed(2)}</td>
-                      <td className="text-right px-4 py-3">
-                        ${trade.exitPrice?.toFixed(2) || '-'}
+                      <td className="py-3 text-right font-mono text-slate-300">
+                        {trade.entry_price.toLocaleString()}원
                       </td>
-                      <td className={`text-right px-4 py-3 font-semibold ${(trade.pnl ?? 0) > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        ${trade.pnl ? (trade.pnl > 0 ? '+' : '') + trade.pnl.toFixed(0) : '-'}
+                      <td className="py-3 text-right font-mono text-slate-300">
+                        {trade.exit_price ? `${trade.exit_price.toLocaleString()}원` : '—'}
                       </td>
-                      <td className={`text-right px-4 py-3 font-semibold ${(trade.pnlRatio ?? 0) > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {trade.pnlRatio ? (trade.pnlRatio > 0 ? '+' : '') + trade.pnlRatio.toFixed(2) : '-'}%
+                      <td className={`py-3 text-right font-semibold ${(trade.pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {trade.pnl != null
+                          ? `${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toLocaleString()}원`
+                          : '—'}
                       </td>
                     </tr>
                   ))}

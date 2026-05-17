@@ -3,7 +3,11 @@
  */
 import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// 브라우저에서는 상대경로(Next.js rewrite 프록시), SSR/외부 지정 시 절대경로
+const API_URL =
+  typeof window !== 'undefined'
+    ? ''
+    : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export const apiClient = axios.create({
   baseURL: API_URL,
@@ -20,7 +24,12 @@ export class WebSocketClient {
   private maxReconnectAttempts = 5;
 
   constructor(path: string = '/ws/realtime') {
-    this.url = `${API_URL.replace('http', 'ws')}${path}`;
+    if (typeof window !== 'undefined' && !API_URL) {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      this.url = `${proto}//${window.location.host}${path}`;
+    } else {
+      this.url = `${(API_URL || 'http://localhost:8000').replace('http', 'ws')}${path}`;
+    }
   }
 
   connect(): Promise<void> {

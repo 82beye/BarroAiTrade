@@ -34,7 +34,7 @@ export function TickerTable() {
               <div>
                 <p className="font-medium text-slate-50">{ticker.symbol}</p>
                 <p className="text-sm text-slate-400">
-                  ${ticker.price.toFixed(2)}
+                  {ticker.price.toLocaleString()}원
                 </p>
               </div>
               <div
@@ -46,8 +46,8 @@ export function TickerTable() {
                   {ticker.change >= 0 ? '+' : ''}
                   {ticker.change.toFixed(2)}%
                 </p>
-                <p className="text-sm">
-                  Vol: {(ticker.volume / 1000000).toFixed(1)}M
+                <p className="text-sm text-slate-400">
+                  {(ticker.volume / 1000).toFixed(0)}천주
                 </p>
               </div>
             </div>

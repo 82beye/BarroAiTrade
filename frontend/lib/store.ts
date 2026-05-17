@@ -46,17 +46,18 @@ export interface Balance {
 }
 
 export interface SystemStatus {
-  uptime: number;
-  connectedMarkets: string[];
-  activeStrategies: number;
-  totalCapital: number;
-  totalPnl: number;
-  timestamp: string;
+  state: string;
+  mode: string;
+  market: string;
+  position_count: number;
+  total_pnl: number;
+  started_at: string | null;
+  error_message: string | null;
 }
 
 export interface WSMessage {
-  type: 'ticker' | 'order' | 'position' | 'balance' | 'status';
-  data: Ticker | Order | Position | Balance | SystemStatus;
+  type: 'ticker' | 'order' | 'position' | 'balance' | 'status' | 'system_status' | 'risk_status';
+  data: Ticker | Order | Position | Balance | SystemStatus | Record<string, unknown>;
   timestamp: string;
 }
 
@@ -180,6 +181,7 @@ export const useTradingStore = create<TradingStore>((set, get) => ({
         get().setBalance(message.data as Balance);
         break;
       case 'status':
+      case 'system_status':
         get().setSystemStatus(message.data as SystemStatus);
         break;
     }

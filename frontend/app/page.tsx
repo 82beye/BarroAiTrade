@@ -88,6 +88,8 @@ export default function Dashboard() {
   const totalPnlPct = balance?.total_pnl_pct ?? 0;
   const modeLabel = sysInfo?.mode === 'live' ? 'LIVE' : sysInfo?.mode === 'simulation' ? 'SIM' : '—';
   const posCount = sysInfo?.position_count ?? 0;
+  const stateLabel: Record<string, string> = { idle: '대기 중', running: '실행 중', stopped: '중지됨', error: '오류' };
+  const sysStateKo = sysInfo?.state ? (stateLabel[sysInfo.state] ?? sysInfo.state) : undefined;
   const isError = error !== null;
 
   return (
@@ -159,7 +161,7 @@ export default function Dashboard() {
             <StatCard
               title="운영 모드"
               value={modeLabel}
-              description={sysInfo?.state ?? undefined}
+              description={sysStateKo}
               color={modeLabel === 'LIVE' ? 'success' : 'default'}
               icon="🌐"
             />

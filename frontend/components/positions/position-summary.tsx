@@ -13,12 +13,12 @@ export function PositionSummary() {
     <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
       <StatCard
         title="총 P&L"
-        value={`$${totalPnl.toFixed(2)}`}
+        value={`${totalPnl >= 0 ? '+' : ''}${totalPnl.toLocaleString()}원`}
         color={totalPnl >= 0 ? 'success' : 'danger'}
         icon="💹"
       />
-      <StatCard title="보유 포지션" value={positions.length} icon="📊" />
-      <StatCard title="총 수량" value={totalQuantity} icon="📈" />
+      <StatCard title="보유 포지션" value={`${positions.length}개`} icon="📊" />
+      <StatCard title="총 수량" value={`${totalQuantity.toLocaleString()}주`} icon="📈" />
     </div>
   );
 }

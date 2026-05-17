@@ -16,30 +16,38 @@ export function PositionTable() {
           <p className="text-slate-400">보유 포지션이 없습니다</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="table">
+            <table className="w-full text-sm">
               <thead>
-                <tr>
-                  <th>심볼</th>
-                  <th>방향</th>
-                  <th>수량</th>
-                  <th>진입가</th>
-                  <th>현재가</th>
-                  <th>P&L</th>
-                  <th>수익률</th>
+                <tr className="border-b border-slate-700 text-left text-slate-400">
+                  <th className="pb-3 font-medium">심볼</th>
+                  <th className="pb-3 font-medium">방향</th>
+                  <th className="pb-3 text-right font-medium">수량</th>
+                  <th className="pb-3 text-right font-medium">진입가</th>
+                  <th className="pb-3 text-right font-medium">현재가</th>
+                  <th className="pb-3 text-right font-medium">P&L</th>
+                  <th className="pb-3 text-right font-medium">수익률</th>
                 </tr>
               </thead>
               <tbody>
                 {positions.map((position) => (
-                  <tr key={position.id}>
-                    <td className="font-medium text-slate-50">{position.symbol}</td>
-                    <td className="text-slate-300">{position.side === 'LONG' ? '롱' : '숏'}</td>
-                    <td className="text-slate-300">{position.quantity}</td>
-                    <td className="text-slate-300">${position.entryPrice.toFixed(2)}</td>
-                    <td className="text-slate-300">${position.currentPrice.toFixed(2)}</td>
-                    <td className={position.pnl >= 0 ? 'font-medium text-green-500' : 'font-medium text-red-500'}>
-                      ${position.pnl.toFixed(2)}
+                  <tr key={position.id} className="border-b border-slate-800 last:border-0 hover:bg-slate-800 hover:bg-opacity-40">
+                    <td className="py-3 font-semibold text-slate-200">{position.symbol}</td>
+                    <td className="py-3">
+                      <span className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                        position.side === 'LONG'
+                          ? 'bg-blue-900 text-blue-200'
+                          : 'bg-orange-900 text-orange-200'
+                      }`}>
+                        {position.side === 'LONG' ? '롱' : '숏'}
+                      </span>
                     </td>
-                    <td className={position.pnlPercent >= 0 ? 'font-medium text-green-500' : 'font-medium text-red-500'}>
+                    <td className="py-3 text-right font-mono text-slate-300">{position.quantity}주</td>
+                    <td className="py-3 text-right font-mono text-slate-300">{position.entryPrice.toLocaleString()}원</td>
+                    <td className="py-3 text-right font-mono text-slate-300">{position.currentPrice.toLocaleString()}원</td>
+                    <td className={`py-3 text-right font-semibold ${position.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {position.pnl >= 0 ? '+' : ''}{position.pnl.toLocaleString()}원
+                    </td>
+                    <td className={`py-3 text-right font-semibold ${position.pnlPercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       {position.pnlPercent >= 0 ? '+' : ''}{position.pnlPercent.toFixed(2)}%
                     </td>
                   </tr>
