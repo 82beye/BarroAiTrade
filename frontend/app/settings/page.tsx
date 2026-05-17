@@ -7,12 +7,12 @@ import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 
-// Zod Schema for validation
 const SettingsSchema = z.object({
   stopLoss: z.number().min(0.1, '0.1 이상이어야 합니다').max(50, '50 이하여야 합니다'),
   takeProfit: z.number().min(0.1, '0.1 이상이어야 합니다').max(100, '100 이하여야 합니다'),
-  dailyLimit: z.number().min(100, '$100 이상이어야 합니다').max(1000000, '$1,000,000 이하여야 합니다'),
+  dailyLossLimit: z.number().min(0.1, '0.1 이상이어야 합니다').max(20, '20 이하여야 합니다'),
   maxSymbols: z.number().min(1, '1개 이상이어야 합니다').max(20, '20개 이하여야 합니다'),
   mode: z.enum(['SIMULATION', 'LIVE'], {
     errorMap: () => ({ message: '유효한 모드를 선택해주세요' }),
@@ -25,33 +25,20 @@ const SettingsSchema = z.object({
 
 type SettingsFormData = z.infer<typeof SettingsSchema>;
 
-interface Settings {
-  stopLoss: number;
-  takeProfit: number;
-  dailyLimit: number;
-  maxSymbols: number;
-  mode: 'SIMULATION' | 'LIVE';
-  telegramChatId?: string;
-  notifyOnOrder: boolean;
-  notifyOnClose: boolean;
-  notifyOnStopLoss: boolean;
-}
-
-// Mock data
-const MOCK_SETTINGS: Settings = {
+const DEFAULT_SETTINGS: SettingsFormData = {
   stopLoss: 5.0,
   takeProfit: 10.0,
-  dailyLimit: 5000,
+  dailyLossLimit: 3.0,
   maxSymbols: 5,
   mode: 'SIMULATION',
-  telegramChatId: '1234567890',
+  telegramChatId: '',
   notifyOnOrder: true,
   notifyOnClose: true,
   notifyOnStopLoss: true,
 };
 
 export default function SettingsPage() {
-  const [isLoading, setIsLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [saveMessage, setSaveMessage] = useState('');
 
@@ -59,319 +46,268 @@ export default function SettingsPage() {
     register,
     handleSubmit,
     reset,
-    watch,
     formState: { errors },
   } = useForm<SettingsFormData>({
     resolver: zodResolver(SettingsSchema),
-    defaultValues: MOCK_SETTINGS,
+    defaultValues: DEFAULT_SETTINGS,
   });
 
-  const mode = watch('mode');
-  const telegramChatId = watch('telegramChatId');
-
-  // 초기 데이터 로드
   useEffect(() => {
-    const loadSettings = async () => {
+    async function loadSettings() {
       try {
-        // TODO: API 엔드포인트 (현재 Mock data)
-        // const response = await fetch('/api/settings');
-        // const data = await response.json();
-        reset(MOCK_SETTINGS);
-      } catch (error) {
-        console.error('Failed to load settings:', error);
-        reset(MOCK_SETTINGS);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+        const [riskRes, configRes] = await Promise.all([
+          fetch('/api/risk/status'),
+          fetch('/api/config'),
+        ]);
 
+        const merged: SettingsFormData = { ...DEFAULT_SETTINGS };
+
+        if (riskRes.ok) {
+          const risk = await riskRes.json();
+          const limits = risk.limits ?? {};
+          if (limits.stop_loss_pct != null) merged.stopLoss = limits.stop_loss_pct;
+          if (limits.take_profit_1_pct != null) merged.takeProfit = limits.take_profit_1_pct;
+          if (limits.daily_loss_limit_pct != null) merged.dailyLossLimit = limits.daily_loss_limit_pct;
+          if (limits.max_concurrent_positions != null) merged.maxSymbols = limits.max_concurrent_positions;
+        }
+
+        if (configRes.ok) {
+          const config = await configRes.json();
+          if (config.trading_mode === 'live') merged.mode = 'LIVE';
+          else if (config.trading_mode === 'simulation') merged.mode = 'SIMULATION';
+          if (config.telegram_chat_id) merged.telegramChatId = config.telegram_chat_id;
+          if (config.notify_on_order != null) merged.notifyOnOrder = config.notify_on_order;
+          if (config.notify_on_close != null) merged.notifyOnClose = config.notify_on_close;
+          if (config.notify_on_stop_loss != null) merged.notifyOnStopLoss = config.notify_on_stop_loss;
+        }
+
+        reset(merged);
+      } catch {
+        reset(DEFAULT_SETTINGS);
+      } finally {
+        setPageLoading(false);
+      }
+    }
     loadSettings();
   }, [reset]);
 
   const onSubmit = async (data: SettingsFormData) => {
+    setSaveStatus('saving');
+    setSaveMessage('');
     try {
-      setSaveStatus('saving');
-      setSaveMessage('');
+      const [riskRes, configRes] = await Promise.all([
+        fetch('/api/risk/limits', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            stop_loss_pct: data.stopLoss,
+            take_profit_1_pct: data.takeProfit,
+            daily_loss_limit_pct: data.dailyLossLimit,
+            max_concurrent_positions: data.maxSymbols,
+          }),
+        }),
+        fetch('/api/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            trading_mode: data.mode.toLowerCase(),
+            telegram_chat_id: data.telegramChatId || '',
+            notify_on_order: data.notifyOnOrder,
+            notify_on_close: data.notifyOnClose,
+            notify_on_stop_loss: data.notifyOnStopLoss,
+          }),
+        }),
+      ]);
 
-      // TODO: API 엔드포인트 통합
-      // const response = await fetch('/api/config', {
-      //   method: 'PUT',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify(data),
-      // });
-
-      // Mock: 설정 저장 시뮬레이션
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (!riskRes.ok || !configRes.ok) throw new Error('저장 실패');
 
       setSaveStatus('success');
       setSaveMessage('설정이 저장되었습니다.');
       setTimeout(() => setSaveStatus('idle'), 3000);
-    } catch (error) {
-      console.error('Failed to save settings:', error);
+    } catch {
       setSaveStatus('error');
-      setSaveMessage('설정 저장에 실패했습니다. 다시 시도해주세요.');
+      setSaveMessage('설정 저장에 실패했습니다. 백엔드 연결을 확인하세요.');
     }
   };
 
-  const handleReset = () => {
-    reset(MOCK_SETTINGS);
-    setSaveStatus('idle');
-    setSaveMessage('');
-  };
-
-  if (isLoading) {
+  if (pageLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div className="text-center">
-          <p className="text-muted-foreground">설정을 불러오는 중...</p>
+      <div className="min-h-screen bg-slate-900 p-8">
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold text-slate-50">설정</h1>
+        </div>
+        <div className="space-y-4">
+          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40 w-full rounded-lg" />)}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 space-y-6 p-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">설정</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          매매 파라미터 및 알림 설정 관리
-        </p>
+    <div className="min-h-screen bg-slate-900 p-8">
+      <div className="mb-8">
+        <h1 className="text-4xl font-bold text-slate-50">설정</h1>
+        <p className="mt-2 text-slate-400">매매 파라미터 및 알림 설정 관리</p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-        {/* Section 1: Risk Parameters */}
-        <Card>
+        {/* 리스크 파라미터 */}
+        <Card className="border-slate-700 bg-slate-800">
           <CardHeader>
-            <CardTitle>리스크 파라미터</CardTitle>
-            <CardDescription>매매 시 적용되는 손절/익절 설정</CardDescription>
+            <CardTitle className="text-slate-200">리스크 파라미터</CardTitle>
+            <CardDescription className="text-slate-500">매매 시 적용되는 손절/익절 설정</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Stop Loss */}
-            <div className="space-y-2">
-              <label htmlFor="stopLoss" className="text-sm font-medium">손절(Stop Loss) (%)</label>
-              <div className="flex items-center gap-4">
-                <Input
-                  id="stopLoss"
-                  type="number"
-                  step="0.1"
-                  {...register('stopLoss', { valueAsNumber: true })}
-                  className={errors.stopLoss ? 'border-red-500' : ''}
-                />
-                <span className="text-sm text-slate-400 whitespace-nowrap">
-                  기본값: 5.0%
-                </span>
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-300">손절 (%)</label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="number"
+                    step="0.1"
+                    {...register('stopLoss', { valueAsNumber: true })}
+                    className="border-slate-600 bg-slate-700 text-slate-200"
+                  />
+                  <span className="whitespace-nowrap text-sm text-slate-500">기본값: 5.0%</span>
+                </div>
+                {errors.stopLoss && <p className="text-sm text-red-400">⚠ {errors.stopLoss.message}</p>}
               </div>
-              {errors.stopLoss && (
-                <p className="text-sm text-red-400 flex items-center gap-1">
-                  ⚠️ {errors.stopLoss.message}
-                </p>
-              )}
-            </div>
 
-            {/* Take Profit */}
-            <div className="space-y-2">
-              <label htmlFor="takeProfit" className="text-sm font-medium">익절(Take Profit) (%)</label>
-              <div className="flex items-center gap-4">
-                <Input
-                  id="takeProfit"
-                  type="number"
-                  step="0.1"
-                  {...register('takeProfit', { valueAsNumber: true })}
-                  className={errors.takeProfit ? 'border-red-500' : ''}
-                />
-                <span className="text-sm text-slate-400 whitespace-nowrap">
-                  기본값: 10.0%
-                </span>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-300">익절 (%)</label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="number"
+                    step="0.1"
+                    {...register('takeProfit', { valueAsNumber: true })}
+                    className="border-slate-600 bg-slate-700 text-slate-200"
+                  />
+                  <span className="whitespace-nowrap text-sm text-slate-500">기본값: 10.0%</span>
+                </div>
+                {errors.takeProfit && <p className="text-sm text-red-400">⚠ {errors.takeProfit.message}</p>}
               </div>
-              {errors.takeProfit && (
-                <p className="text-sm text-red-400 flex items-center gap-1">
-                  ⚠️ {errors.takeProfit.message}
-                </p>
-              )}
-            </div>
 
-            {/* Daily Limit */}
-            <div className="space-y-2">
-              <label htmlFor="dailyLimit" className="text-sm font-medium">일일 한도 (USD)</label>
-              <div className="flex items-center gap-4">
-                <Input
-                  id="dailyLimit"
-                  type="number"
-                  step="100"
-                  {...register('dailyLimit', { valueAsNumber: true })}
-                  className={errors.dailyLimit ? 'border-red-500' : ''}
-                />
-                <span className="text-sm text-slate-400 whitespace-nowrap">
-                  기본값: $5,000
-                </span>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-300">일일 손실 한도 (%)</label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="number"
+                    step="0.1"
+                    {...register('dailyLossLimit', { valueAsNumber: true })}
+                    className="border-slate-600 bg-slate-700 text-slate-200"
+                  />
+                  <span className="whitespace-nowrap text-sm text-slate-500">기본값: 3.0%</span>
+                </div>
+                {errors.dailyLossLimit && <p className="text-sm text-red-400">⚠ {errors.dailyLossLimit.message}</p>}
               </div>
-              {errors.dailyLimit && (
-                <p className="text-sm text-red-400 flex items-center gap-1">
-                  ⚠️ {errors.dailyLimit.message}
-                </p>
-              )}
-            </div>
 
-            {/* Max Symbols */}
-            <div className="space-y-2">
-              <label htmlFor="maxSymbols" className="text-sm font-medium">최대 종목수</label>
-              <div className="flex items-center gap-4">
-                <Input
-                  id="maxSymbols"
-                  type="number"
-                  step="1"
-                  {...register('maxSymbols', { valueAsNumber: true })}
-                  className={errors.maxSymbols ? 'border-red-500' : ''}
-                />
-                <span className="text-sm text-slate-400 whitespace-nowrap">
-                  기본값: 5개
-                </span>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-300">최대 동시 포지션</label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="number"
+                    step="1"
+                    {...register('maxSymbols', { valueAsNumber: true })}
+                    className="border-slate-600 bg-slate-700 text-slate-200"
+                  />
+                  <span className="whitespace-nowrap text-sm text-slate-500">기본값: 5개</span>
+                </div>
+                {errors.maxSymbols && <p className="text-sm text-red-400">⚠ {errors.maxSymbols.message}</p>}
               </div>
-              {errors.maxSymbols && (
-                <p className="text-sm text-red-400 flex items-center gap-1">
-                  ⚠️ {errors.maxSymbols.message}
-                </p>
-              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Section 2: Trading Mode */}
-        <Card>
+        {/* 매매 모드 */}
+        <Card className="border-slate-700 bg-slate-800">
           <CardHeader>
-            <CardTitle>매매 모드</CardTitle>
-            <CardDescription>실시간 거래 또는 시뮬레이션 모드 선택</CardDescription>
+            <CardTitle className="text-slate-200">매매 모드</CardTitle>
+            <CardDescription className="text-slate-500">실시간 거래 또는 시뮬레이션 모드 선택</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-3">
-              <div className="flex items-center space-x-3 p-3 border border-slate-700 rounded-lg cursor-pointer hover:bg-slate-800/50">
-                <input
-                  type="radio"
-                  id="mode-simulation"
-                  value="SIMULATION"
-                  {...register('mode')}
-                  className="w-4 h-4"
-                />
-                <label htmlFor="mode-simulation" className="flex-1 cursor-pointer">
-                  <div className="font-medium">Simulation (테스트)</div>
-                  <p className="text-sm text-slate-400">실제 자금 없이 매매 시뮬레이션</p>
-                </label>
-              </div>
-
-              <div className="flex items-center space-x-3 p-3 border border-slate-700 rounded-lg cursor-pointer hover:bg-slate-800/50">
-                <input
-                  type="radio"
-                  id="mode-live"
-                  value="LIVE"
-                  {...register('mode')}
-                  className="w-4 h-4"
-                />
-                <label htmlFor="mode-live" className="flex-1 cursor-pointer">
-                  <div className="font-medium">Live (실시간)</div>
-                  <p className="text-sm text-slate-400">실시간 거래 활성화</p>
-                </label>
-              </div>
-            </div>
-
-            {errors.mode && (
-              <p className="text-sm text-red-400 flex items-center gap-1">
-                ⚠️ {errors.mode.message}
-              </p>
-            )}
+          <CardContent className="space-y-3">
+            {(['SIMULATION', 'LIVE'] as const).map((val) => (
+              <label
+                key={val}
+                className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-700 p-3 hover:bg-slate-700 hover:bg-opacity-50"
+              >
+                <input type="radio" value={val} {...register('mode')} className="h-4 w-4" />
+                <div>
+                  <div className="font-medium text-slate-200">
+                    {val === 'SIMULATION' ? 'Simulation (테스트)' : 'Live (실시간)'}
+                  </div>
+                  <p className="text-sm text-slate-500">
+                    {val === 'SIMULATION' ? '실제 자금 없이 매매 시뮬레이션' : '실시간 거래 활성화'}
+                  </p>
+                </div>
+              </label>
+            ))}
+            {errors.mode && <p className="text-sm text-red-400">⚠ {errors.mode.message}</p>}
           </CardContent>
         </Card>
 
-        {/* Section 3: Notifications */}
-        <Card>
+        {/* 알림 설정 */}
+        <Card className="border-slate-700 bg-slate-800">
           <CardHeader>
-            <CardTitle>알림 설정</CardTitle>
-            <CardDescription>거래 및 시스템 알림 환경 설정</CardDescription>
+            <CardTitle className="text-slate-200">알림 설정</CardTitle>
+            <CardDescription className="text-slate-500">텔레그램 알림 환경 설정</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Telegram Chat ID */}
-            <div className="space-y-3">
-              <label htmlFor="telegramChatId" className="text-sm font-medium">텔레그램 Chat ID</label>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-300">텔레그램 Chat ID</label>
               <Input
-                id="telegramChatId"
                 type="text"
                 placeholder="Chat ID 입력 (예: 1234567890)"
                 {...register('telegramChatId')}
+                className="max-w-xs border-slate-600 bg-slate-700 text-slate-200 placeholder-slate-500"
               />
-              <p className="text-xs text-slate-400">
-                텔레그램 봇으로부터 Chat ID를 얻을 수 있습니다.
-              </p>
+              <p className="text-xs text-slate-500">텔레그램 봇에서 Chat ID를 확인하세요.</p>
             </div>
 
-            {/* Notification Types */}
             <div className="space-y-3">
-              <label className="text-sm font-medium">알림 종류</label>
-              <div className="space-y-3">
-                <div className="flex items-center space-x-2 p-2">
-                  <input
-                    type="checkbox"
-                    id="notifyOnOrder"
-                    {...register('notifyOnOrder')}
-                    className="w-4 h-4"
-                  />
-                  <label htmlFor="notifyOnOrder" className="font-normal cursor-pointer flex-1">
-                    주문 실행 알림
-                  </label>
-                </div>
-
-                <div className="flex items-center space-x-2 p-2">
-                  <input
-                    type="checkbox"
-                    id="notifyOnClose"
-                    {...register('notifyOnClose')}
-                    className="w-4 h-4"
-                  />
-                  <label htmlFor="notifyOnClose" className="font-normal cursor-pointer flex-1">
-                    포지션 청산 알림
-                  </label>
-                </div>
-
-                <div className="flex items-center space-x-2 p-2">
-                  <input
-                    type="checkbox"
-                    id="notifyOnStopLoss"
-                    {...register('notifyOnStopLoss')}
-                    className="w-4 h-4"
-                  />
-                  <label htmlFor="notifyOnStopLoss" className="font-normal cursor-pointer flex-1">
-                    손절 알림
-                  </label>
-                </div>
-              </div>
+              <label className="text-sm font-medium text-slate-300">알림 종류</label>
+              {(
+                [
+                  { key: 'notifyOnOrder', label: '주문 실행 알림' },
+                  { key: 'notifyOnClose', label: '포지션 청산 알림' },
+                  { key: 'notifyOnStopLoss', label: '손절 알림' },
+                ] as const
+              ).map(({ key, label }) => (
+                <label key={key} className="flex cursor-pointer items-center gap-3 p-2">
+                  <input type="checkbox" {...register(key)} className="h-4 w-4 rounded" />
+                  <span className="text-sm text-slate-300">{label}</span>
+                </label>
+              ))}
             </div>
           </CardContent>
         </Card>
 
-        {/* Save Status Message */}
+        {/* 저장 상태 */}
         {saveStatus !== 'idle' && (
-          <div className={`p-4 rounded-lg flex items-center gap-3 ${
+          <div className={`flex items-center gap-3 rounded-lg border p-4 ${
             saveStatus === 'success'
-              ? 'bg-green-900 text-green-200 border border-green-700'
+              ? 'border-green-700 bg-green-900 bg-opacity-30 text-green-300'
               : saveStatus === 'error'
-              ? 'bg-red-900 text-red-200 border border-red-700'
-              : 'bg-blue-900 text-blue-200 border border-blue-700'
+              ? 'border-red-700 bg-red-900 bg-opacity-30 text-red-300'
+              : 'border-blue-700 bg-blue-900 bg-opacity-30 text-blue-300'
           }`}>
-            {saveStatus === 'success' && <span>✓</span>}
-            {saveStatus === 'error' && <span>✕</span>}
-            <span>{saveMessage}</span>
+            <span>{saveMessage || '저장 중...'}</span>
           </div>
         )}
 
-        {/* Action Buttons */}
         <div className="flex gap-3">
-          <Button type="submit" disabled={saveStatus === 'saving'}>
+          <Button
+            type="submit"
+            disabled={saveStatus === 'saving'}
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+          >
             {saveStatus === 'saving' ? '저장 중...' : '저장하기'}
           </Button>
           <Button
             type="button"
             variant="outline"
-            onClick={handleReset}
+            onClick={() => { reset(DEFAULT_SETTINGS); setSaveStatus('idle'); }}
             disabled={saveStatus === 'saving'}
+            className="border-slate-600 text-slate-300 hover:bg-slate-700"
           >
             초기화
           </Button>
