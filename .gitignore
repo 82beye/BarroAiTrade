@@ -78,3 +78,6 @@ backend/legacy_scalping/.venv/
 backend/legacy_scalping/**/__pycache__/
 backend/legacy_scalping/**/*.pyc
 backend/legacy_scalping/**/*.log
+
+# Next.js TS 빌드 캐시 (2026-05-18)
+frontend/tsconfig.tsbuildinfo
