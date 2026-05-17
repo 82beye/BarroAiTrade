@@ -459,18 +459,35 @@ class IntradaySimulator:
         pos = position
         orders: list[ExitOrder] = []
 
+        # high_water_mark 갱신 — 트레일링 평가 기준
+        hwm = pos.high_water_mark
+        if hwm is None or high > hwm:
+            hwm = high
+            pos = pos.model_copy(update={"high_water_mark": hwm})
+
         # SL 평가 우선 — low 가 효과적 SL 이하면 체결 (보수적: 하락 먼저 가정).
-        # sl_eff 는 ExitEngine._effective_sl 과 동일 — breakeven 갱신된 sl_at 우선.
+        # 우선순위: trail_sl(peak) → breakeven sl_at → time_stages → fixed_pct.
+        # 더 높은(보수적) SL 사용.
         if pos.qty > 0 and plan.stop_loss is not None:
-            sl_eff = (
-                pos.sl_at
-                if pos.sl_at is not None
-                else pos.entry_price * (Decimal("1") + plan.stop_loss.fixed_pct)
-            )
+            trail_sl = plan.trail_sl_for_peak(pos.entry_price, hwm)
+            base_sl_at = pos.sl_at
+            if trail_sl is not None and (base_sl_at is None or trail_sl > base_sl_at):
+                base_sl_at = trail_sl
+                pos = pos.model_copy(update={"sl_at": trail_sl})
+            if base_sl_at is not None:
+                sl_eff = base_sl_at
+            else:
+                sl = plan.stop_loss
+                if sl.time_stages and pos.entry_time is not None:
+                    elapsed = (ts - pos.entry_time).total_seconds()
+                    sl_pct = sl.sl_pct_at_elapsed(elapsed)
+                else:
+                    sl_pct = sl.fixed_pct
+                sl_eff = pos.entry_price * (Decimal("1") + sl_pct)
             if low <= sl_eff:
                 new_pos, exit_orders = self._exit.evaluate(pos, plan, sl_eff, ts)
                 for eo in exit_orders:
-                    if eo.reason == ExitReason.STOP_LOSS:
+                    if eo.reason in (ExitReason.STOP_LOSS, ExitReason.TRAIL_STOP):
                         orders.append(eo)
                 pos = new_pos
                 return pos, orders
@@ -501,19 +518,45 @@ class IntradaySimulator:
         return pos, orders
 
 
+# 시간별 단계 SL 인프라 — 2026-05-17 ai-trade 패턴 비교 결과:
+# - ai-trade 원본(0~2분-1.5%/2~5분-2%/5분+-2.5%): -13k (효과 미미)
+# - 역전 패턴(0~5분-2.5%/5~15분-2%/15분+-1.5%): -141k (악화)
+# - default OFF: +437,617 (기준)
+# 결론: 현재 picker 종목군에서 SL 즉시 발동 케이스는 실제 큰 하락의 시작 — 빠른
+# 손절이 답. 인프라는 보존 (StopLoss.time_stages 필드 + ExitEngine 시간 인자) →
+# 향후 종목별·전략별 명시 적용 가능. _scaled_exit_plan default 자동 적용은 제외.
+
+
 def _scaled_exit_plan(
     entry_price: Decimal,
     sl_pct: Decimal = Decimal("-0.015"),
+    time_stages: Optional[list[tuple[int, Decimal]]] = None,
+    trail_stages: Optional[list[tuple[Decimal, Decimal]]] = None,
+    high_momentum_sl_mult: Optional[Decimal] = None,
+    sl_mult: Optional[Decimal] = None,
 ) -> ExitPlan:
-    """entry_price 기준 +3/+5/+7% TP, SL(default -1.5%). 고정 정책 — 대부분 전략 default."""
+    """entry_price 기준 +3/+5/+7% TP, SL fixed (default -1.5%).
+
+    옵션 (모두 None 이면 기존 동작 보존):
+    - time_stages: 시간별 단계 SL (A)
+    - trail_stages: 5단계 변동성 트레일링 (B)
+    - high_momentum_sl_mult + sl_mult: high_momentum_sl_mult ≥ 0.15 시 sl_pct ×sl_mult (C)
+    """
+    eff_sl_pct = sl_pct
+    if (
+        high_momentum_sl_mult is not None and sl_mult is not None
+        and high_momentum_sl_mult >= Decimal("0.15")
+    ):
+        eff_sl_pct = sl_pct * sl_mult
     return ExitPlan(
         take_profits=[
             TakeProfitTier(price=entry_price * Decimal("1.03"), qty_pct=Decimal("0.33")),
             TakeProfitTier(price=entry_price * Decimal("1.05"), qty_pct=Decimal("0.33")),
             TakeProfitTier(price=entry_price * Decimal("1.07"), qty_pct=Decimal("0.34")),
         ],
-        stop_loss=StopLoss(fixed_pct=sl_pct),
+        stop_loss=StopLoss(fixed_pct=eff_sl_pct, time_stages=time_stages),
         breakeven_trigger=Decimal("0.01"),
+        trail_stages=trail_stages,
     )
 
 
@@ -527,6 +570,8 @@ def _sfzone_atr_exit_plan(
     ),
     sl_floor_pct: Decimal = Decimal("0.015"),
     sl_cap_pct: Decimal = Decimal("0.08"),
+    trail_stages: Optional[list[tuple[Decimal, Decimal]]] = None,
+    high_momentum_sl_mult: Optional[Decimal] = None,
 ) -> ExitPlan:
     """SF존 전용 ExitPlan — TP·SL 모두 ATR 기반 (R:R 균형).
 
@@ -542,6 +587,13 @@ def _sfzone_atr_exit_plan(
     if sl_pct < -sl_cap_pct * Decimal("2"):
         sl_pct = -sl_cap_pct * Decimal("2")
 
+    # 고모멘텀 SL 완화 (2026-05-17, ai-trade 패턴, C):
+    # 진입 직전 일봉 change_pct ≥ 15% 시 SL 폭을 추가 ×high_momentum_sl_mult 완화.
+    if high_momentum_sl_mult is not None:
+        day_chg = _day_change_pct(candles_window)
+        if day_chg >= Decimal("0.15"):
+            sl_pct = sl_pct * high_momentum_sl_mult
+
     tp1_pct, tp2_pct, tp3_pct = (atr_clamped * m for m in tp_multipliers)
     return ExitPlan(
         take_profits=[
@@ -554,6 +606,7 @@ def _sfzone_atr_exit_plan(
         ],
         stop_loss=StopLoss(fixed_pct=sl_pct),
         breakeven_trigger=Decimal("0.01"),
+        trail_stages=trail_stages,
     )
 
 
@@ -563,18 +616,56 @@ def _exit_plan_for_strategy(
     candles_window: list[OHLCV],
     *,
     f_zone_atr: bool = False,
+    trail_stages: Optional[list[tuple[Decimal, Decimal]]] = None,
+    time_stages: Optional[list[tuple[int, Decimal]]] = None,
+    high_momentum_sl_mult: Optional[Decimal] = None,
 ) -> ExitPlan:
     """전략별 ExitPlan 분기 — '100% 중복은 공유, 나머지는 별도' 원칙.
 
     - sf_zone: ATR 기반 동적 TP·SL (변동성 적응)
     - f_zone + f_zone_atr=True: sf_zone 과 동일 ATR plan (실험 옵션)
     - 그 외 (f_zone 기본, gold_zone, swing_38, scalping_consensus): 고정 +3/+5/+7%, −1.5%
+
+    옵션 (2026-05-17, ai-trade 패턴 도입, 모두 default OFF):
+    - trail_stages: 5단계 변동성 트레일링 SL (B)
+    - time_stages: 시간별 단계 SL (A, 이미 도입)
+    - high_momentum_sl_mult: 진입 직전 일봉 change_pct ≥ 15% 시 SL 폭 ×배율 (C)
     """
-    if strategy_id == "sf_zone":
-        return _sfzone_atr_exit_plan(entry_price, candles_window)
-    if strategy_id == "f_zone" and f_zone_atr:
-        return _sfzone_atr_exit_plan(entry_price, candles_window)
-    return _scaled_exit_plan(entry_price)
+    if strategy_id == "sf_zone" or (strategy_id == "f_zone" and f_zone_atr):
+        return _sfzone_atr_exit_plan(
+            entry_price, candles_window,
+            trail_stages=trail_stages,
+            high_momentum_sl_mult=high_momentum_sl_mult,
+        )
+    return _scaled_exit_plan(
+        entry_price,
+        time_stages=time_stages,
+        trail_stages=trail_stages,
+        high_momentum_sl_mult=_day_change_pct(candles_window)
+        if high_momentum_sl_mult else None,
+        sl_mult=high_momentum_sl_mult,
+    )
+
+
+# ai-trade 5단계 변동성 트레일링 (2026-05-17 권장 default — 명시 적용 시).
+# DESC 정렬: 가장 큰 high_pnl 단계 우선. trail_sl = peak × (1 + trail_pct).
+TRAIL_STAGES_AITRADE: list[tuple[Decimal, Decimal]] = [
+    (Decimal("0.05"), Decimal("-0.010")),   # +5% 이상 → peak×0.99
+    (Decimal("0.04"), Decimal("-0.012")),
+    (Decimal("0.03"), Decimal("-0.015")),
+    (Decimal("0.02"), Decimal("-0.020")),
+    (Decimal("0.015"), Decimal("-0.025")),  # +1.5% 도달 시 trail 활성화
+]
+
+
+def _day_change_pct(candles_window: list[OHLCV]) -> Decimal:
+    """진입 직전 일봉의 change_pct = (close - open) / open."""
+    if not candles_window:
+        return Decimal("0")
+    last = candles_window[-1]
+    if last.open <= 0:
+        return Decimal("0")
+    return (Decimal(str(last.close)) - Decimal(str(last.open))) / Decimal(str(last.open))
 
 
 def _atr_pct(candles_window: list[OHLCV], n: int = 14) -> Decimal:

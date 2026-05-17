@@ -15,6 +15,7 @@ class ExitReason(str, Enum):
     TP3 = "tp3"
     STOP_LOSS = "stop_loss"
     TIME_EXIT = "time_exit"
+    TRAIL_STOP = "trail_stop"  # 2026-05-17: 5단계 변동성 트레일링 (ai-trade 패턴)
 
 
 class ExitOrder(BaseModel):
@@ -38,6 +39,7 @@ class PositionState(BaseModel):
     initial_qty: Decimal = Field(gt=0)    # 진입 시점 qty (TP 비율 계산 기준)
     tp_filled: int = Field(default=0, ge=0, le=3)
     sl_at: Optional[Decimal] = None       # breakeven 후 갱신
+    high_water_mark: Optional[Decimal] = None  # 트레일링 peak (2026-05-17)
 
 
 __all__ = ["ExitReason", "ExitOrder", "PositionState"]

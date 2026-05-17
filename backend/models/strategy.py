@@ -78,12 +78,21 @@ class TakeProfitTier(BaseModel):
 
 
 class StopLoss(BaseModel):
-    """고정 + 트레일링 손절."""
+    """고정 + 트레일링 + 시간별 단계 손절.
+
+    time_stages (2026-05-17, ai-trade 패턴 도입):
+      entry 후 경과초별 SL 단계. 예: [(120,-0.015),(300,-0.020),(99999,-0.025)]
+      = 2분 -1.5% / 5분 -2% / 5분+ -2.5%
+      → 개장 직후 노이즈 SL 회피 + 시간 지날수록 손실 허용 폭 확대.
+      None 이면 fixed_pct 만 사용 (기존 동작 보존).
+      breakeven 발동 후 갱신된 PositionState.sl_at 이 항상 우선.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     fixed_pct: Decimal = Field(..., lt=0)        # -0.02 = -2%
     trailing_pct: Optional[Decimal] = None       # 동적 손절 (선택)
+    time_stages: Optional[list[tuple[int, Decimal]]] = None  # [(sec, sl_pct), ...]
 
     @field_validator("fixed_pct", mode="before")
     @classmethod
@@ -97,9 +106,34 @@ class StopLoss(BaseModel):
             return None
         return v if isinstance(v, Decimal) else Decimal(str(v))
 
+    @field_validator("time_stages", mode="before")
+    @classmethod
+    def _stages_to_decimal(
+        cls, v: Optional[list]
+    ) -> Optional[list[tuple[int, Decimal]]]:
+        if v is None:
+            return None
+        out: list[tuple[int, Decimal]] = []
+        for sec, pct in v:
+            d = pct if isinstance(pct, Decimal) else Decimal(str(pct))
+            if d >= 0:
+                raise ValueError(f"time_stages sl_pct must be < 0, got {d}")
+            out.append((int(sec), d))
+        out.sort(key=lambda kv: kv[0])
+        return out
+
+    def sl_pct_at_elapsed(self, elapsed_sec: float) -> Decimal:
+        """elapsed_sec 시점의 SL 비율. time_stages 없으면 fixed_pct."""
+        if not self.time_stages:
+            return self.fixed_pct
+        for limit_sec, pct in self.time_stages:
+            if elapsed_sec <= limit_sec:
+                return pct
+        return self.time_stages[-1][1]
+
 
 class ExitPlan(BaseModel):
-    """청산 계획 — 분할 익절 + 손절 + 시간 청산 + 브레이크이븐."""
+    """청산 계획 — 분할 익절 + 손절 + 시간 청산 + 브레이크이븐 + 트레일링."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
@@ -107,6 +141,12 @@ class ExitPlan(BaseModel):
     stop_loss: StopLoss
     time_exit: Optional[dtime] = None            # 예: 14:50 강제 청산
     breakeven_trigger: Optional[Decimal] = None  # 예: +0.015 도달 시 SL 을 +0.005 로
+    # 5단계 변동성 트레일링 (2026-05-17, ai-trade 패턴):
+    #   [(high_pnl_pct, trail_pct), ...] — peak 대비 high_pnl 도달 시 trail_pct 적용.
+    #   예: [(0.05, -0.01), (0.04, -0.012), (0.03, -0.015), (0.02, -0.02), (0.015, -0.025)]
+    #   high_pnl_pct DESC 정렬 (가장 큰 단계 우선). trail_sl = peak × (1 + trail_pct).
+    #   None 이면 미적용 (기존 회귀 보존).
+    trail_stages: Optional[list[tuple[Decimal, Decimal]]] = None
 
     @field_validator("breakeven_trigger", mode="before")
     @classmethod
@@ -122,6 +162,38 @@ class ExitPlan(BaseModel):
         if total > Decimal("1.0001"):
             raise ValueError(f"take_profits qty_pct 합계 {total} > 1.0")
         return v
+
+    @field_validator("trail_stages", mode="before")
+    @classmethod
+    def _trail_to_decimal(
+        cls, v: Optional[list]
+    ) -> Optional[list[tuple[Decimal, Decimal]]]:
+        if v is None:
+            return None
+        out: list[tuple[Decimal, Decimal]] = []
+        for hp, tr in v:
+            hp_d = hp if isinstance(hp, Decimal) else Decimal(str(hp))
+            tr_d = tr if isinstance(tr, Decimal) else Decimal(str(tr))
+            if hp_d <= 0:
+                raise ValueError(f"trail_stages high_pnl must be > 0, got {hp_d}")
+            if tr_d >= 0:
+                raise ValueError(f"trail_stages trail_pct must be < 0, got {tr_d}")
+            out.append((hp_d, tr_d))
+        # DESC — 가장 큰 high_pnl 단계 우선 평가
+        out.sort(key=lambda kv: kv[0], reverse=True)
+        return out
+
+    def trail_sl_for_peak(
+        self, entry_price: Decimal, peak_price: Decimal
+    ) -> Optional[Decimal]:
+        """현재 peak 기준 trail SL 가격. trail_stages 없거나 단계 미달 시 None."""
+        if not self.trail_stages or peak_price <= entry_price:
+            return None
+        high_pnl_pct = (peak_price - entry_price) / entry_price
+        for thresh, trail_pct in self.trail_stages:  # DESC
+            if high_pnl_pct >= thresh:
+                return peak_price * (Decimal(1) + trail_pct)
+        return None
 
 
 # === Account ===

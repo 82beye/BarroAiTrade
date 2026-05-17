@@ -86,6 +86,13 @@ class FZoneParams:
     min_atr_pct: float = 0.0
     atr_n: int = 14
 
+    # 수박지표 가산 (2026-05-17, ai-trade D 포팅, default OFF):
+    # 최근 N봉 중 watermelon_signal=True 발생 시 F존 score 에 +bonus.
+    # 세력 매집 가능성 종목 우대 — 진입 정밀도 보강.
+    use_watermelon_bonus: bool = False
+    watermelon_lookback: int = 60
+    watermelon_bonus: float = 1.0
+
 
 # ── 분석 결과 ─────────────────────────────────────────────────────────────────
 
@@ -185,7 +192,7 @@ class FZoneStrategy(Strategy):
             return None
 
         # 5단계: F존/SF존 판정 및 점수 계산
-        self._score_and_classify(analysis)
+        self._score_and_classify(analysis, candles)
         if not analysis.is_f_zone:
             return None
 
@@ -424,8 +431,13 @@ class FZoneStrategy(Strategy):
                 analysis.symbol, bounce_gain_pct * 100, bounce_vol_ratio,
             )
 
-    def _score_and_classify(self, analysis: FZoneAnalysis) -> None:
-        """F존/SF존 판정 및 종합 점수 계산 (0~10점)"""
+    def _score_and_classify(
+        self, analysis: FZoneAnalysis, candles: Optional[list] = None,
+    ) -> None:
+        """F존/SF존 판정 및 종합 점수 계산 (0~10점).
+
+        candles 인자: 수박지표 가산 (use_watermelon_bonus=True) 시 필요.
+        """
         p = self.params
         score = 0.0
         reasons = []
@@ -462,6 +474,16 @@ class FZoneStrategy(Strategy):
         reasons.append(
             f"반등 +{analysis.bounce_gain_pct*100:.1f}%(거래량 {analysis.bounce_volume_ratio:.1f}x)"
         )
+
+        # 수박지표 가산 (D, ai-trade 포팅, default OFF)
+        if p.use_watermelon_bonus and candles:
+            from backend.core.strategy._watermelon import watermelon_signal
+            lookback = min(p.watermelon_lookback, len(candles))
+            for j in range(len(candles) - lookback, len(candles)):
+                if watermelon_signal(candles[: j + 1]).signal:
+                    score += p.watermelon_bonus
+                    reasons.append("수박(+bonus)")
+                    break
 
         analysis.score = min(score, 10.0)
         analysis.is_f_zone = analysis.score >= 4.0

@@ -81,6 +81,80 @@ class KiwoomNativeCandleFetcher:
             parse_kind="minute",
         )
 
+    async def fetch_minute_history(
+        self,
+        symbol: str,
+        tic_scope: str = "1",
+        adjust_price: bool = True,
+        target_business_days: int = 15,
+        max_pages: int = 12,
+    ) -> list[OHLCV]:
+        """페이징으로 target_business_days 영업일 분봉 누적.
+
+        응답 헤더 cont-yn / next-key 로 연속 호출. 중복 제거 후 시간 오름차순 반환.
+        """
+        if tic_scope not in _VALID_TIC:
+            raise ValueError(f"invalid tic_scope: {tic_scope}")
+        token = await self._oauth.get_token()
+        client = self._http or httpx.AsyncClient(timeout=15)
+        owns = self._http is None
+        url = f"{self._oauth.base_url}{_CHART_PATH}"
+        body = {
+            "stk_cd": symbol, "tic_scope": tic_scope,
+            "upd_stkpc_tp": "1" if adjust_price else "0",
+        }
+        seen: dict[datetime, OHLCV] = {}
+        cont_yn = "N"
+        next_key = ""
+        try:
+            for page_idx in range(max_pages):
+                for attempt in range(3):
+                    try:
+                        resp = await client.post(
+                            url,
+                            headers={
+                                "authorization": f"Bearer {token.access_token.get_secret_value()}",
+                                "content-type": "application/json;charset=UTF-8",
+                                "cont-yn": cont_yn,
+                                "next-key": next_key,
+                                "api-id": _TR_MINUTE,
+                            },
+                            json=body,
+                        )
+                        if resp.status_code == 429 and attempt < 2:
+                            await asyncio.sleep(1.0 * (attempt + 1))
+                            continue
+                        resp.raise_for_status()
+                        break
+                    except Exception:
+                        if attempt < 2:
+                            await asyncio.sleep(1.0 * (attempt + 1))
+                            continue
+                        raise
+                data = resp.json()
+                if data.get("return_code") != 0:
+                    raise RuntimeError(
+                        f"kiwoom-native error: rc={data.get('return_code')} "
+                        f"msg={data.get('return_msg')}"
+                    )
+                rows = data.get("stk_min_pole_chart_qry") or []
+                for r in rows:
+                    c = _parse_minute_row(symbol, r)
+                    seen.setdefault(c.timestamp, c)
+                cont_yn = resp.headers.get("cont-yn", "N")
+                next_key = resp.headers.get("next-key", "")
+                unique_days = {c.timestamp.date() for c in seen.values()}
+                if len(unique_days) >= target_business_days:
+                    break
+                if cont_yn != "Y" or not next_key:
+                    break
+                await asyncio.sleep(self._rate)
+        finally:
+            if owns:
+                await client.aclose()
+        out = sorted(seen.values(), key=lambda c: c.timestamp)
+        return out
+
     async def _fetch(
         self,
         tr_id: str,

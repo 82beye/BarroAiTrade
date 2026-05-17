@@ -38,6 +38,10 @@ class ExitEngine:
         new_qty = pos.qty
         new_tp = pos.tp_filled
         new_sl = pos.sl_at
+        # high_water_mark 갱신 (current_price > 기존 hwm 이면 update)
+        new_hwm = pos.high_water_mark
+        if new_hwm is None or current_price > new_hwm:
+            new_hwm = current_price
 
         # 1. time_exit
         if plan.time_exit is not None and now.time() >= plan.time_exit:
@@ -49,20 +53,32 @@ class ExitEngine:
                     reason=ExitReason.TIME_EXIT,
                 )
             )
-            return self._with_state(pos, qty=Decimal(0), tp_filled=new_tp, sl_at=new_sl), orders
+            return self._with_state(
+                pos, qty=Decimal(0), tp_filled=new_tp, sl_at=new_sl, hwm=new_hwm,
+            ), orders
 
-        # 2. SL — 효과적 SL 가격 계산
-        sl_eff = self._effective_sl(pos, plan)
+        # 2. SL — 효과적 SL 가격 계산 (breakeven sl_at > trail_stages > time_stages > fixed)
+        # trail_sl 은 peak 기반 — sl_at(breakeven) 보다 더 높으면 갱신
+        trail_sl = plan.trail_sl_for_peak(pos.entry_price, new_hwm)
+        if trail_sl is not None and (new_sl is None or trail_sl > new_sl):
+            new_sl = trail_sl
+        sl_eff = self._effective_sl(pos, plan, now, override_sl_at=new_sl)
         if sl_eff is not None and current_price <= sl_eff:
             orders.append(
                 ExitOrder(
                     symbol=pos.symbol,
                     qty=new_qty,
                     target_price=current_price,
-                    reason=ExitReason.STOP_LOSS,
+                    reason=(
+                        ExitReason.TRAIL_STOP
+                        if (trail_sl is not None and sl_eff == trail_sl)
+                        else ExitReason.STOP_LOSS
+                    ),
                 )
             )
-            return self._with_state(pos, qty=Decimal(0), tp_filled=new_tp, sl_at=new_sl), orders
+            return self._with_state(
+                pos, qty=Decimal(0), tp_filled=new_tp, sl_at=new_sl, hwm=new_hwm,
+            ), orders
 
         # 3. TP 단계 (현재 미발동 단계만)
         for idx, tier in enumerate(plan.take_profits):
@@ -85,29 +101,46 @@ class ExitEngine:
                 new_qty = new_qty - qty
                 new_tp = idx + 1
 
-        # 4. breakeven_trigger — TP1 발동 후 sl_at 갱신
+        # 4. breakeven_trigger — TP1 발동 후 sl_at 갱신 (trail 로 이미 갱신된 경우 더 높은 쪽)
         if (
             plan.breakeven_trigger is not None
             and new_tp >= 1
-            and new_sl is None  # 아직 갱신 안 됨
         ):
-            # breakeven offset 적용 — entry * (1 + offset)
-            new_sl = pos.entry_price * (Decimal(1) + plan.breakeven_trigger)
+            be_sl = pos.entry_price * (Decimal(1) + plan.breakeven_trigger)
+            if new_sl is None or be_sl > new_sl:
+                new_sl = be_sl
 
-        return self._with_state(pos, qty=new_qty, tp_filled=new_tp, sl_at=new_sl), orders
+        return self._with_state(
+            pos, qty=new_qty, tp_filled=new_tp, sl_at=new_sl, hwm=new_hwm,
+        ), orders
 
     @staticmethod
-    def _effective_sl(pos: PositionState, plan: ExitPlan) -> Optional[Decimal]:
+    def _effective_sl(
+        pos: PositionState, plan: ExitPlan, now: Optional[datetime] = None,
+        override_sl_at: Optional[Decimal] = None,
+    ) -> Optional[Decimal]:
+        # 우선순위: override_sl_at(=trail 또는 breakeven 갱신) > pos.sl_at > time_stages > fixed
+        if override_sl_at is not None:
+            return override_sl_at
         if pos.sl_at is not None:
             return pos.sl_at
-        # fixed_pct 는 음수 (-0.02 = -2%)
-        return pos.entry_price * (Decimal(1) + plan.stop_loss.fixed_pct)
+        sl = plan.stop_loss
+        if sl.time_stages and now is not None and pos.entry_time is not None:
+            elapsed = (now - pos.entry_time).total_seconds()
+            pct = sl.sl_pct_at_elapsed(elapsed)
+        else:
+            pct = sl.fixed_pct
+        return pos.entry_price * (Decimal(1) + pct)
 
     @staticmethod
     def _with_state(
-        pos: PositionState, qty: Decimal, tp_filled: int, sl_at: Optional[Decimal]
+        pos: PositionState, qty: Decimal, tp_filled: int,
+        sl_at: Optional[Decimal], hwm: Optional[Decimal] = None,
     ) -> PositionState:
-        return pos.model_copy(update={"qty": qty, "tp_filled": tp_filled, "sl_at": sl_at})
+        update = {"qty": qty, "tp_filled": tp_filled, "sl_at": sl_at}
+        if hwm is not None:
+            update["high_water_mark"] = hwm
+        return pos.model_copy(update=update)
 
 
 __all__ = ["ExitEngine"]
