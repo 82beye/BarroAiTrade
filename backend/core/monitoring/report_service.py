@@ -10,6 +10,8 @@ import logging
 from datetime import datetime, date
 from typing import Any, Dict, List, Optional, Tuple
 
+from sqlalchemy import text
+
 logger = logging.getLogger(__name__)
 
 
@@ -118,6 +120,21 @@ class ReportService:
             },
             "monthly": [],  # TODO: 월별 집계
         }
+
+    async def get_active_users_count(self) -> int:
+        """DB에서 등록된 사용자 수 조회 (BAR-54)"""
+        try:
+            from backend.db.database import get_db
+
+            async with get_db() as db:
+                if db is None:
+                    return 0
+                res = await db.execute(text("SELECT COUNT(*) as count FROM users"))
+                row = res.mappings().first()
+                return int(row["count"]) if row else 0
+        except Exception as e:
+            logger.error("활성 사용자 수 조회 실패: %s", e)
+            return 0
 
     def build_comprehensive_daily_report(
         self,

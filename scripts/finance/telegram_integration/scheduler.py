@@ -31,8 +31,8 @@ async def _daily_report_job() -> None:
         position_manager = getattr(app_state, "position_manager", None)
         trades = position_manager.get_trade_history() if position_manager else []
 
-        # TODO: 활성 사용자 수를 실제 데이터에서 조회
-        active_users = 0
+        # DB에서 활성 사용자 수 조회 (BAR-54)
+        active_users = await report_service.get_active_users_count()
 
         # BAR-44 스펙에 맞는 comprehensive 리포트 빌드
         report = report_service.build_comprehensive_daily_report(
