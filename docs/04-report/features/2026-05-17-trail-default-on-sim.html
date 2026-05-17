@@ -474,7 +474,227 @@ strong { color: #c0392b; }
 <li><strong>f_zone 적자 유지</strong> — 트레일링 무관 (신호 자체가 SL 발동 케이스). picker가 박스권 종목 위주</li>
 <li><strong>gold_zone 포트폴리오 폭발</strong> — 자본 풀 + 600봉 누적에서 진입 빈도 확보 + trail 효과 결합</li>
 </ol>
-<h2 id="_8">후속 후보</h2>
+<hr />
+<h2 id="d-2026-05-18">D. 일별 매매 승률 분석 (2026-05-18 추가)</h2>
+<p><strong>일별 수익 금액보다 일별 승률이 중요</strong> — 사용자 피드백.
+<code>_strategy_daily_winrate.py</code> (정적 picker) + <code>_strategy_daily_winrate_dynamic.py</code> (일별 picker 재조회) 신규 도구.</p>
+<h3 id="d-1-picker-top-n">D-1. 정적 picker — top N 비교</h3>
+<p>5/16 picker top N 1회 고정 가정. 윈도우 30일.</p>
+<table>
+<thead>
+<tr>
+<th>시나리오</th>
+<th style="text-align: right;">매매</th>
+<th style="text-align: right;">승률</th>
+<th style="text-align: right;">활동일</th>
+<th style="text-align: right;">수익일 비율</th>
+<th style="text-align: right;">누적 net</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>top 10</td>
+<td style="text-align: right;">15</td>
+<td style="text-align: right;"><strong>53.3%</strong></td>
+<td style="text-align: right;">12</td>
+<td style="text-align: right;">58.3%</td>
+<td style="text-align: right;">+4,020,248</td>
+</tr>
+<tr>
+<td>top 5 (daemon 기본)</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;"><strong>0.0%</strong></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0.0%</td>
+<td style="text-align: right;">-30,710</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>top 5는 5/16 picker 상위 5종목(252670·454910·066570·114800·001740) — ETF/우량주 위주라 swing/gold 신호 거의 안 남</li>
+<li>모멘텀 견인 종목(080220 제주반도체·067310 하나마이크론·090710 휴림로봇)은 top 6~10 → top 5에서 제외</li>
+</ul>
+<h3 id="d-2-universe-picker">D-2. 동적 universe — 일별 picker 재조회</h3>
+<p><strong>실전 daemon 정합</strong>. 후보군에서 매일 3-factor(거래대금·등락률·거래량) 재계산 → 일별 top 5 동적 선정.
+각 trade entry 전일 ranking 에서 top 5 통과한 trade 만 인정.</p>
+<table>
+<thead>
+<tr>
+<th>시나리오</th>
+<th style="text-align: right;">매매</th>
+<th style="text-align: right;">승률</th>
+<th style="text-align: right;">활동일</th>
+<th style="text-align: right;">수익일 비율</th>
+<th style="text-align: right;">누적 net</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>후보 10 · min_flu 1.0%</td>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">50.0%</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">50.0%</td>
+<td style="text-align: right;">+3,299,032</td>
+</tr>
+<tr>
+<td>후보 10 · <strong>min_flu 0%</strong></td>
+<td style="text-align: right;"><strong>12</strong></td>
+<td style="text-align: right;"><strong>58.3%</strong></td>
+<td style="text-align: right;">9</td>
+<td style="text-align: right;"><strong>66.7%</strong></td>
+<td style="text-align: right;"><strong>+3,748,874</strong></td>
+</tr>
+<tr>
+<td>후보 30 · min_flu 1.0%</td>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">50.0%</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">50.0%</td>
+<td style="text-align: right;">+3,299,032</td>
+</tr>
+<tr>
+<td><strong>후보 30 · min_flu 0%</strong></td>
+<td style="text-align: right;"><strong>12</strong></td>
+<td style="text-align: right;"><strong>58.3%</strong></td>
+<td style="text-align: right;">9</td>
+<td style="text-align: right;"><strong>66.7%</strong></td>
+<td style="text-align: right;"><strong>+3,748,874</strong></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>min_flu 1.0% 필터가 +740k 놓침</strong> (등락률 0.9% 직전 종목 2건 +449k, -3.8% 약세 종목 1건 +290k). 완화(0%) 시 매매 +2건, 승률 +8.3%p, 수익일 +2일, net +450k.
+후보 확장(10→30)은 효과 0 — 5/16 picker top 10 외 candidate 는 그 날 신호 없거나 동일 trade 발생.</p>
+</blockquote>
+<h3 id="d-3-30-min_flu-0">D-3. 일자별 상세 (최적 시나리오: 후보 30 · min_flu 0%)</h3>
+<table>
+<thead>
+<tr>
+<th>일자</th>
+<th style="text-align: right;">매매</th>
+<th style="text-align: right;">승</th>
+<th style="text-align: right;">패</th>
+<th style="text-align: right;">승률</th>
+<th style="text-align: right;">net</th>
+<th style="text-align: right;">누적</th>
+<th>종목</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>04-22</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;"><strong>100%</strong></td>
+<td style="text-align: right;">+165,563</td>
+<td style="text-align: right;">+165,563</td>
+<td>067310</td>
+</tr>
+<tr>
+<td>04-23</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;"><strong>100%</strong></td>
+<td style="text-align: right;">+63,765</td>
+<td style="text-align: right;">+229,328</td>
+<td>080220</td>
+</tr>
+<tr>
+<td>04-24</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;"><strong>100%</strong></td>
+<td style="text-align: right;">+147,332</td>
+<td style="text-align: right;">+376,660</td>
+<td>067310</td>
+</tr>
+<tr>
+<td>04-28</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0%</td>
+<td style="text-align: right;">-69,734</td>
+<td style="text-align: right;">+306,926</td>
+<td>067310</td>
+</tr>
+<tr>
+<td>05-04</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">50%</td>
+<td style="text-align: right;">+299,021</td>
+<td style="text-align: right;">+605,946</td>
+<td>067310,090710</td>
+</tr>
+<tr>
+<td>05-07</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">0%</td>
+<td style="text-align: right;">-87,471</td>
+<td style="text-align: right;">+518,476</td>
+<td>001740,067310</td>
+</tr>
+<tr>
+<td>05-12</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;"><strong>100%</strong></td>
+<td style="text-align: right;">+127,759</td>
+<td style="text-align: right;">+646,234</td>
+<td>090710</td>
+</tr>
+<tr>
+<td>05-14</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0%</td>
+<td style="text-align: right;">-205</td>
+<td style="text-align: right;">+646,030</td>
+<td>252670</td>
+</tr>
+<tr>
+<td>05-15</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;"><strong>100%</strong></td>
+<td style="text-align: right;">+3,102,844</td>
+<td style="text-align: right;">+3,748,874</td>
+<td>080220</td>
+</tr>
+<tr>
+<td><strong>합계</strong></td>
+<td style="text-align: right;"><strong>12</strong></td>
+<td style="text-align: right;"><strong>7</strong></td>
+<td style="text-align: right;"><strong>5</strong></td>
+<td style="text-align: right;"><strong>58.3%</strong></td>
+<td style="text-align: right;"><strong>+3,748,874</strong></td>
+<td style="text-align: right;"></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="d-4">D-4. 결론 — 실전 정합 일별 승률</h3>
+<ul>
+<li><strong>실전 daemon 환경(top 5 동적, min_flu 0%)에서 매매 승률 ≈ 58.3%</strong></li>
+<li><strong>수익 일 비율 66.7%</strong> (9일 매매 중 6일 수익)</li>
+<li><strong>활동 일수 30%</strong> (30일 중 9일만 매매)</li>
+<li>swing_38 주력 + 5/15 080220 제주반도체 단일 +3.1M 견인</li>
+<li>min_flu 필터 완화 권장 (운영 적용 시)</li>
+</ul>
+<h3 id="d-5">D-5. 한계</h3>
+<p>본 시뮬은 5/16 picker top 30 후보군 기반으로 30일 ranking 재계산. 진정한 실전(매일 전체 시장 ranking 재계산)과 차이 — picker API 가 historical ranking 미제공으로 절충.</p>
+<h2 id="_8">후속 후보 (이전)</h2>
 <ul>
 <li>C 고모멘텀 SL 완화 — 강세장 picker (min_flu 5%+) 시나리오에서 효과 측정</li>
 <li>D 수박지표 — picker watermelon 우선 필터로 효과 측정</li>
@@ -484,6 +704,7 @@ strong { color: #c0392b; }
 <ul>
 <li><code>85ae8df</code> feat(strategy/exit): ai-trade 패턴 A/B/C/D 인프라 도입 + 1분봉 ledger 시뮬</li>
 <li><code>9193f19</code> feat(strategy/exit): B 5단계 트레일링 SL default ON 활성화</li>
+<li>(예정) docs(report): 일별 승률 분석 + 동적 universe 시뮬 추가</li>
 </ul>
 </body>
 </html>
