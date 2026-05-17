@@ -22,6 +22,10 @@ export class WebSocketClient {
   private url: string;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private manuallyClosed = false;
+  // listeners persist across reconnects
+  private storedListeners: Map<string, Array<(data: any) => void>> = new Map();
 
   constructor(path: string = '/ws/realtime') {
     if (typeof window !== 'undefined' && !API_URL) {
@@ -35,7 +39,15 @@ export class WebSocketClient {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
+        this.manuallyClosed = false;
         this.ws = new WebSocket(this.url);
+
+        // Re-attach all stored listeners onto the new ws instance
+        this.storedListeners.forEach((callbacks, event) => {
+          callbacks.forEach((cb) => {
+            this.ws!.addEventListener(event, (e: Event) => cb((e as MessageEvent).data));
+          });
+        });
 
         this.ws.onopen = () => {
           console.log('[WS] Connected');
@@ -50,7 +62,7 @@ export class WebSocketClient {
 
         this.ws.onclose = () => {
           console.log('[WS] Disconnected');
-          this.attemptReconnect();
+          if (!this.manuallyClosed) this.attemptReconnect();
         };
       } catch (error) {
         reject(error);
@@ -63,11 +75,16 @@ export class WebSocketClient {
       this.reconnectAttempts++;
       const delay = Math.pow(2, this.reconnectAttempts) * 1000;
       console.log(`[WS] Reconnecting in ${delay}ms...`);
-      setTimeout(() => this.connect(), delay);
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.connect().catch(() => {
+          // reconnect failed; next attempt scheduled by onclose
+        });
+      }, delay);
     }
   }
 
-  send(data: any): void {
+  send(data: unknown): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));
     } else {
@@ -76,15 +93,25 @@ export class WebSocketClient {
   }
 
   on(event: 'message' | 'error' | 'close' | 'open', callback: (data: any) => void): void {
-    if (!this.ws) return;
-    this.ws.addEventListener(event, (e: any) => callback(e.data));
+    if (!this.storedListeners.has(event)) this.storedListeners.set(event, []);
+    this.storedListeners.get(event)!.push(callback);
+    // also attach to current ws if already open
+    if (this.ws) {
+      this.ws.addEventListener(event, (e: Event) => callback((e as MessageEvent).data));
+    }
   }
 
   close(): void {
+    this.manuallyClosed = true;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
+    this.storedListeners.clear();
   }
 }
 
@@ -101,7 +128,7 @@ export const api = {
     apiClient.get(`/api/market/ticker/${symbol}`),
 
   getOrderBook: (symbol: string) =>
-    apiClient.get(`/api/market/orderbook/${symbol}`),
+    apiClient.get(`/api/market/order-book/${symbol}`),
 
   // 계좌 정보
   getBalance: () => apiClient.get('/api/accounts/balance'),

@@ -30,12 +30,13 @@ export function StatusBar() {
         </div>
       )}
 
-      {systemStatus?.started_at && (
-        <div className="text-sm text-slate-400">
-          업타임:{' '}
-          {Math.floor((Date.now() - new Date(systemStatus.started_at).getTime()) / 3_600_000)}h
-        </div>
-      )}
+      {systemStatus?.started_at && (() => {
+        const ms = Date.now() - new Date(systemStatus.started_at).getTime();
+        const h = Math.floor(ms / 3_600_000);
+        const m = Math.floor((ms % 3_600_000) / 60_000);
+        const label = h > 0 ? `${h}h ${m}m` : `${m}m`;
+        return <div className="text-sm text-slate-400">업타임: {label}</div>;
+      })()}
     </div>
   );
 }

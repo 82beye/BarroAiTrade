@@ -1,44 +1,49 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTradingStore } from '@/lib/store';
 import { PositionSummary } from '@/components/positions/position-summary';
 import { PositionTable } from '@/components/positions/position-table';
 import { Skeleton } from '@/components/ui/skeleton';
+
+const POLL_MS = 30_000;
 
 export default function PositionsPage() {
   const { setPositions } = useTradingStore();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadPositions() {
-      try {
-        const res = await fetch('/api/positions');
-        if (!res.ok) throw new Error(`${res.status}`);
-        const json = await res.json();
-        const raw: any[] = json.positions ?? [];
-        setPositions(
-          raw.map((p) => ({
-            id: p.symbol,
-            symbol: p.symbol,
-            side: 'LONG' as const,
-            quantity: p.quantity ?? 0,
-            entryPrice: p.avg_price ?? 0,
-            currentPrice: p.cur_price ?? p.avg_price ?? 0,
-            pnl: Math.round(((p.cur_price ?? p.avg_price ?? 0) - (p.avg_price ?? 0)) * (p.quantity ?? 0)),
-            pnlPercent: p.pnl_rate ?? 0,
-            updatedAt: new Date().toISOString(),
-          }))
-        );
-      } catch {
-        setError('포지션 데이터를 불러오지 못했습니다. 백엔드 연결을 확인하세요.');
-      } finally {
-        setLoading(false);
-      }
+  const loadPositions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/positions');
+      if (!res.ok) throw new Error(`${res.status}`);
+      const json = await res.json();
+      const raw: any[] = json.positions ?? [];
+      setPositions(
+        raw.map((p) => ({
+          id: p.symbol,
+          symbol: p.symbol,
+          side: 'LONG' as const,
+          quantity: p.quantity ?? 0,
+          entryPrice: p.avg_price ?? 0,
+          currentPrice: p.cur_price ?? p.avg_price ?? 0,
+          pnl: Math.round(((p.cur_price ?? p.avg_price ?? 0) - (p.avg_price ?? 0)) * (p.quantity ?? 0)),
+          pnlPercent: p.pnl_rate ?? 0,
+          updatedAt: new Date().toISOString(),
+        }))
+      );
+    } catch {
+      setError('포지션 데이터를 불러오지 못했습니다. 백엔드 연결을 확인하세요.');
+    } finally {
+      setLoading(false);
     }
-    loadPositions();
   }, [setPositions]);
+
+  useEffect(() => {
+    loadPositions();
+    const id = setInterval(loadPositions, POLL_MS);
+    return () => clearInterval(id);
+  }, [loadPositions]);
 
   return (
     <div className="min-h-screen bg-slate-900 p-8">

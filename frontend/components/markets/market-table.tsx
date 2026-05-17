@@ -13,12 +13,17 @@ interface UniverseResponse {
 interface TickerMeta {
   symbol: string;
   name: string;
+  price: number;
+  change_pct: number;
+  volume: number;
+  high: number;
+  low: number;
 }
 
 export function MarketTable() {
   const tickers = useTradingStore((state) => Array.from(state.tickers.values()));
   const [universe, setUniverse] = useState<string[]>([]);
-  const [namemap, setNamemap] = useState<Record<string, string>>({});
+  const [restMap, setRestMap] = useState<Record<string, TickerMeta>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,22 +35,34 @@ export function MarketTable() {
         const data: UniverseResponse = await res.json();
         setUniverse(data.symbols);
 
-        // 종목명 일괄 조회 (최대 20개, 병렬)
+        // 종목명 및 시세 일괄 조회 (최대 20개, 병렬)
         const slice = data.symbols.slice(0, 20);
         const results = await Promise.allSettled(
           slice.map((sym) =>
             fetch(`/api/market/ticker/${sym}`)
               .then((r) => (r.ok ? r.json() : null))
-              .then((d): TickerMeta | null => (d ? { symbol: d.symbol, name: d.name } : null))
+              .then((d): TickerMeta | null =>
+                d
+                  ? {
+                      symbol: d.symbol,
+                      name: d.name ?? d.symbol,
+                      price: d.price ?? 0,
+                      change_pct: d.change_pct ?? 0,
+                      volume: d.volume ?? 0,
+                      high: d.high ?? 0,
+                      low: d.low ?? 0,
+                    }
+                  : null
+              )
           )
         );
-        const map: Record<string, string> = {};
+        const map: Record<string, TickerMeta> = {};
         results.forEach((r) => {
           if (r.status === 'fulfilled' && r.value) {
-            map[r.value.symbol] = r.value.name;
+            map[r.value.symbol] = r.value;
           }
         });
-        setNamemap(map);
+        setRestMap(map);
       } catch (e) {
         setError(e instanceof Error ? e.message : '조회 실패');
       } finally {
@@ -55,7 +72,7 @@ export function MarketTable() {
     loadUniverse();
   }, []);
 
-  // universe 기반으로 rows 구성 (WS live data 우선, 없으면 — 표시)
+  // universe 기반으로 rows 구성 (WS live data 우선, REST 폴백)
   const displaySymbols = universe.length > 0 ? universe.slice(0, 20) : [];
   const wsMap = new Map(tickers.map((t) => [t.symbol, t]));
 
@@ -95,30 +112,37 @@ export function MarketTable() {
               <tbody>
                 {displaySymbols.map((symbol) => {
                   const live = wsMap.get(symbol);
-                  const name = namemap[symbol];
+                  const rest = restMap[symbol];
+                  const price = live?.price ?? rest?.price;
+                  const change = live?.change ?? rest?.change_pct;
+                  const volume = live?.volume ?? rest?.volume;
+                  const high = live?.high ?? rest?.high;
+                  const low = live?.low ?? rest?.low;
+                  const name = rest?.name ?? symbol;
+                  const isRest = !live && rest;
                   return (
                     <tr
                       key={symbol}
                       className="border-b border-slate-800 last:border-0 hover:bg-slate-800 hover:bg-opacity-40"
                     >
                       <td className="py-3">
-                        <div className="font-medium text-slate-200">{name ?? symbol}</div>
-                        <div className="text-xs text-slate-500">{symbol}</div>
+                        <div className="font-medium text-slate-200">{name}</div>
+                        <div className="text-xs text-slate-500">{symbol}{isRest && <span className="ml-1 text-slate-600">(REST)</span>}</div>
                       </td>
                       <td className="py-3 text-right font-mono text-slate-200">
-                        {live ? `${live.price.toLocaleString()}원` : '—'}
+                        {price ? `${price.toLocaleString()}원` : '—'}
                       </td>
-                      <td className={`py-3 text-right font-semibold ${!live ? 'text-slate-500' : live.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {live ? `${live.change >= 0 ? '+' : ''}${live.change.toFixed(2)}%` : '—'}
-                      </td>
-                      <td className="py-3 text-right font-mono text-slate-400">
-                        {live ? `${(live.volume / 1000).toFixed(0)}천` : '—'}
+                      <td className={`py-3 text-right font-semibold ${change == null ? 'text-slate-500' : change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {change != null ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : '—'}
                       </td>
                       <td className="py-3 text-right font-mono text-slate-400">
-                        {live ? `${live.high.toLocaleString()}원` : '—'}
+                        {volume ? `${(volume / 1000).toFixed(0)}천` : '—'}
                       </td>
                       <td className="py-3 text-right font-mono text-slate-400">
-                        {live ? `${live.low.toLocaleString()}원` : '—'}
+                        {high ? `${high.toLocaleString()}원` : '—'}
+                      </td>
+                      <td className="py-3 text-right font-mono text-slate-400">
+                        {low ? `${low.toLocaleString()}원` : '—'}
                       </td>
                     </tr>
                   );
