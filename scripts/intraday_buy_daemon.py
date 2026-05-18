@@ -498,14 +498,21 @@ def main():
     ap.add_argument("--pos-log", default="data/active_positions.json")
     args = ap.parse_args()
 
-    # graceful shutdown
     loop = asyncio.new_event_loop()
+    task: asyncio.Task | None = None
+
+    def _shutdown():
+        nonlocal task
+        if task and not task.done():
+            task.cancel()
+
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: loop.stop())
+        loop.add_signal_handler(sig, _shutdown)
 
     try:
-        loop.run_until_complete(_daemon(args))
-    except (KeyboardInterrupt, SystemExit):
+        task = loop.create_task(_daemon(args))
+        loop.run_until_complete(task)
+    except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
         print("\n데몬 종료.")
     finally:
         loop.close()
