@@ -56,6 +56,14 @@ class ExitPolicy:
     partial_tp_ratio: Decimal = Decimal("0.5")
     hold_days_tighten: int = 5
     tightened_sl_pct: Decimal = Decimal("-2.0")
+    # 2026-05-19 P5-a — 시간별 단계 SL (인프라만 도입, default OFF).
+    # tuple[(sec, sl_pct), ...] ASC 정렬. None(default) 이면 stop_loss_pct 사용.
+    # 5/18 100790 실제 분봉 검증 결과: close 가 -4% 미달이라 효과 0 (실제 문제는
+    # PARTIAL_TP 반복 → P1 fix). 122630 같은 장기 하락은 오히려 불리.
+    # 양면성 있어 default OFF — 다른 운영 case 검증 후 명시 활성화 권장.
+    # 권장 stages (활성화 시): ((600, Decimal("-5.0")), (1800, Decimal("-4.0")),
+    #                          (99999, Decimal("-3.0")))
+    sl_time_stages: Optional[tuple] = None
 
 
 # ── 전략별 매도 프로파일 ─────────────────────────────────────────
@@ -148,6 +156,32 @@ def _hold_days(entry_time: Optional[str]) -> int:
         return 0
 
 
+def _elapsed_seconds(entry_time: Optional[str], now: Optional[datetime] = None) -> int:
+    """진입 후 경과 초 (P5-a 시간별 SL 단계 평가용)."""
+    if not entry_time:
+        return 0
+    try:
+        et = datetime.fromisoformat(entry_time)
+        if et.tzinfo is None:
+            et = et.replace(tzinfo=timezone.utc)
+        reference = now or datetime.now(timezone.utc)
+        return int((reference - et).total_seconds())
+    except (ValueError, TypeError):
+        return 0
+
+
+def _sl_pct_at_elapsed(
+    stages: Optional[tuple], elapsed_sec: int,
+) -> Optional[Decimal]:
+    """sl_time_stages 에서 elapsed_sec 시점의 SL%. None 이면 default 사용."""
+    if not stages:
+        return None
+    for limit_sec, sl_pct in stages:
+        if elapsed_sec <= limit_sec:
+            return sl_pct
+    return stages[-1][1]
+
+
 def evaluate_holding(
     h: HoldingPosition,
     policy: ExitPolicy = ExitPolicy(),
@@ -225,12 +259,24 @@ def evaluate_holding(
             reason=f"익절: 수익률 {float(rate):.1f}% >= TP {float(policy.take_profit_pct):.1f}%",
         )
 
-    # ── 5. 시간 기반 SL 강화 ──────────────────────────────────────
+    # ── 5. 시간 기반 SL ──────────────────────────────────────────
+    # 우선순위:
+    #   1) hold_days_tighten 이상 → tightened_sl_pct (장기 보유 강화, 기존)
+    #   2) sl_time_stages 활성 → 분 단위 단계 (P5-a, 진입 직후 노이즈 흡수)
+    #   3) fallback → stop_loss_pct
     effective_sl = policy.stop_loss_pct
     time_note = ""
     if days >= policy.hold_days_tighten:
         effective_sl = policy.tightened_sl_pct
         time_note = f" (보유 {days}일 → SL 강화 {float(effective_sl):.1f}%)"
+    else:
+        elapsed_sec = _elapsed_seconds(ctx.entry_time)
+        sl_from_stages = _sl_pct_at_elapsed(policy.sl_time_stages, elapsed_sec)
+        if sl_from_stages is not None:
+            effective_sl = sl_from_stages
+            time_note = (
+                f" (진입 후 {elapsed_sec // 60}분 → SL 단계 {float(effective_sl):.1f}%)"
+            )
 
     # ── 6. 손절 (SL) ─────────────────────────────────────────────
     if rate <= effective_sl:
