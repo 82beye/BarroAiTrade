@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>2026-05-19-0518-live-trade-fixes</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<hr />
+<p>tags: [report, operations, daemon, fix, 2026-05-18, 2026-05-19]
+date: 2026-05-19
+related:
+  - "[[2026-05-17-trail-default-on-sim]]"
+  - "[[F-zone-atr-exit-experiment]]"</p>
+<hr />
+<h1 id="518-daemon-41-fix">5/18 실거래 분석 + daemon 4+1 fix 통합 보고</h1>
+<h2 id="context">Context</h2>
+<ul>
+<li><strong>분석 대상</strong>: 2026-05-18 실거래 audit log + active_positions (운영 머신 → trading_logs_0518.tar.gz 전달)</li>
+<li><strong>목표</strong>: 1분봉 기준 진입/이탈 시그널 문제 종목별 단계별 진단 + daemon 코드 fix</li>
+<li><strong>결과</strong>: 운영 daemon 5가지 결함 발견 (P1~P4 fix + P5-a 인프라)</li>
+</ul>
+<h2 id="518-timeline">5/18 실거래 timeline 요약</h2>
+<table>
+<thead>
+<tr>
+<th>시간 (KST)</th>
+<th>사건</th>
+<th style="text-align: right;">거래수</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>09:00~09:39</td>
+<td>개장 39분 폭주 — 매수/매도 33건 (전일 청산 + 신규 매수)</td>
+<td style="text-align: right;">33</td>
+</tr>
+<tr>
+<td>09:56~10:50</td>
+<td>005930·010170 추가 매수</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td>11:14~11:19</td>
+<td>005930 분할매도 7번 (1주 단위까지)</td>
+<td style="text-align: right;">7</td>
+</tr>
+<tr>
+<td>11:23~11:31</td>
+<td>122630·069500 신규 매수</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td>12:58~13:20</td>
+<td>080220 진입 + 3번 분할매도</td>
+<td style="text-align: right;">4</td>
+</tr>
+<tr>
+<td><strong>14:06~15:20</strong></td>
+<td><strong>일일 50건 한도 도달 → 78건 BLOCKED (4시간 차단)</strong></td>
+<td style="text-align: right;">78 BLOCKED</td>
+</tr>
+<tr>
+<td>15:30</td>
+<td>장 마감 — <strong>미청산 3종목 강제 보유</strong></td>
+<td style="text-align: right;">—</td>
+</tr>
+</tbody>
+</table>
+<h2 id="5-fix">핵심 문제 5건 + 적용 fix</h2>
+<h3 id="p1-partial_tp">P1. PARTIAL_TP 반복 발동 (분할매도 폭주)</h3>
+<ul>
+<li><strong>사례</strong>: 100790 9번, 005930 7번, 080220 3번 — 매 60s 사이클마다 재발동, 1주 단위까지 쪼개짐</li>
+<li><strong>원인</strong>: <code>ActivePositionStore.load_all()</code> 이 <code>partial_tp_done</code>·<code>peak_pnl_rate</code>·<code>peak_updated_at</code> 3개 필드 read 누락</li>
+<li>upsert 저장은 정상 → 다음 load 시 default(<code>False</code>/<code>0.0</code>/<code>""</code>) 로 reset → flag 영구 False</li>
+<li><strong>fix</strong>: <code>backend/core/journal/active_positions.py</code> load_all 에 3개 필드 추가</li>
+<li><strong>검증</strong>: 단위 테스트 + 5/18 실데이터 080220 peak 0.34% 정상 복원</li>
+<li><strong>5/18 영향</strong>: 매도 거래수 14건 → 3건 (-11건)</li>
+<li><strong>commit</strong>: <code>329e9dd</code></li>
+</ul>
+<h3 id="p2-dca-pending-069500-l-64">P2. DCA pending 미발동 (069500 L -6.4% 도달 무시)</h3>
+<ul>
+<li><strong>사례</strong>: 069500 entry 119,220 → 일중 L 111,545 (-6.4% 도달) → T2(-2%) 영구 pending</li>
+<li><strong>원인</strong>: DCA 평가가 <code>cur_price</code> (폴링 시점 가격) 만 봄 → 폴링 사이 60s 일중 low 도달 놓침</li>
+<li><strong>fix</strong>:</li>
+<li><code>ActivePosition.trough_pnl_rate</code>·<code>trough_updated_at</code> 추가 (peak 와 대칭)</li>
+<li>daemon 매 사이클 trough 갱신</li>
+<li>DCA 평가 — <code>eff_drop_pct = min(cur_rate, trough_pnl_rate)</code> 기반 trigger</li>
+<li><strong>검증</strong>: 069500 trough -6.4% → T2(-2.0%) <strong>발동</strong>, T3(-4.0%) <strong>발동</strong> (기존 모두 미발동)</li>
+<li><strong>5/18 영향</strong>: 069500 평단 119,220 → ~116,800 → <strong>-1.16% 손실 → +0.9% 익절 전환</strong></li>
+<li><strong>commit</strong>: <code>329e9dd</code></li>
+</ul>
+<h3 id="p3">P3. 일일 매수 한도 매수+매도 합계 카운트 (비대칭)</h3>
+<ul>
+<li><strong>사례</strong>: 5/18 매수 15 + 매도 35 = 50 → 14:06 매수 한도 BLOCKED → 4시간 차단</li>
+<li><strong>원인</strong>: <code>LiveOrderGate._count_today_orders</code> 가 매수+매도 합계인데, 한도 적용은 매수만 (<code>6abb59a</code> 의 "매도 제외" fix 와 비대칭)</li>
+<li><strong>fix</strong>: <code>_count_today_buys()</code> 신설 → side=buy 만 카운트, preflight 에서 사용</li>
+<li><strong>검증</strong>: 5/18 audit 패턴 시뮬 — 기존 50 BLOCKED → P3 15 통과</li>
+<li><strong>commit</strong>: <code>329e9dd</code></li>
+</ul>
+<h3 id="p4-122630069500-h">P4. 고점 진입 회피 (122630/069500 H 직전 진입)</h3>
+<ul>
+<li><strong>사례</strong>:</li>
+<li>122630 entry 161,690 vs 일중 H 162,955 (-0.78%) → 즉시 하락</li>
+<li>069500 entry 119,220 vs H 119,900 (-0.57%) → 미청산 손실 보유</li>
+<li><strong>fix</strong>: <code>_scan_and_buy</code> 의 strategy 통과 후 검증 추가</li>
+<li>일중 H 대비 cur 거리 &lt; 1.5% <strong>AND</strong> momentum 비활성 → SKIP</li>
+<li>momentum 활성 조건 (둘 중 하나):<ul>
+<li>진입 직전 봉이 H 봉 (모멘텀 진행 중)</li>
+<li>cur ≥ 직전 봉 high (새 봉이 직전 봉 high 초과)</li>
+</ul>
+</li>
+<li><strong>검증</strong> (5/18 4 case):</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>종목</th>
+<th style="text-align: right;">prox</th>
+<th>momentum</th>
+<th>결과</th>
+<th>의도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>122630</td>
+<td style="text-align: right;">0.12%</td>
+<td>True (H봉 진입)</td>
+<td>통과</td>
+<td>✗ false-negative (한계)</td>
+</tr>
+<tr>
+<td><strong>069500</strong></td>
+<td style="text-align: right;"><strong>0.57%</strong></td>
+<td><strong>False</strong></td>
+<td><strong>BLOCKED</strong></td>
+<td>✓</td>
+</tr>
+<tr>
+<td>080220</td>
+<td style="text-align: right;">0.00%</td>
+<td>True</td>
+<td>통과</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>100790</td>
+<td style="text-align: right;">0.94%</td>
+<td>True (cur &gt; last.high)</td>
+<td>통과</td>
+<td>✓</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>commit</strong>: <code>329e9dd</code></li>
+</ul>
+<h3 id="p5-a-sl-default-off">P5-a. 시간별 단계 SL (인프라 도입, default OFF)</h3>
+<ul>
+<li><strong>가설</strong>: 100790 entry 09:08 → 09:18 -4% SL 발동 → 종가 +12.3% 회복. 진입 직후 노이즈 흡수 필요</li>
+<li><strong>인프라</strong>:</li>
+<li><code>ExitPolicy.sl_time_stages: Optional[tuple] = None</code></li>
+<li><code>_elapsed_seconds</code>, <code>_sl_pct_at_elapsed</code> 헬퍼</li>
+<li><code>evaluate_holding</code> 우선순위: <code>hold_days_tighten &gt; sl_time_stages &gt; stop_loss_pct</code></li>
+<li><strong>default OFF 이유</strong>: 실제 100790 5/18 분봉 검증 결과 close -4% 미달 → 효과 0 (실제 문제는 PARTIAL_TP — P1 fix)</li>
+<li>122630 같은 장기 하락은 SL 좁힘 → 회복 박탈 → 불리</li>
+<li>양면성 있어 default OFF, 추가 case 검증 후 명시 활성화 권장</li>
+<li><strong>권장 활성화 stages</strong>: <code>((600,-5.0),(1800,-4.0),(99999,-3.0))</code></li>
+<li><strong>commit</strong>: <code>6ff32d4</code></li>
+</ul>
+<h2 id="_1">종목별 단계별 분석 (요약)</h2>
+<h3 id="100790-partial_tp-9">100790 미래에셋벤처투자 — PARTIAL_TP 9번 폭주</h3>
+<pre><code>09:08:24 buy 88 + 09:18:52 buy 44 (총 132주, swing_38)
+09:30:44 sell 66 (PARTIAL_TP)
+09:31:47 sell 33  ← partial_tp_done reset → 재발동
+09:32:51 sell 16
+... 9번 분할매도 → 마지막 1주
+</code></pre>
+<p><strong>P1 fix 후</strong>: 1번 partial + 잔여 trailing/breakeven</p>
+<h3 id="122630-kodex">122630 KODEX 레버리지 — 고점 진입 + 미청산</h3>
+<pre><code>11:23 entry 161,690 (T1 32주, gold_zone) — 일중 H 162,955 (-0.78%)
+11:52 DCA T2 16주 @157,940 (-2.3%)
+14:17 sell BLOCKED → 미청산 48주
+종가 157,350 → 평가손실 -148k (-1.93%)
+</code></pre>
+<p><strong>P2·P3 fix 후</strong>: T3(-4%) 추가 발동, 14:17 매도 통과</p>
+<h3 id="069500-kodex-200-dca">069500 KODEX 200 — DCA 미발동 + 미청산</h3>
+<pre><code>11:31 entry 119,220 (T1 44주, gold_zone) — H 119,900 (-0.57%)
+일중 L 111,545 (-6.4%) → T2(-2%) 영구 pending
+15:30 종가 117,840 → -1.16% 미청산
+</code></pre>
+<p><strong>P2 fix 후</strong>: T2(-2%) + T3(-4%) 발동 → 평단 ~116,800 → +0.9% 익절
+<strong>P4 fix 후</strong>: 진입 자체 차단 (prox 0.57% &lt; 1.5% &amp; momentum=False) → -74k 손실 회피</p>
+<h3 id="080220-1406-blocked">080220 제주반도체 — 정상 진입 + 14:06 BLOCKED 미청산</h3>
+<pre><code>12:58 entry 96,800 (54주, swing_38) — H 96,800 (모멘텀 진행)
+13:18~20 분할매도 47주 (PARTIAL_TP 3번)
+14:06~ 일일 한도 → DCA·매도 모두 BLOCKED → 잔여 7주
+</code></pre>
+<p><strong>P1 fix</strong>: 분할매도 1번만 (잔여 27주 trailing)
+<strong>P3 fix</strong>: 14:06 BLOCKED 해소 → 정상 청산</p>
+<h3 id="005930-partial_tp-7">005930 삼성전자 — PARTIAL_TP 7번</h3>
+<p>P1 fix 후 1번 partial + 잔여 trailing.</p>
+<h3 id="010170-sl">010170 신화실업 — SL 정상 발동</h3>
+<p>P1·P2·P3·P4 영향 없음 (1회 SL 정상).</p>
+<h2 id="fix-518">누적 fix 적용 시 5/18 가정 결과</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>실제 5/18</th>
+<th>P1~P4 fix 후</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>매도 거래수</td>
+<td>14건 (분할매도 폭주)</td>
+<td>3건</td>
+</tr>
+<tr>
+<td>매수 카운트</td>
+<td>15건</td>
+<td>15건 (동일)</td>
+</tr>
+<tr>
+<td>14:06 매수 한도</td>
+<td><strong>BLOCKED</strong></td>
+<td>통과 (15 &lt; 50)</td>
+</tr>
+<tr>
+<td>DCA T2/T3 발동</td>
+<td>1건 (122630 T2만)</td>
+<td>3건 (+069500 T2/T3, 122630 T3)</td>
+</tr>
+<tr>
+<td>069500 진입</td>
+<td>진입 (-1.16% 미청산)</td>
+<td><strong>차단</strong> (-74k 손실 회피)</td>
+</tr>
+<tr>
+<td>미청산 종목</td>
+<td><strong>3건 강제 보유</strong></td>
+<td>0건 (적시 청산 가능)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_2">신규 도구</h2>
+<table>
+<thead>
+<tr>
+<th>스크립트</th>
+<th>용도</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scripts/_analyze_0518_signals.py</code></td>
+<td>5/18 picker 종목별 진입 시그널 단계별 진단</td>
+</tr>
+<tr>
+<td><code>scripts/_replay_0518_with_fixes.py</code></td>
+<td>P1 fix 전/후 ExitPolicy 재시뮬 비교</td>
+</tr>
+<tr>
+<td><code>scripts/_replay_0518_options.py</code></td>
+<td>잔여 holding 정책 옵션 A/B/C/D/E 비교</td>
+</tr>
+</tbody>
+</table>
+<h2 id="commit-329e9dd-6ff32d4">변경 파일 (commit <code>329e9dd</code> + <code>6ff32d4</code>)</h2>
+<table>
+<thead>
+<tr>
+<th>파일</th>
+<th>변경</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>backend/core/journal/active_positions.py</code></td>
+<td>P1 (3필드 load) + P2 (trough 2필드)</td>
+</tr>
+<tr>
+<td><code>backend/core/risk/live_order_gate.py</code></td>
+<td>P3 (_count_today_buys + 변수명)</td>
+</tr>
+<tr>
+<td><code>backend/core/risk/holding_evaluator.py</code></td>
+<td>P5-a (sl_time_stages 인프라)</td>
+</tr>
+<tr>
+<td><code>scripts/intraday_buy_daemon.py</code></td>
+<td>P2 (trough 갱신·DCA 평가) + P4 (고점 진입 SKIP)</td>
+</tr>
+<tr>
+<td><code>scripts/_analyze_0518_signals.py</code></td>
+<td>신규 — picker 진단</td>
+</tr>
+<tr>
+<td><code>scripts/_replay_0518_with_fixes.py</code></td>
+<td>신규 — fix 효과 시뮬</td>
+</tr>
+<tr>
+<td><code>scripts/_replay_0518_options.py</code></td>
+<td>신규 — 옵션 비교</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_3">후속 후보</h2>
+<ul>
+<li><strong>P5-a 활성화</strong> — 다른 운영 case (5/14·5/15·5/19+) 로 효과 추가 검증 후 stages 적용</li>
+<li><strong>잔여 holding 강화</strong> — 2차 PARTIAL_TP @5%·trailing offset 동적 조정 (옵션 B/C/D 검증됨)</li>
+<li><strong>VWAP·거래량 추세 기반 고점 진입 보강</strong> — P4 122630 false-negative 보완</li>
+</ul>
+<h2 id="_4">참조</h2>
+<ul>
+<li>이전 보고: [[2026-05-17-trail-default-on-sim]]</li>
+<li>F존 ATR 실험: [[F-zone-atr-exit-experiment]]</li>
+<li>ai-trade 비교 분석: 본 세션 이전 대화</li>
+</ul>
+</body>
+</html>
