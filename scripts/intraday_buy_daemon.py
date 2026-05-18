@@ -125,9 +125,18 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
         pos = active_positions.get(h.symbol)
         if pos:
             cur_rate = float(h.pnl_rate)
+            now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            dirty = False
             if cur_rate > pos.peak_pnl_rate:
                 pos.peak_pnl_rate = cur_rate
-                pos.peak_updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                pos.peak_updated_at = now_iso
+                dirty = True
+            # P2 fix — trough(lowest) 추적 → DCA trigger 평가에 사용
+            if cur_rate < pos.trough_pnl_rate:
+                pos.trough_pnl_rate = cur_rate
+                pos.trough_updated_at = now_iso
+                dirty = True
+            if dirty:
                 pos_store.upsert(pos)
             contexts[h.symbol] = PositionContext(
                 peak_pnl_rate=pos.peak_pnl_rate,
@@ -152,7 +161,11 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
         notifier=notifier,
     )
 
-    # DCA
+    # DCA — 2026-05-19 P2 fix:
+    # 기존: cur_price > trigger_price 면 skip (폴링 사이 일중 low 도달 놓침)
+    # 변경: trough_pnl_rate(=일중 lowest) 가 trigger_drop_pct 이하 도달했으면 발동
+    #       매수가는 현재가(cur_price). 발동 후 status=filled 로 1회만 실행.
+    # 5/18 069500 L -6.4% 도달했어도 T2(-2%) pending 영구 → fix 후 발동 가능.
     active_positions = pos_store.load_all()
     for h in balance.holdings:
         if h.symbol in sl_symbols:
@@ -164,11 +177,14 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
         if not pending:
             continue
         cur_price = float(h.cur_price)
+        cur_rate = float(h.pnl_rate)
+        # trough 기반 평가: 일중 lowest 가 trigger 도달했으면 발동
+        # (현재 cur_rate 회복했어도 OK — 한 번 trigger 도달 = 매수 가치 있음)
+        eff_drop_pct = min(cur_rate, float(pos.trough_pnl_rate))
         for tranche in pending:
             if tranche.qty <= 0:
                 continue
-            trigger_price = pos.entry_price * (1 + tranche.trigger_drop_pct / 100)
-            if cur_price > trigger_price:
+            if eff_drop_pct > tranche.trigger_drop_pct:
                 continue
             try:
                 r = await gate.place_buy(symbol=h.symbol, qty=tranche.qty)
@@ -365,6 +381,38 @@ async def _scan_and_buy(args, oauth, session_bought: set[str]) -> int:
             # BEARISH 국면: 가중치 < 1.0 전략은 제외
             if regime == MarketRegime.BEARISH and weights.get(best_strategy, 1.0) < 1.0:
                 continue
+            # 2026-05-19 P4 fix — 고점 진입 회피.
+            # 5/18 122630 entry 161,690 vs H 162,955 (0.78%) → 즉시 하락,
+            # 069500 entry 119,220 vs H 119,900 (0.57%) → 미청산 손실 보유.
+            # 조건: 일중 H 대비 cur 거리 < 1.5% AND H 가 진입 직전 봉의 high 가 아님.
+            #       (직전 봉이 H 봉이면 모멘텀 진행 중 — 080220 같은 정상 진입 보호)
+            try:
+                minute_bars = await fetcher.fetch_minute(symbol=c.symbol, tic_scope="1")
+                today_str = datetime.now(timezone.utc).astimezone(KST).strftime("%Y-%m-%d")
+                day_bars = [b for b in minute_bars if b.timestamp.strftime("%Y-%m-%d") == today_str]
+                if day_bars:
+                    day_high = max(b.high for b in day_bars)
+                    last_bar = day_bars[-1]
+                    cur = float(c.cur_price)
+                    proximity_pct = ((day_high - cur) / day_high * 100) if day_high > 0 else 0.0
+                    MIN_HIGH_PROXIMITY_PCT = 1.5
+                    # momentum 인정 조건 (둘 중 하나):
+                    #   a) last_bar 가 H 봉 (모멘텀 진행 중)
+                    #   b) cur 가 last_bar.high 이상 (새 봉이 직전 봉 high 초과 = 강세)
+                    momentum_active = (
+                        last_bar.high >= day_high - 1e-6
+                        or cur >= last_bar.high - 1e-6
+                    )
+                    if proximity_pct < MIN_HIGH_PROXIMITY_PCT and not momentum_active:
+                        ts_p = _now_kst().strftime("%H:%M:%S")
+                        print(
+                            f"  [{ts_p}][SKIP] {c.symbol} {c.name:<14} 일중 H "
+                            f"{day_high:,.0f} vs cur {cur:,.0f} (거리 {proximity_pct:.2f}% "
+                            f"< {MIN_HIGH_PROXIMITY_PCT}%) — 고점 인접 + 모멘텀 종료"
+                        )
+                        continue
+            except Exception:
+                pass  # 분봉 fetch 실패 시 통과 (보수적 fallback)
             signals.append((c, best_strategy, best_pnl))
             print(f"  [SIGNAL] {c.symbol} {c.name:<14} 전략={best_strategy} PnL={best_pnl:+,.0f} (w={weights.get(best_strategy, 1.0):.1f})")
 

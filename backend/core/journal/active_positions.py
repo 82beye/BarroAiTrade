@@ -64,6 +64,11 @@ class ActivePosition:
     peak_pnl_rate: float = 0.0            # 보유 기간 중 최고 수익률
     peak_updated_at: str = ""             # peak 갱신 시점
     partial_tp_done: bool = False         # 1차 분할 익절 완료 여부
+    # 2026-05-19 P2 fix — DCA 폴링 사이 일중 low 도달 추적용.
+    # daemon 60s 폴링이 cur_price 만 보면 폴링 사이 low 놓침 → DCA trigger 미발동
+    # (5/18 069500 L -6.4% 도달했어도 T2 pending 영구).
+    trough_pnl_rate: float = 0.0          # 보유 기간 중 최저 수익률 (음수)
+    trough_updated_at: str = ""           # trough 갱신 시점
 
     # ── 계산 헬퍼 ───────────────────────────────────────────────
 
@@ -141,6 +146,15 @@ class ActivePositionStore:
                 flu_rate=float(d.get("flu_rate", 0)),
                 score=float(d.get("score", 0)),
                 tranches=tranches,
+                # 2026-05-19 P1 fix — 적응형 매도 추적 필드 read 누락 버그.
+                # upsert 로 저장 되어도 다음 load 시 default 로 reset 되어
+                # partial_tp_done=False 영구 유지 → PARTIAL_TP 매 사이클 재발동
+                # (5/18 100790 9번, 005930 7번, 080220 3번 분할매도 폭주 원인).
+                peak_pnl_rate=float(d.get("peak_pnl_rate", 0.0)),
+                peak_updated_at=d.get("peak_updated_at", ""),
+                partial_tp_done=bool(d.get("partial_tp_done", False)),
+                trough_pnl_rate=float(d.get("trough_pnl_rate", 0.0)),
+                trough_updated_at=d.get("trough_updated_at", ""),
             )
             result[symbol] = pos
         return result

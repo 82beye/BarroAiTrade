@@ -99,13 +99,16 @@ class LiveOrderGate:
                 f"일일 손실 한도 도달: {daily_pnl_pct}% ≤ {self._policy.daily_loss_limit_pct}%. 신규 매수 차단."
             )
 
-        # 3) 일일 거래수 한도 — 매수만 차단 (매도는 손절 가능해야)
+        # 3) 일일 매수 한도 — 매수만 차단 (매도는 손절 가능해야).
+        # 2026-05-19 P3 fix: 기존 _count_today_orders 가 매수+매도 합계라
+        # 분할매도 폭주 시(5/18 100790 9번 등) 매수가 조기 차단됨.
+        # 매수만 카운트로 의미 일치 (5/18 매수 15 + 매도 35 = 50 → 매수만 15 → 통과).
         if side == OrderSide.BUY:
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            count = self._count_today_orders(today)
+            count = self._count_today_buys(today)
             if count >= self._policy.daily_max_orders:
                 raise DailyOrderLimitExceeded(
-                    f"일일 거래수 한도 초과: {count} ≥ {self._policy.daily_max_orders}"
+                    f"일일 매수 한도 초과: {count} ≥ {self._policy.daily_max_orders}"
                 )
 
     async def place_buy(
@@ -189,6 +192,7 @@ class LiveOrderGate:
             logger.warning("blocked alert send failed: %s", type(e).__name__)
 
     def _count_today_orders(self, today: str) -> int:
+        """전체 거래수 (매수+매도) — 통계용. 한도 적용은 _count_today_buys 사용."""
         if not self._audit_path.exists():
             return 0
         n = 0
@@ -196,6 +200,20 @@ class LiveOrderGate:
             r = csv.DictReader(f)
             for row in r:
                 if row["ts"].startswith(today) and row["action"] in {"ORDERED", "DRY_RUN"}:
+                    n += 1
+        return n
+
+    def _count_today_buys(self, today: str) -> int:
+        """매수만 카운트 — 일일 매수 한도 평가용 (2026-05-19 P3 fix)."""
+        if not self._audit_path.exists():
+            return 0
+        n = 0
+        with open(self._audit_path, "r", encoding="utf-8", newline="") as f:
+            r = csv.DictReader(f)
+            for row in r:
+                if (row["ts"].startswith(today)
+                        and row["action"] in {"ORDERED", "DRY_RUN"}
+                        and row.get("side") == "buy"):
                     n += 1
         return n
 
