@@ -236,6 +236,31 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     return sold
 
 
+def _save_refined_signals(signals: list, regime) -> None:
+    """정제된 시그널을 JSON 파일에 저장 (대시보드 API용)."""
+    import json
+    now_iso = _now_kst().isoformat()
+    data = {
+        "regime": regime.value,
+        "timestamp": now_iso,
+        "signals": [
+            {
+                "symbol": c.symbol,
+                "name": c.name,
+                "strategy": strategy,
+                "score": round(float(c.score), 3),
+                "flu_rate": float(c.flu_rate),
+                "cur_price": float(c.cur_price),
+                "pnl": round(pnl, 0),
+                "ts": now_iso,
+            }
+            for c, strategy, pnl in signals
+        ],
+    }
+    path = Path("data/refined_signals.json")
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 async def _scan_and_buy(args, oauth, session_bought: set[str]) -> int:
     """한 사이클: 스캔 → 시그널 검증 → 매수. 매수 건수 반환."""
     # 매수는 BUY_START 이후만
@@ -328,6 +353,9 @@ async def _scan_and_buy(args, oauth, session_bought: set[str]) -> int:
                 continue
             signals.append((c, best_strategy, best_pnl))
             print(f"  [SIGNAL] {c.symbol} {c.name:<14} 전략={best_strategy} PnL={best_pnl:+,.0f} (w={weights.get(best_strategy, 1.0):.1f})")
+
+    # 정제된 시그널을 파일에 저장 (대시보드 노출용)
+    _save_refined_signals(signals, regime)
 
     if not signals:
         return 0

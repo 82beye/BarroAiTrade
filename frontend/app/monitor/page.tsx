@@ -118,6 +118,7 @@ export default function MonitorPage() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [regime, setRegime] = useState<string>('');
   const [logs, setLogs] = useState<LogFileStatus[]>([]);
   const [serverState, setServerState] = useState<ServerState>('loading');
   const [lastUpdated, setLastUpdated] = useState<string>('');
@@ -127,7 +128,7 @@ export default function MonitorPage() {
       fetchJson<RiskStatus>('/risk/status'),
       fetchJson<{ positions: Position[] }>('/positions'),
       fetchJson<{ log: AuditRow[] }>('/risk/audit'),
-      fetchJson<{ signals: Signal[] }>('/signals/recent'),
+      fetchJson<{ signals: Signal[]; regime?: string }>('/signals/recent'),
     ]);
 
     if (!riskData) {
@@ -140,6 +141,7 @@ export default function MonitorPage() {
     setPositions(posData?.positions ?? []);
     setAudit((auditData?.log ?? []).slice(-10).reverse());
     setSignals(sigData?.signals ?? []);
+    setRegime(sigData?.regime ?? '');
     setLastUpdated(new Date().toLocaleTimeString('ko-KR'));
   }, []);
 
@@ -271,7 +273,7 @@ export default function MonitorPage() {
         </Card>
 
         {/* Signals */}
-        <Card title="최근 시그널">
+        <Card title={`최근 시그널${regime ? ` [${regime.toUpperCase()}]` : ''}`}>
           {signals.length === 0 ? (
             <p className="text-sm text-slate-500">시그널 없음</p>
           ) : (

@@ -83,20 +83,20 @@ async def get_recent_signals(
     limit: int = Query(10, ge=1, le=100, description="최대 신호 수"),
 ) -> dict:
     """
-    최근 신호 조회 (메모리 캐시에서)
+    최근 정제된 신호 조회 (데몬이 시뮬+국면 필터 후 저장한 시그널)
 
     응답:
     ```json
     {
       "signals": [...],
-      "timestamp": "2026-04-11T10:00:00Z"
+      "regime": "sideways",
+      "timestamp": "2026-05-18T10:00:00+09:00"
     }
     ```
     """
-    import os
-    import time as _time
+    import json
     from datetime import datetime, timezone, timedelta, time as dtime
-    from pydantic import SecretStr
+    from pathlib import Path
 
     KST = timezone(timedelta(hours=9))
     now_kst = datetime.now(KST)
@@ -104,55 +104,24 @@ async def get_recent_signals(
     market_close = dtime(15, 30)
 
     # 장 외 시간: 빈 시그널 반환
+    if now_kst.weekday() >= 5:
+        return {"signals": [], "timestamp": now_kst.isoformat(), "status": "closed"}
     if not (market_open <= now_kst.time() <= market_close):
-        # 주말 체크 (토=5, 일=6)
-        if now_kst.weekday() >= 5 or not (market_open <= now_kst.time() <= market_close):
-            return {"signals": [], "timestamp": now_kst.isoformat(), "status": "closed"}
+        return {"signals": [], "timestamp": now_kst.isoformat(), "status": "closed"}
 
-    logger.info("최근 신호 %d개 조회", limit)
-
-    try:
-        from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
-        from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
-
-        if not hasattr(get_recent_signals, "_oauth"):
-            get_recent_signals._oauth = KiwoomNativeOAuth(
-                app_key=SecretStr(os.environ["KIWOOM_APP_KEY"]),
-                app_secret=SecretStr(os.environ["KIWOOM_APP_SECRET"]),
-                base_url=os.environ.get("KIWOOM_BASE_URL", "https://mockapi.kiwoom.com"),
-            )
-        oauth = get_recent_signals._oauth
-
-        # 60초 캐시
-        cache = getattr(get_recent_signals, "_cache", None)
-        if cache and _time.time() - cache["ts"] < 60:
-            return cache["data"]
-
-        picker = KiwoomNativeLeaderPicker(oauth=oauth, min_score=0.5)
-        leaders = await picker.pick(top_n=limit)
-        now_iso = now_kst.isoformat()
-        signals = [
-            {
-                "symbol": l.symbol,
-                "name": getattr(l, "name", ""),
-                "score": round(float(getattr(l, "score", 0)), 3),
-                "direction": "BUY",
-                "flu_rate": float(getattr(l, "flu_rate", 0)),
-                "cur_price": float(getattr(l, "cur_price", 0)),
-                "ts": now_iso,
+    # 데몬이 저장한 정제된 시그널 파일 읽기
+    refined_path = Path("data/refined_signals.json")
+    if refined_path.exists():
+        try:
+            data = json.loads(refined_path.read_text(encoding="utf-8"))
+            signals = data.get("signals", [])[:limit]
+            return {
+                "signals": signals,
+                "regime": data.get("regime", "unknown"),
+                "timestamp": data.get("timestamp"),
+                "status": "ok",
             }
-            for l in leaders
-        ]
-        result = {
-            "signals": signals,
-            "timestamp": now_iso,
-            "status": "ok",
-        }
-        get_recent_signals._cache = {"ts": _time.time(), "data": result}
-        return result
-    except Exception as e:
-        logger.warning("시그널 조회 실패: %s", e)
-        cache = getattr(get_recent_signals, "_cache", None)
-        if cache:
-            return cache["data"]
-        return {"signals": [], "timestamp": None, "status": "error", "detail": str(e)}
+        except Exception as e:
+            logger.warning("refined_signals.json 읽기 실패: %s", e)
+
+    return {"signals": [], "timestamp": now_kst.isoformat(), "status": "no_data"}
