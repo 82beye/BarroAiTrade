@@ -39,6 +39,9 @@ from backend.core.risk.holding_evaluator import (
     evaluate_all, resolve_policy,
 )
 from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
+from backend.core.backtester.market_regime import (
+    MarketRegime, classify_regime, regime_weights,
+)
 
 KST = timezone(timedelta(hours=9))
 MARKET_OPEN = time(9, 5)       # 시초가 안정 후 매수 시작 (08:58→09:05)
@@ -276,6 +279,27 @@ async def _scan_and_buy(args, oauth, session_bought: set[str]) -> int:
     if not filtered:
         return 0
 
+    # 시장 국면(regime) 분류 — 상위 종목 캔들로 판단
+    candles_for_regime: dict[str, list] = {}
+    for c in filtered[:5]:
+        try:
+            clist = await fetcher.fetch_daily(symbol=c.symbol)
+            if len(clist) >= 31:
+                candles_for_regime[c.symbol] = clist
+        except Exception:
+            pass
+
+    regime = classify_regime(candles_for_regime, lookback=30)
+    weights = regime_weights(regime)
+    ts_r = _now_kst().strftime("%H:%M:%S")
+    print(f"  [{ts_r}][REGIME] {regime.value.upper()} (종목 {len(candles_for_regime)}개 분석)")
+
+    # BEARISH 국면: 가중치 ≥ 1.0 전략만 허용, 매수 1건으로 제한
+    regime_max_buy = MAX_BUY_PER_CYCLE
+    if regime == MarketRegime.BEARISH:
+        regime_max_buy = 1
+        print(f"  [{ts_r}][REGIME] BEARISH — 가중치≥1.0 전략만 허용, 최대 1건")
+
     # 전략 시뮬레이션 시그널 검증
     sim = IntradaySimulator()
     strategies = ["f_zone", "sf_zone", "gold_zone", "swing_38"]
@@ -290,12 +314,20 @@ async def _scan_and_buy(args, oauth, session_bought: set[str]) -> int:
             continue
 
         result = sim.run(candles, symbol=c.symbol, strategies=strategies)
-        best_strategy = max(result.pnl_by_strategy, key=lambda s: float(result.pnl_by_strategy[s]))
-        best_pnl = float(result.pnl_by_strategy[best_strategy])
+        # 국면 가중치 적용하여 전략 점수 조정
+        weighted_pnl = {
+            s: float(result.pnl_by_strategy[s]) * weights.get(s, 1.0)
+            for s in result.pnl_by_strategy
+        }
+        best_strategy = max(weighted_pnl, key=lambda s: weighted_pnl[s])
+        best_pnl = weighted_pnl[best_strategy]
 
         if best_pnl > 0 and len(result.trades) > 0:
+            # BEARISH 국면: 가중치 < 1.0 전략은 제외
+            if regime == MarketRegime.BEARISH and weights.get(best_strategy, 1.0) < 1.0:
+                continue
             signals.append((c, best_strategy, best_pnl))
-            print(f"  [SIGNAL] {c.symbol} {c.name:<14} 전략={best_strategy} PnL={best_pnl:+,.0f}")
+            print(f"  [SIGNAL] {c.symbol} {c.name:<14} 전략={best_strategy} PnL={best_pnl:+,.0f} (w={weights.get(best_strategy, 1.0):.1f})")
 
     if not signals:
         return 0
@@ -331,7 +363,7 @@ async def _scan_and_buy(args, oauth, session_bought: set[str]) -> int:
     )
 
     executed = 0
-    for r, strategy in buyable[:MAX_BUY_PER_CYCLE]:
+    for r, strategy in buyable[:regime_max_buy]:
         tranche1_qty = max(1, round(r.recommended_qty * 0.5))
         try:
             result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty)
