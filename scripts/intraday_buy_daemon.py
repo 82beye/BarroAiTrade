@@ -41,8 +41,12 @@ from backend.core.risk.holding_evaluator import (
 from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
 
 KST = timezone(timedelta(hours=9))
-MARKET_OPEN = time(8, 58)
+MARKET_OPEN = time(9, 5)       # 시초가 안정 후 매수 시작 (08:58→09:05)
 MARKET_CLOSE = time(15, 20)
+BUY_START = time(9, 5)         # 매수는 09:05 이후만
+SELL_START = time(9, 1)        # 매도 평가는 09:01부터
+MIN_HOLD_MINUTES = 10          # 매수 후 최소 10분 보유 (쿨다운)
+MAX_BUY_PER_CYCLE = 2          # 사이클당 최대 매수 2종목
 
 
 def _now_kst() -> datetime:
@@ -81,6 +85,10 @@ async def _sync_positions(pos_store: ActivePositionStore, held_symbols: set[str]
 
 async def _evaluate_and_sell(args, oauth, notifier) -> int:
     """보유 종목 매도 평가 + DCA. 매도 건수 반환."""
+    # 매도 평가는 SELL_START 이후만
+    if _now_kst().time() < SELL_START:
+        return 0
+
     cfg = PolicyConfigStore("data/policy.json").load()
     account = KiwoomNativeAccountFetcher(oauth=oauth)
     balance = await account.fetch_balance()
@@ -171,7 +179,23 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
                 print(f"  [DCA-ERR] {h.symbol}: {e}")
 
     # 매도 실행
-    sell_targets = [d for d in decisions if d.signal != SellSignal.HOLD]
+    # 쿨다운: 매수 후 MIN_HOLD_MINUTES 미경과 종목 매도 제외
+    now_utc = datetime.now(timezone.utc)
+    cooldown_symbols: set[str] = set()
+    for sym, pos in active_positions.items():
+        if pos.entry_time:
+            try:
+                entry_dt = datetime.fromisoformat(pos.entry_time)
+                elapsed = (now_utc - entry_dt).total_seconds() / 60
+                if elapsed < MIN_HOLD_MINUTES:
+                    cooldown_symbols.add(sym)
+            except Exception:
+                pass
+
+    sell_targets = [
+        d for d in decisions
+        if d.signal != SellSignal.HOLD and d.symbol not in cooldown_symbols
+    ]
     if not sell_targets:
         return 0
 
@@ -211,6 +235,10 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
 
 async def _scan_and_buy(args, oauth, session_bought: set[str]) -> int:
     """한 사이클: 스캔 → 시그널 검증 → 매수. 매수 건수 반환."""
+    # 매수는 BUY_START 이후만
+    if _now_kst().time() < BUY_START:
+        return 0
+
     cfg = PolicyConfigStore("data/policy.json").load()
     picker = KiwoomNativeLeaderPicker(
         oauth=oauth, min_flu_rate=args.min_flu, min_score=cfg.min_score,
@@ -303,7 +331,7 @@ async def _scan_and_buy(args, oauth, session_bought: set[str]) -> int:
     )
 
     executed = 0
-    for r, strategy in buyable:
+    for r, strategy in buyable[:MAX_BUY_PER_CYCLE]:
         tranche1_qty = max(1, round(r.recommended_qty * 0.5))
         try:
             result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty)
