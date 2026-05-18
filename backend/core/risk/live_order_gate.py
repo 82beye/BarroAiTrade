@@ -99,13 +99,14 @@ class LiveOrderGate:
                 f"일일 손실 한도 도달: {daily_pnl_pct}% ≤ {self._policy.daily_loss_limit_pct}%. 신규 매수 차단."
             )
 
-        # 3) 일일 거래수 한도
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        count = self._count_today_orders(today)
-        if count >= self._policy.daily_max_orders:
-            raise DailyOrderLimitExceeded(
-                f"일일 거래수 한도 초과: {count} ≥ {self._policy.daily_max_orders}"
-            )
+        # 3) 일일 거래수 한도 — 매수만 차단 (매도는 손절 가능해야)
+        if side == OrderSide.BUY:
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            count = self._count_today_orders(today)
+            if count >= self._policy.daily_max_orders:
+                raise DailyOrderLimitExceeded(
+                    f"일일 거래수 한도 초과: {count} ≥ {self._policy.daily_max_orders}"
+                )
 
     async def place_buy(
         self, symbol: str, qty: int,

@@ -38,7 +38,9 @@ from backend.core.risk.holding_evaluator import (
     ExitPolicy, PositionContext, SellSignal, STRATEGY_EXIT_PROFILES,
     evaluate_all, resolve_policy,
 )
-from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
+from backend.core.risk.live_order_gate import (
+    GatePolicy, LiveOrderGate, DailyOrderLimitExceeded,
+)
 from backend.core.backtester.market_regime import (
     MarketRegime, classify_regime, regime_weights,
 )
@@ -178,6 +180,10 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
                 tranche.filled_price = cur_price
                 tranche.filled_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
                 pos_store.upsert(pos)
+            except DailyOrderLimitExceeded:
+                ts = _now_kst().strftime("%H:%M:%S")
+                print(f"  [{ts}][DCA] 일일 거래수 한도 도달 — DCA 중단")
+                break
             except Exception as e:
                 print(f"  [DCA-ERR] {h.symbol}: {e}")
 
@@ -204,7 +210,11 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
 
     sold = 0
     for d in sell_targets:
-        sell_qty = d.sell_qty if d.sell_qty > 0 else d.qty
+        # partial_tp만 분할, 나머지(손절/트레일링 등)는 전량 매도
+        if d.signal == SellSignal.PARTIAL_TP and d.sell_qty > 0:
+            sell_qty = d.sell_qty
+        else:
+            sell_qty = d.qty
         try:
             r = await gate.place_sell(symbol=d.symbol, qty=sell_qty)
             tag = "DRY_RUN" if r.dry_run else "SOLD"
@@ -230,6 +240,10 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
                 except Exception:
                     pass
             sold += 1
+        except DailyOrderLimitExceeded:
+            ts = _now_kst().strftime("%H:%M:%S")
+            print(f"  [{ts}][SELL] 일일 거래수 한도 도달 — 매도 중단")
+            break
         except Exception as e:
             print(f"  [SELL-ERR] {d.symbol}: {e}")
 
@@ -428,6 +442,10 @@ async def _scan_and_buy(args, oauth, session_bought: set[str]) -> int:
                 except Exception:
                     pass
             executed += 1
+        except DailyOrderLimitExceeded:
+            ts = _now_kst().strftime("%H:%M:%S")
+            print(f"  [{ts}][BUY] 일일 거래수 한도 도달 — 매수 중단")
+            break
         except Exception as e:
             print(f"  [BLOCKED] {r.symbol}: {e}")
 
