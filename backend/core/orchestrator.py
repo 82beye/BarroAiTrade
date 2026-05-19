@@ -34,8 +34,11 @@ _TASK_RESTART_DELAY = 5          # 태스크 재시작 대기
 _DAILY_SCAN_INTERVAL_SEC = 3600  # 당일 스캔 주기 (1시간)
 
 
-def _record_balance_snapshot(balance: Any, today: date) -> None:
-    """balance_history.json에 오늘 잔고 스냅샷 추가 (당일 중복 시 덮어쓰기)."""
+def _record_balance_snapshot(balance: Any, today: date, position_count: int = 0) -> None:
+    """balance_history.json에 오늘 잔고 스냅샷 추가 (당일 중복 시 덮어쓰기).
+
+    프론트엔드 BalancePoint 인터페이스: {date, cash, eval_total, total, position_count}
+    """
     history_path = _DATA_DIR / "balance_history.json"
     try:
         if history_path.exists():
@@ -46,11 +49,15 @@ def _record_balance_snapshot(balance: Any, today: date) -> None:
         data = []
 
     date_str = today.isoformat()
+    total = float(getattr(balance, "total_value", 0))
+    cash = float(getattr(balance, "available_cash", getattr(balance, "cash", 0)))
+    eval_total = total - cash
     point = {
         "date": date_str,
-        "total_value": float(getattr(balance, "total_value", 0)),
-        "cash": float(getattr(balance, "cash", getattr(balance, "available_cash", 0))),
-        "eval_value": float(getattr(balance, "eval_value", getattr(balance, "total_eval", 0))),
+        "total": total,
+        "cash": cash,
+        "eval_total": eval_total,
+        "position_count": position_count,
     }
     # 당일 기존 항목 교체 또는 추가
     data = [p for p in data if p.get("date") != date_str]
@@ -231,17 +238,17 @@ class TradingOrchestrator:
                             _, daily_pnl_pct = self._position_mgr.get_daily_pnl()
                             app_state.risk_engine.update_daily_pnl(daily_pnl_pct)
 
+                        # 현재가 업데이트
+                        positions = self._position_mgr.get_positions()
+
                         # 잔고 히스토리 — 하루 1회 스냅샷
                         today = date.today()
                         if _balance_history_date != today:
                             try:
-                                _record_balance_snapshot(balance, today)
+                                _record_balance_snapshot(balance, today, len(positions))
                                 _balance_history_date = today
                             except Exception as hist_err:
                                 logger.warning("잔고 히스토리 기록 실패: %s", hist_err)
-
-                        # 현재가 업데이트
-                        positions = self._position_mgr.get_positions()
                         if positions:
                             prices = await gateway.get_prices(list(positions.keys()))
                             self._position_mgr.update_prices(prices)
