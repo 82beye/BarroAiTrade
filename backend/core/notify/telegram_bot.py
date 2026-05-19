@@ -130,7 +130,7 @@ class TelegramBot:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.warning("poll cycle failed: %s — retrying in %ds", type(e).__name__, _backoff)
+                logger.warning("poll cycle failed: %s: %s — retrying in %ds", type(e).__name__, e, _backoff)
                 await asyncio.sleep(_backoff)
                 _backoff = min(_backoff * 2, _MAX_BACKOFF)
 

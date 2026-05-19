@@ -500,6 +500,52 @@ async def _scan_and_buy(args, oauth, session_bought: set[str]) -> int:
     return executed
 
 
+async def _save_balance_snapshot(oauth) -> None:
+    """잔고 스냅샷을 balance_history.json에 추가 (일 1회)."""
+    import json
+    try:
+        account = KiwoomNativeAccountFetcher(oauth=oauth)
+        balance = await account.fetch_balance()
+        deposit = await account.fetch_deposit()
+
+        cash = float(deposit.cash)
+        eval_total = sum(float(h.cur_price) * h.quantity for h in (balance.holdings or []))
+        total = cash + eval_total
+        pos_count = len(balance.holdings or [])
+
+        today_str = _now_kst().strftime("%Y-%m-%d")
+        now_str = _now_kst().isoformat()
+
+        path = Path("data/balance_history.json")
+        history: list[dict] = []
+        if path.exists():
+            try:
+                history = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+        # 오늘자 이미 있으면 업데이트, 없으면 추가
+        existing = next((p for p in history if p.get("date") == today_str), None)
+        entry = {
+            "date": today_str,
+            "cash": cash,
+            "eval_total": eval_total,
+            "total": total,
+            "position_count": pos_count,
+            "updated_at": now_str,
+        }
+        if existing:
+            existing.update(entry)
+        else:
+            history.append(entry)
+
+        path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+        ts = _now_kst().strftime("%H:%M:%S")
+        print(f"  [{ts}][BALANCE] 스냅샷 저장: 총 {total:,.0f}원 (현금 {cash:,.0f} + 평가 {eval_total:,.0f})")
+    except Exception as e:
+        print(f"  [BALANCE-ERR] {e}")
+
+
 async def _daemon(args):
     print(f"== 실시간 포지션 관리 데몬 (interval={args.interval}s, top={args.top}) ==")
     oauth = _build_oauth()
@@ -515,6 +561,9 @@ async def _daemon(args):
         await asyncio.sleep(60)
 
     print(f"  [{_now_kst().strftime('%H:%M:%S')}] 장중 감시 시작")
+
+    # 장 시작 잔고 스냅샷
+    await _save_balance_snapshot(oauth)
 
     while _in_market_hours():
         ts = _now_kst().strftime("%H:%M:%S")
@@ -541,6 +590,8 @@ async def _daemon(args):
         if _in_market_hours():
             await asyncio.sleep(args.interval)
 
+    # 장 마감 잔고 스냅샷
+    await _save_balance_snapshot(oauth)
     print(f"\n== 장 마감 — 데몬 종료 (매수 {total_bought}건, 매도 {total_sold}건) ==")
 
 

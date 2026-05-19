@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 _ACCT_PATH = "/api/dostk/acnt"
 _TR_BALANCE = "kt00018"     # 계좌평가현황
 _TR_DEPOSIT = "kt00001"     # 예수금상세현황
-_TR_REALIZED = "ka10073"    # 일자별실현손익 (BAR-OPS-28)
+_TR_REALIZED = "ka10073"    # 종목별실현손익 (BAR-OPS-28)
+_TR_DAILY_PNL = "ka10074"   # 일자별실현손익합산
 _TR_OPEN_ORDERS = "kt00004" # 미체결요청 (BAR-OPS-33)
 
 
@@ -109,6 +110,16 @@ class RealizedPnLEntry:
     pnl_rate: Decimal              # 손익률 % (signed)
     commission: Decimal            # 매매수수료
     tax: Decimal                   # 매매세금
+
+
+@dataclass(frozen=True)
+class DailyPnLEntry:
+    """일자별 실현손익 합산 (ka10074)."""
+    date: str                      # YYYYMMDD
+    pnl_amount: Decimal            # 실현손익
+    commission: Decimal            # 수수료
+    tax: Decimal                   # 세금
+    net_pnl: Decimal               # 순손익
 
 
 class KiwoomNativeAccountFetcher:
@@ -225,6 +236,53 @@ class KiwoomNativeAccountFetcher:
             ))
         return out
 
+    async def fetch_daily_pnl(
+        self, start_date: str, end_date: str,
+    ) -> list[DailyPnLEntry]:
+        """일자별 실현손익 합산 (ka10074). YYYYMMDD."""
+        if not (len(start_date) == 8 and start_date.isdigit()):
+            raise ValueError(f"invalid start_date: {start_date} (YYYYMMDD)")
+        if not (len(end_date) == 8 and end_date.isdigit()):
+            raise ValueError(f"invalid end_date: {end_date} (YYYYMMDD)")
+        all_items: list[DailyPnLEntry] = []
+        cont_yn_val = "N"
+        next_key_val = ""
+        while True:
+            data = await self._post(
+                _TR_DAILY_PNL,
+                {"strt_dt": start_date, "end_dt": end_date},
+                cont_yn=cont_yn_val,
+                next_key=next_key_val,
+            )
+            # 응답 리스트 키 탐색
+            rows: list = []
+            for key in ("list", "output", "dt_rlzt_pl"):
+                candidate = data.get(key)
+                if isinstance(candidate, list):
+                    rows = candidate
+                    break
+            for r in rows:
+                dt = r.get("date", r.get("stdr_dt", ""))
+                if not dt:
+                    continue
+                pnl_amt = _signed_decimal(r.get("pl_amt", r.get("rlzt_pfls", "0")))
+                cmsn = _abs_decimal(r.get("cmsn_amt", r.get("cmsn", "0")))
+                tax = _abs_decimal(r.get("tax_amt", r.get("tax", "0")))
+                net = _signed_decimal(r.get("net_pl_amt", r.get("rlzt_pfls", "0")))
+                all_items.append(DailyPnLEntry(
+                    date=dt, pnl_amount=pnl_amt,
+                    commission=cmsn, tax=tax, net_pnl=net,
+                ))
+            # 연속조회
+            resp_cont = data.get("_cont_yn", "N")
+            resp_next = data.get("_next_key", "")
+            if resp_cont == "Y" and resp_next:
+                cont_yn_val = "Y"
+                next_key_val = resp_next
+            else:
+                break
+        return all_items
+
     async def fetch_deposit(self, qry_tp: str = "3") -> AccountDeposit:
         data = await self._post(_TR_DEPOSIT, {"qry_tp": qry_tp})
         return AccountDeposit(
@@ -234,7 +292,10 @@ class KiwoomNativeAccountFetcher:
             next_day_settlement=_abs_decimal(data.get("nxdy_bncr_sell_exct", "0")),
         )
 
-    async def _post(self, tr_id: str, body: dict) -> dict:
+    async def _post(
+        self, tr_id: str, body: dict,
+        cont_yn: str = "N", next_key: str = "",
+    ) -> dict:
         token = await self._oauth.get_token()
         client = self._http or httpx.AsyncClient(timeout=15)
         owns = self._http is None
@@ -249,8 +310,8 @@ class KiwoomNativeAccountFetcher:
                         headers={
                             "authorization": f"Bearer {token.access_token.get_secret_value()}",
                             "content-type": "application/json;charset=UTF-8",
-                            "cont-yn": "N",
-                            "next-key": "",
+                            "cont-yn": cont_yn,
+                            "next-key": next_key,
                             "api-id": tr_id,
                         },
                         json=body,
@@ -263,6 +324,9 @@ class KiwoomNativeAccountFetcher:
                         continue
                     resp.raise_for_status()
                     data = resp.json()
+                    # 연속조회 헤더 보존
+                    data["_cont_yn"] = resp.headers.get("cont-yn", "N")
+                    data["_next_key"] = resp.headers.get("next-key", "")
                     break
                 except Exception as exc:
                     if attempt < _retries - 1:
@@ -285,6 +349,6 @@ class KiwoomNativeAccountFetcher:
 __all__ = [
     "KiwoomNativeAccountFetcher",
     "AccountBalance", "AccountDeposit", "HoldingPosition",
-    "RealizedPnLEntry", "OpenOrder",
+    "RealizedPnLEntry", "DailyPnLEntry", "OpenOrder",
     "_abs_decimal", "_signed_decimal",
 ]

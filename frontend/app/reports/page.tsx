@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -21,6 +21,8 @@ interface TradeRecord {
   entry_price: number;
   exit_price?: number;
   pnl?: number;
+  buy_qty?: number;
+  sell_qty?: number;
   entry_time: string;
   exit_time?: string;
 }
@@ -34,6 +36,7 @@ interface DailyReport {
 interface ChartPoint {
   date: string;
   pnl_pct: number;
+  trades_count: number;
 }
 
 function today() {
@@ -52,32 +55,18 @@ export default function ReportsPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/reports/daily?date_str=${date}`);
-      if (!res.ok) throw new Error(`${res.status}`);
-      const data: DailyReport = await res.json();
+      const [reportRes, chartRes] = await Promise.all([
+        fetch(`/api/reports/daily?date_str=${date}`),
+        fetch('/api/reports/chart?days=30'),
+      ]);
+      if (!reportRes.ok) throw new Error(`${reportRes.status}`);
+      const data: DailyReport = await reportRes.json();
       setReport(data);
 
-      // 최근 7일 차트 데이터 병렬 조회
-      const days = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(date);
-        d.setDate(d.getDate() - i);
-        return d.toISOString().split('T')[0];
-      }).reverse();
-
-      const results = await Promise.allSettled(
-        days.map((d) =>
-          fetch(`/api/reports/daily?date_str=${d}`)
-            .then((r) => (r.ok ? r.json() : null))
-            .then((d2): ChartPoint | null =>
-              d2 ? { date: d2.date?.slice(5), pnl_pct: d2.summary?.pnl_pct ?? 0 } : null
-            )
-        )
-      );
-      setChartData(
-        results
-          .filter((r): r is PromiseFulfilledResult<ChartPoint> => r.status === 'fulfilled' && r.value !== null)
-          .map((r) => r.value)
-      );
+      if (chartRes.ok) {
+        const chartJson = await chartRes.json();
+        setChartData(chartJson.points ?? []);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : '조회 실패');
       setReport(null);
@@ -172,34 +161,41 @@ export default function ReportsPage() {
         </div>
       ) : null}
 
-      {/* 수익률 차트 */}
+      {/* 매매 활동 차트 */}
       {chartData.length > 0 && (
         <Card className="mb-6 border-slate-700 bg-slate-800">
           <CardHeader>
-            <CardTitle className="text-slate-200">최근 7일 수익률 추이</CardTitle>
+            <CardTitle className="text-slate-200">최근 30일 매매 추이</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
+                <ComposedChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 12 }} />
+                  <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} />
                   <YAxis
+                    yAxisId="left"
+                    tick={{ fill: '#94a3b8', fontSize: 12 }}
+                    label={{ value: '매매건수', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 11 }}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
                     tickFormatter={(v) => `${v.toFixed(1)}%`}
                     tick={{ fill: '#94a3b8', fontSize: 12 }}
+                    label={{ value: '수익률', angle: 90, position: 'insideRight', fill: '#94a3b8', fontSize: 11 }}
                   />
                   <Tooltip
                     contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', color: '#e2e8f0' }}
-                    formatter={(v) => [typeof v === 'number' ? `${v.toFixed(2)}%` : '—', '수익률']}
+                    formatter={(v: number, name: string) =>
+                      name === 'trades_count'
+                        ? [`${v}건`, '매매건수']
+                        : [`${v.toFixed(2)}%`, '수익률']
+                    }
                   />
-                  <Line
-                    type="monotone"
-                    dataKey="pnl_pct"
-                    stroke="#6366f1"
-                    strokeWidth={2}
-                    dot={{ fill: '#6366f1' }}
-                  />
-                </LineChart>
+                  <Bar yAxisId="left" dataKey="trades_count" fill="#3b82f6" opacity={0.6} name="trades_count" />
+                  <Line yAxisId="right" type="monotone" dataKey="pnl_pct" stroke="#f59e0b" strokeWidth={2} dot={{ fill: '#f59e0b' }} name="pnl_pct" />
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
           </CardContent>
@@ -242,10 +238,10 @@ export default function ReportsPage() {
                   <tr className="border-b border-slate-700 text-left text-slate-400">
                     <th className="pb-3 font-medium">시간</th>
                     <th className="pb-3 font-medium">종목</th>
-                    <th className="pb-3 font-medium">방향</th>
-                    <th className="pb-3 text-right font-medium">진입가</th>
-                    <th className="pb-3 text-right font-medium">청산가</th>
-                    <th className="pb-3 text-right font-medium">수익금</th>
+                    <th className="pb-3 font-medium">상태</th>
+                    <th className="pb-3 text-right font-medium">매수</th>
+                    <th className="pb-3 text-right font-medium">매도</th>
+                    <th className="pb-3 text-right font-medium">보유시간</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -256,19 +252,22 @@ export default function ReportsPage() {
                       </td>
                       <td className="py-3 font-semibold text-slate-200">{trade.symbol}</td>
                       <td className="py-3">
-                        <Badge className={trade.side === 'buy' ? 'bg-blue-600 text-white' : 'bg-orange-600 text-white'}>
-                          {trade.side === 'buy' ? '매수' : '매도'}
+                        <Badge className={trade.exit_time ? 'bg-orange-600 text-white' : 'bg-blue-600 text-white'}>
+                          {trade.exit_time ? '청산' : '보유중'}
                         </Badge>
                       </td>
                       <td className="py-3 text-right font-mono text-slate-300">
-                        {trade.entry_price.toLocaleString()}원
+                        {trade.buy_qty ? `${trade.buy_qty}주` : '—'}
                       </td>
                       <td className="py-3 text-right font-mono text-slate-300">
-                        {trade.exit_price ? `${trade.exit_price.toLocaleString()}원` : '—'}
+                        {trade.sell_qty ? `${trade.sell_qty}주` : '—'}
                       </td>
-                      <td className={`py-3 text-right font-semibold ${(trade.pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {trade.pnl != null
-                          ? `${trade.pnl >= 0 ? '+' : ''}${trade.pnl.toLocaleString()}원`
+                      <td className="py-3 text-right font-mono text-xs text-slate-400">
+                        {trade.entry_time && trade.exit_time
+                          ? (() => {
+                              const mins = Math.round((new Date(trade.exit_time).getTime() - new Date(trade.entry_time).getTime()) / 60000);
+                              return mins >= 60 ? `${Math.floor(mins / 60)}시간 ${mins % 60}분` : `${mins}분`;
+                            })()
                           : '—'}
                       </td>
                     </tr>
