@@ -99,7 +99,8 @@ app.include_router(reports_router, prefix="/api")
 app.include_router(logs_router, prefix="/api")
 # themes/calendar/news 라우트는 경로에 /api/ 포함 — prefix 없이 등록
 app.include_router(tcn_router)
-app.include_router(admin_router, prefix="/api/admin")
+# admin 라우터는 APIRouter(prefix="/api/admin") 내장 — 추가 prefix 불필요
+app.include_router(admin_router)
 # BAR-43: /metrics (Prometheus exposition) — 단, prefix 없음 (Prometheus 표준 경로)
 app.include_router(metrics_router)
 
