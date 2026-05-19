@@ -143,7 +143,7 @@ class KiwoomGateway(MarketGateway):
             )
 
             # asyncio에서 blocking I/O를 실행
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             resp_data = await loop.run_in_executor(
                 None, self._make_request, request
             )
@@ -195,7 +195,7 @@ class KiwoomGateway(MarketGateway):
             request = urllib.request.Request(url, data=data, headers=headers, method=method)
 
             # asyncio에서 blocking I/O를 실행
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             resp_text = await loop.run_in_executor(None, self._make_request, request)
             response = json.loads(resp_text)
 

@@ -34,7 +34,7 @@ export function PriceChart({
     if (!chartContainerRef.current) return;
 
     let chart: any = null;
-    let series: any = null;
+    let handleResize: (() => void) | null = null;
 
     const initChart = async () => {
       const { createChart } = await import('lightweight-charts');
@@ -62,7 +62,7 @@ export function PriceChart({
         },
       });
 
-      series = chart.addCandlestickSeries({
+      const series = chart.addCandlestickSeries({
         upColor: '#22c55e',
         downColor: '#ef4444',
         borderUpColor: '#22c55e',
@@ -74,29 +74,20 @@ export function PriceChart({
       chartRef.current = chart;
       seriesRef.current = series;
 
-      // 리사이즈 처리
-      const handleResize = () => {
+      handleResize = () => {
         if (chartContainerRef.current && chart) {
-          chart.applyOptions({
-            width: chartContainerRef.current.clientWidth,
-          });
+          chart.applyOptions({ width: chartContainerRef.current.clientWidth });
         }
       };
-
       window.addEventListener('resize', handleResize);
 
-      // 데이터 로드
       await loadData();
-
-      return () => {
-        window.removeEventListener('resize', handleResize);
-        chart.remove();
-      };
     };
 
     initChart();
 
     return () => {
+      if (handleResize) window.removeEventListener('resize', handleResize);
       if (chartRef.current) {
         chartRef.current.remove();
         chartRef.current = null;

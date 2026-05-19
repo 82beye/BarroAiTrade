@@ -18,8 +18,9 @@ from fastapi import APIRouter, Query, HTTPException
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+_DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 KST = timezone(timedelta(hours=9))
-_AUDIT_PATH = Path("data/order_audit.csv")
+_AUDIT_PATH = _DATA_DIR / "order_audit.csv"
 
 
 def _parse_audit_for_date(report_date: date) -> list[dict]:
@@ -121,7 +122,7 @@ def _build_daily_report(report_date: date) -> dict:
 
     # active_positions.json에서 실제 가격 보강
     import json
-    pos_path = Path("data/active_positions.json")
+    pos_path = _DATA_DIR / "active_positions.json"
     active = {}
     if pos_path.exists():
         try:
@@ -241,7 +242,7 @@ async def get_balance_history(
     days: int = Query(30, ge=1, le=365, description="조회 일수"),
 ) -> dict:
     """잔고(예수금+평가금) 추이 조회."""
-    history_path = Path("data/balance_history.json")
+    history_path = _DATA_DIR / "balance_history.json"
     if not history_path.exists():
         return {"points": [], "days": days}
     import json

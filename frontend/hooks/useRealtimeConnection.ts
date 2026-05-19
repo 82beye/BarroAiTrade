@@ -25,6 +25,7 @@ export function useRealtimeConnection() {
     // listeners를 connect()보다 먼저 등록해 재연결 시에도 유효하도록
     wsClient.on('open', () => {
       setConnected(true);
+      setError(null);
     });
     wsClient.on('message', (data: string) => {
       try {

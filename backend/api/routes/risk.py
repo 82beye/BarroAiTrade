@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -20,6 +21,8 @@ from backend.models.risk import RiskLimits, RiskStatus
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 
 # ── 요청 모델 ──────────────────────────────────────────────────────────────────
 
@@ -52,7 +55,7 @@ async def get_risk_status() -> dict:
 
     from backend.core.journal.policy_config import PolicyConfigStore
 
-    cfg = PolicyConfigStore("data/policy.json").load()
+    cfg = PolicyConfigStore(_DATA_DIR / "policy.json").load()
 
     # 브로커 잔고 (60초 캐시)
     cache = getattr(get_risk_status, "_cache", None)
@@ -82,13 +85,13 @@ async def get_risk_status() -> dict:
         # 일일 손익: audit log에서 당일 매도 손익 합산
         daily_pnl = 0.0
         daily_pnl_pct = 0.0
-        audit_path = Path("data/order_audit.csv")
+        audit_path = Path(__file__).resolve().parents[3] / "data" / "order_audit.csv"
         if audit_path.exists():
             KST = timezone(timedelta(hours=9))
             today = datetime.now(KST).strftime("%Y-%m-%d")
             try:
                 from backend.core.journal.active_positions import ActivePositionStore
-                active = ActivePositionStore("data/active_positions.json").load_all()
+                active = ActivePositionStore(_DATA_DIR / "active_positions.json").load_all()
                 with audit_path.open(newline="", encoding="utf-8") as f:
                     for row in csv.DictReader(f):
                         if not row.get("ts", "").startswith(today):
@@ -135,7 +138,7 @@ async def get_risk_status() -> dict:
             "position_count": 0,
             "daily_limit_breached": False,
             "new_entry_blocked": False,
-            "limits": {"daily_loss_limit_pct": -0.03, "max_concurrent_positions": 50},
+            "limits": {"daily_loss_limit_pct": 0.03, "max_concurrent_positions": 50},
             "timestamp": None,
             "status": "error",
             "detail": str(e),
@@ -227,7 +230,7 @@ async def get_audit_log(
 
     # active_positions 에서 전략 정보 merge
     from backend.core.journal.active_positions import ActivePositionStore
-    active = ActivePositionStore("data/active_positions.json").load_all()
+    active = ActivePositionStore(_DATA_DIR / "active_positions.json").load_all()
     for row in rows:
         sym = row.get("symbol", "")
         pos = active.get(sym)

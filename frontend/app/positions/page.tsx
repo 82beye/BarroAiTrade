@@ -19,6 +19,7 @@ export default function PositionsPage() {
       if (!res.ok) throw new Error(`${res.status}`);
       const json = await res.json();
       const raw: any[] = json.positions ?? [];
+      setError(null);
       setPositions(
         raw.map((p) => ({
           id: p.symbol,

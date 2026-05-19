@@ -23,6 +23,8 @@ interface ScanResult {
 interface TickerMeta {
   symbol: string;
   name: string;
+  price: number;
+  change_pct: number;
 }
 
 const SIGNAL_BADGE: Record<string, { label: string; className: string }> = {
@@ -35,7 +37,7 @@ const SIGNAL_BADGE: Record<string, { label: string; className: string }> = {
 export default function WatchlistPage() {
   const tickers = useTradingStore((state) => state.tickers);
   const [symbols, setSymbols] = useState<string[]>([]);
-  const [namemap, setNamemap] = useState<Record<string, string>>({});
+  const [tickermap, setTickermap] = useState<Record<string, TickerMeta>>({});
   const [signalmap, setSignalmap] = useState<Record<string, Signal>>({});
   const [loading, setLoading] = useState(true);
   const [addInput, setAddInput] = useState('');
@@ -53,13 +55,17 @@ export default function WatchlistPage() {
 
       if (data.symbols.length === 0) return;
 
-      // 종목명 + 신호 병렬 조회
-      const [nameResults, scanRes] = await Promise.all([
+      // 종목 시세(이름·가격·등락률) + 신호 병렬 조회
+      const [tickerResults, scanRes] = await Promise.all([
         Promise.allSettled(
           data.symbols.map((sym) =>
             fetch(`/api/market/ticker/${sym}`)
               .then((r) => (r.ok ? r.json() : null))
-              .then((d): TickerMeta | null => (d ? { symbol: d.symbol, name: d.name } : null))
+              .then((d): TickerMeta | null =>
+                d
+                  ? { symbol: d.symbol, name: d.name ?? d.symbol, price: d.price ?? 0, change_pct: d.change_pct ?? 0 }
+                  : null
+              )
           )
         ),
         fetch(`/api/signals/scan?symbols=${encodeURIComponent(data.symbols.join(','))}&market_type=stock`)
@@ -67,11 +73,11 @@ export default function WatchlistPage() {
           .catch((): ScanResult => ({ signals: [] })),
       ]);
 
-      const nm: Record<string, string> = {};
-      nameResults.forEach((r) => {
-        if (r.status === 'fulfilled' && r.value) nm[r.value.symbol] = r.value.name;
+      const tm: Record<string, TickerMeta> = {};
+      tickerResults.forEach((r) => {
+        if (r.status === 'fulfilled' && r.value) tm[r.value.symbol] = r.value;
       });
-      setNamemap(nm);
+      setTickermap(tm);
 
       const sm: Record<string, Signal> = {};
       (scanRes as ScanResult).signals.forEach((sig) => { sm[sig.symbol] = sig; });
@@ -189,20 +195,23 @@ export default function WatchlistPage() {
                 <tbody>
                   {symbols.map((sym) => {
                     const live = tickers.get(sym);
-                    const name = namemap[sym];
+                    const rest = tickermap[sym];
+                    const name = rest?.name ?? sym;
+                    const price = live?.price ?? rest?.price;
+                    const change = live?.change ?? rest?.change_pct;
                     const sig = signalmap[sym];
                     const badge = sig ? SIGNAL_BADGE[sig.signal_type] : null;
                     return (
                       <tr key={sym} className="border-b border-slate-700 last:border-0 hover:bg-slate-700 hover:bg-opacity-30">
                         <td className="py-3">
-                          <div className="font-medium text-slate-200">{name ?? sym}</div>
+                          <div className="font-medium text-slate-200">{name}</div>
                           <div className="text-xs text-slate-500">{sym}</div>
                         </td>
                         <td className="py-3 text-right font-mono text-slate-200">
-                          {live ? `${live.price.toLocaleString()}원` : '—'}
+                          {price ? `${price.toLocaleString()}원` : '—'}
                         </td>
-                        <td className={`py-3 text-right font-semibold ${!live ? 'text-slate-500' : live.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {live ? `${live.change >= 0 ? '+' : ''}${live.change.toFixed(2)}%` : '—'}
+                        <td className={`py-3 text-right font-semibold ${change == null ? 'text-slate-500' : change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {change != null ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : '—'}
                         </td>
                         <td className="py-3 text-center">
                           {badge ? (

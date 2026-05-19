@@ -249,7 +249,7 @@ class TradingOrchestrator:
                     })
 
                     # 첫 실행 또는 1시간 경과 시 스캔 + Telegram 전송
-                    now = asyncio.get_event_loop().time()
+                    now = asyncio.get_running_loop().time()
                     if last_scan_time is None or (now - last_scan_time) >= _DAILY_SCAN_INTERVAL_SEC:
                         logger.info("당일 분석 스캔 시작: %d종목", len(app_state.watchlist))
                         try:

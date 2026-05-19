@@ -110,7 +110,7 @@ async def get_recent_signals(
         return {"signals": [], "timestamp": now_kst.isoformat(), "status": "closed"}
 
     # 데몬이 저장한 정제된 시그널 파일 읽기
-    refined_path = Path("data/refined_signals.json")
+    refined_path = Path(__file__).resolve().parents[3] / "data" / "refined_signals.json"
     if refined_path.exists():
         try:
             data = json.loads(refined_path.read_text(encoding="utf-8"))

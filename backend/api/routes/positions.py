@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from pydantic import SecretStr
@@ -17,6 +18,8 @@ from backend.core.state import app_state
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 
 
 _kiwoom_oauth = None
@@ -117,7 +120,7 @@ async def get_positions(
     ```
     """
     from backend.core.journal.active_positions import ActivePositionStore
-    active = ActivePositionStore("data/active_positions.json").load_all()
+    active = ActivePositionStore(_DATA_DIR / "active_positions.json").load_all()
 
     try:
         fetcher = _build_kiwoom_fetcher()

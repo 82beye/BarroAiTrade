@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useTradingStore } from '@/lib/store';
 import { Button } from '@/components/ui/button';
@@ -8,10 +8,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 
+interface RestTicker {
+  price: number;
+  change_pct: number;
+}
+
 export function OrderForm() {
   const { addOrder, tickers } = useTradingStore();
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [restTicker, setRestTicker] = useState<RestTicker | null>(null);
   const [formData, setFormData] = useState({
     symbol: '005930',
     side: 'BUY',
@@ -19,6 +25,19 @@ export function OrderForm() {
     quantity: 1,
     price: 70000,
   });
+
+  useEffect(() => {
+    const sym = formData.symbol.trim().toUpperCase();
+    if (!sym) return;
+    let cancelled = false;
+    fetch(`/api/market/ticker/${sym}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d) setRestTicker({ price: d.price ?? 0, change_pct: d.change_pct ?? 0 });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [formData.symbol]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
@@ -28,7 +47,7 @@ export function OrderForm() {
       ...prev,
       [name]:
         name === 'quantity' ? parseInt(value, 10) || 1
-        : name === 'price' ? parseFloat(value)
+        : name === 'price' ? (isNaN(parseFloat(value)) ? prev.price : parseFloat(value))
         : value,
     }));
   };
@@ -91,16 +110,20 @@ export function OrderForm() {
             />
             {(() => {
               const live = tickers.get(formData.symbol.toUpperCase());
-              if (!live) return null;
+              const price = live?.price ?? restTicker?.price;
+              const change = live?.change ?? restTicker?.change_pct;
+              if (!price) return null;
               return (
                 <p className="mt-1 text-xs text-slate-400">
                   현재가{' '}
                   <span className="font-semibold text-slate-200">
-                    {live.price.toLocaleString()}원
+                    {price.toLocaleString()}원
                   </span>
-                  <span className={`ml-2 ${live.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {live.change >= 0 ? '+' : ''}{live.change.toFixed(2)}%
-                  </span>
+                  {change != null && (
+                    <span className={`ml-2 ${change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {change >= 0 ? '+' : ''}{change.toFixed(2)}%
+                    </span>
+                  )}
                 </p>
               );
             })()}

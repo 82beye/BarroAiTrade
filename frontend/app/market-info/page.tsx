@@ -70,11 +70,13 @@ function ThemesTab() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/themes')
+    const controller = new AbortController();
+    fetch('/api/themes', { signal: controller.signal })
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then(setThemes)
-      .catch(() => setError('테마 데이터를 불러올 수 없습니다'))
+      .catch((e) => { if (e?.name !== 'AbortError') setError('테마 데이터를 불러올 수 없습니다'); })
       .finally(() => setLoading(false));
+    return () => controller.abort();
   }, []);
 
   async function toggleTheme(id: number) {
@@ -226,11 +228,13 @@ function NewsTab() {
   const [activeTag, setActiveTag] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/news/recent?limit=50')
+    const controller = new AbortController();
+    fetch('/api/news/recent?limit=50', { signal: controller.signal })
       .then((r) => (r.ok ? r.json() : []))
       .then(setNews)
-      .catch(() => setNews([]))
+      .catch((e) => { if (e?.name !== 'AbortError') setNews([]); })
       .finally(() => setLoading(false));
+    return () => controller.abort();
   }, []);
 
   const allTags = Array.from(new Set(news.flatMap((n) => n.tags))).slice(0, 20);

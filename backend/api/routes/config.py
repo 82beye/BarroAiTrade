@@ -41,10 +41,14 @@ async def get_config() -> dict:
         logger.info("설정 조회")
 
         return {
-            "trading_mode": config.get("mode", "simulation"),
+            "trading_mode": config.get("trading_mode", config.get("mode", "simulation")),
             "market": config.get("market", "stock"),
             "scan_interval_sec": config.get("scan_interval_sec", 3),
             "kiwoom": config.get("kiwoom", {}),
+            "telegram_chat_id": config.get("telegram_chat_id", ""),
+            "notify_on_order": config.get("notify_on_order", True),
+            "notify_on_close": config.get("notify_on_close", True),
+            "notify_on_stop_loss": config.get("notify_on_stop_loss", True),
         }
     except Exception as e:
         logger.error(f"설정 조회 실패: {e}")

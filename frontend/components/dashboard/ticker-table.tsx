@@ -52,16 +52,16 @@ export function TickerTable() {
     ? wsTickers.slice(0, 5).map((t) => ({
         symbol: t.symbol,
         name: undefined as string | undefined,
-        price: t.price,
-        volume: t.volume,
-        change: t.change,
+        price: t.price ?? 0,
+        volume: t.volume ?? 0,
+        change: t.change ?? 0,
       }))
     : restTickers.map((t) => ({
         symbol: t.symbol,
         name: t.name,
-        price: t.price,
-        volume: t.volume,
-        change: t.change_pct,
+        price: t.price ?? 0,
+        volume: t.volume ?? 0,
+        change: t.change_pct ?? 0,
       }));
 
   return (
