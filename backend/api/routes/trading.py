@@ -124,12 +124,16 @@ async def place_order(
         side = OrderSide(order_data["side"])
         order_type = OrderType(order_data["order_type"])
 
+        price_raw = order_data.get("price")
+        if order_type == OrderType.LIMIT and price_raw is None:
+            raise ValueError("LIMIT 주문에는 price가 필요합니다")
+
         order = Order(
             symbol=order_data["symbol"],
             side=side,
             order_type=order_type,
             quantity=float(order_data["quantity"]),
-            price=float(order_data.get("price", 0)) if order_type == OrderType.LIMIT else None,
+            price=float(price_raw) if order_type == OrderType.LIMIT else None,
             market_type=MarketType.STOCK,
             strategy_id=order_data.get("strategy_id", "manual"),
             risk_approved=True,
