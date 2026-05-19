@@ -13,12 +13,16 @@ asyncio.TaskGroup 기반으로 모든 서브시스템을 관리:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, date
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from backend.core.state import app_state
 from backend.models.market import MarketType
+
+_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +32,33 @@ _RESCAN_INTERVAL_SEC = 3         # 신호 스캔 주기
 _EXIT_INTERVAL_SEC = 1           # 청산 조건 체크 주기
 _TASK_RESTART_DELAY = 5          # 태스크 재시작 대기
 _DAILY_SCAN_INTERVAL_SEC = 3600  # 당일 스캔 주기 (1시간)
+
+
+def _record_balance_snapshot(balance: Any, today: date) -> None:
+    """balance_history.json에 오늘 잔고 스냅샷 추가 (당일 중복 시 덮어쓰기)."""
+    history_path = _DATA_DIR / "balance_history.json"
+    try:
+        if history_path.exists():
+            data: list = json.loads(history_path.read_text(encoding="utf-8"))
+        else:
+            data = []
+    except Exception:
+        data = []
+
+    date_str = today.isoformat()
+    point = {
+        "date": date_str,
+        "total_value": float(getattr(balance, "total_value", 0)),
+        "cash": float(getattr(balance, "cash", getattr(balance, "available_cash", 0))),
+        "eval_value": float(getattr(balance, "eval_value", getattr(balance, "total_eval", 0))),
+    }
+    # 당일 기존 항목 교체 또는 추가
+    data = [p for p in data if p.get("date") != date_str]
+    data.append(point)
+    data.sort(key=lambda p: p["date"])
+
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    history_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 class TradingOrchestrator:
@@ -186,6 +217,8 @@ class TradingOrchestrator:
 
     async def _sync_loop(self) -> None:
         """잔고/포지션 동기화"""
+        _balance_history_date: Optional[date] = None
+
         while self._running:
             try:
                 gateway = app_state.market_gateway
@@ -197,6 +230,15 @@ class TradingOrchestrator:
                             app_state.risk_engine.update_total_value(balance.total_value)
                             _, daily_pnl_pct = self._position_mgr.get_daily_pnl()
                             app_state.risk_engine.update_daily_pnl(daily_pnl_pct)
+
+                        # 잔고 히스토리 — 하루 1회 스냅샷
+                        today = date.today()
+                        if _balance_history_date != today:
+                            try:
+                                _record_balance_snapshot(balance, today)
+                                _balance_history_date = today
+                            except Exception as hist_err:
+                                logger.warning("잔고 히스토리 기록 실패: %s", hist_err)
 
                         # 현재가 업데이트
                         positions = self._position_mgr.get_positions()
