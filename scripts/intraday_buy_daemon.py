@@ -52,6 +52,7 @@ BUY_START = time(9, 5)         # 매수는 09:05 이후만
 SELL_START = time(9, 1)        # 매도 평가는 09:01부터
 MIN_HOLD_MINUTES = 10          # 매수 후 최소 10분 보유 (쿨다운)
 MAX_BUY_PER_CYCLE = 2          # 사이클당 최대 매수 2종목
+BUY_REENTRY_COOLDOWN_MIN = 30  # P6 (2026-05-20): 매수 후 동일 종목 재진입 금지 (30분)
 
 
 def _now_kst() -> datetime:
@@ -291,7 +292,10 @@ def _save_refined_signals(signals: list, regime) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-async def _scan_and_buy(args, oauth, session_bought: set[str]) -> int:
+async def _scan_and_buy(
+    args, oauth, session_bought: set[str],
+    recent_buys: dict[str, datetime] | None = None,
+) -> int:
     """한 사이클: 스캔 → 시그널 검증 → 매수. 매수 건수 반환."""
     # 매수는 BUY_START 이후만
     if _now_kst().time() < BUY_START:
@@ -327,7 +331,49 @@ async def _scan_and_buy(args, oauth, session_bought: set[str]) -> int:
         except Exception:
             pass
 
-    excluded = already_held | active_symbols | today_sold | session_bought
+    # P6 (2026-05-20) — 매수 후 BUY_REENTRY_COOLDOWN_MIN 미경과 종목 재진입 금지.
+    # 5/19 4건 양수 가격 추매(001430 6분·036930 1분·027360 1분·005500 1분) 차단 목적.
+    # session_bought.add 가 pos_store.create_from_order exception 시 누락되거나
+    # active_positions disk write timing 지연으로 already_held/active_symbols
+    # 필터 우회한 경우의 이중 안전망. process-local recent_buys dict 로 추적.
+    cooldown_buys: set[str] = set()
+    if recent_buys is not None:
+        now_kst = _now_kst()
+        for sym, bought_at in list(recent_buys.items()):
+            elapsed_min = (now_kst - bought_at).total_seconds() / 60
+            if elapsed_min < BUY_REENTRY_COOLDOWN_MIN:
+                cooldown_buys.add(sym)
+            else:
+                recent_buys.pop(sym, None)  # cooldown 종료 → 정리
+
+    # audit log 기반 fallback — recent_buys 가 process restart 등으로 비어있으면
+    # audit 의 최근 매수 ts 로 cooldown 평가 (이중 안전망).
+    audit_buys: set[str] = set()
+    if audit_path.exists():
+        now_utc = datetime.now(timezone.utc)
+        cutoff_utc = now_utc - timedelta(minutes=BUY_REENTRY_COOLDOWN_MIN)
+        try:
+            with audit_path.open(newline="", encoding="utf-8") as f:
+                for row in _csv.DictReader(f):
+                    if row.get("side") != "buy":
+                        continue
+                    if row.get("action") not in {"ORDERED", "DRY_RUN"}:
+                        continue
+                    try:
+                        row_ts = datetime.fromisoformat(row["ts"])
+                        if row_ts.tzinfo is None:
+                            row_ts = row_ts.replace(tzinfo=timezone.utc)
+                    except (ValueError, KeyError):
+                        continue
+                    if row_ts >= cutoff_utc:
+                        audit_buys.add(row["symbol"])
+        except Exception:
+            pass
+
+    excluded = (
+        already_held | active_symbols | today_sold | session_bought
+        | cooldown_buys | audit_buys
+    )
     filtered = [c for c in leaders if c.symbol not in excluded
                 and c.flu_rate < 25.0 and c.cur_price >= 5_000]
 
@@ -480,6 +526,9 @@ async def _scan_and_buy(args, oauth, session_bought: set[str]) -> int:
             )
 
             session_bought.add(r.symbol)
+            # P6 — 매수 직후 즉시 cooldown 등록 (recent_buys 인자가 있으면)
+            if recent_buys is not None:
+                recent_buys[r.symbol] = _now_kst()
 
             if notifier:
                 try:
@@ -551,6 +600,7 @@ async def _daemon(args):
     oauth = _build_oauth()
     notifier = TelegramNotifier.from_env() if args.telegram else None
     session_bought: set[str] = set()
+    recent_buys: dict[str, datetime] = {}  # P6 — 매수 후 30분 재진입 금지
     total_bought = 0
     total_sold = 0
 
@@ -579,7 +629,7 @@ async def _daemon(args):
 
         # 2) 매수 스캔
         try:
-            buy_count = await _scan_and_buy(args, oauth, session_bought)
+            buy_count = await _scan_and_buy(args, oauth, session_bought, recent_buys)
             if buy_count > 0:
                 total_bought += buy_count
                 print(f"  [{ts}] 매수 {buy_count}건 (누적 {total_bought}건)")
