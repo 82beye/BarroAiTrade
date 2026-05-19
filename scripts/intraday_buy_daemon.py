@@ -408,11 +408,18 @@ async def _scan_and_buy(
     ts_r = _now_kst().strftime("%H:%M:%S")
     print(f"  [{ts_r}][REGIME] {regime.value.upper()} (종목 {len(candles_for_regime)}개 분석)")
 
-    # BEARISH 국면: 가중치 ≥ 1.0 전략만 허용, 매수 1건으로 제한
+    # 2026-05-20 P8 — 시장 국면별 매수 제한 강화.
+    # 5/19 7건 매수 중 5건 손실 (SIDEWAYS·BULL 분류로 max_buy=2 적용된 듯).
+    # SIDEWAYS 도 보수 축소 (1건) + BEARISH 는 더 강한 신호 임계 추가.
     regime_max_buy = MAX_BUY_PER_CYCLE
+    bearish_min_pnl = 0.0
     if regime == MarketRegime.BEARISH:
         regime_max_buy = 1
-        print(f"  [{ts_r}][REGIME] BEARISH — 가중치≥1.0 전략만 허용, 최대 1건")
+        bearish_min_pnl = 50_000.0  # BEARISH: 강한 신호만 (best_pnl > 50k)
+        print(f"  [{ts_r}][REGIME] BEARISH — 가중치≥1.0 전략 + best_pnl>50k 만, 최대 1건")
+    elif regime == MarketRegime.SIDEWAYS:
+        regime_max_buy = 1  # P8 신규 — 박스권도 보수 운영
+        print(f"  [{ts_r}][REGIME] SIDEWAYS — 보수 운영, 최대 1건")
 
     # 전략 시뮬레이션 시그널 검증
     sim = IntradaySimulator()
@@ -439,6 +446,9 @@ async def _scan_and_buy(
         if best_pnl > 0 and len(result.trades) > 0:
             # BEARISH 국면: 가중치 < 1.0 전략은 제외
             if regime == MarketRegime.BEARISH and weights.get(best_strategy, 1.0) < 1.0:
+                continue
+            # P8 — BEARISH 시 best_pnl 임계 (강한 신호만)
+            if bearish_min_pnl > 0 and best_pnl < bearish_min_pnl:
                 continue
             # 2026-05-19 P4 fix — 고점 진입 회피.
             # 5/18 122630 entry 161,690 vs H 162,955 (0.78%) → 즉시 하락,
