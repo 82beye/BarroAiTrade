@@ -195,6 +195,8 @@ class TradingOrchestrator:
                         self._position_mgr.sync_balance(balance)
                         if app_state.risk_engine:
                             app_state.risk_engine.update_total_value(balance.total_value)
+                            _, daily_pnl_pct = self._position_mgr.get_daily_pnl()
+                            app_state.risk_engine.update_daily_pnl(daily_pnl_pct)
 
                         # 현재가 업데이트
                         positions = self._position_mgr.get_positions()
