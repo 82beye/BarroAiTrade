@@ -50,9 +50,10 @@ MARKET_OPEN = time(9, 5)       # 시초가 안정 후 매수 시작 (08:58→09:
 MARKET_CLOSE = time(15, 20)
 BUY_START = time(9, 5)         # 매수는 09:05 이후만
 SELL_START = time(9, 1)        # 매도 평가는 09:01부터
-MIN_HOLD_MINUTES = 10          # 매수 후 최소 10분 보유 (쿨다운)
+MIN_HOLD_MINUTES = 15          # 매수 후 최소 보유 (P7 5/20: 10→15, 노이즈 SL 회피)
 MAX_BUY_PER_CYCLE = 2          # 사이클당 최대 매수 2종목
 BUY_REENTRY_COOLDOWN_MIN = 30  # P6 (2026-05-20): 매수 후 동일 종목 재진입 금지 (30분)
+HARD_SL_PCT = -5.0             # P7 (2026-05-20): cooldown 안 극한 SL 우회 임계
 
 
 def _now_kst() -> datetime:
@@ -218,9 +219,21 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
             except Exception:
                 pass
 
+    # P7 (2026-05-20) — cooldown 안 종목 매도 차단, 단 극한 SL(-5% 이하) 만 우회.
+    # 5/19 6 손실 종목 모두 10~17분 매도 (breakeven_stop 2.5% trigger). MIN_HOLD
+    # 10→15분 상향으로 노이즈 매도 회피 + hard SL 우회로 큰 손실은 즉시 차단.
+    def _allow_sell(d) -> bool:
+        if d.symbol not in cooldown_symbols:
+            return True
+        # cooldown 안 — STOP_LOSS 이면서 -5% 이하 극한이면 우회
+        return (
+            d.signal == SellSignal.STOP_LOSS
+            and float(d.pnl_rate) <= HARD_SL_PCT
+        )
+
     sell_targets = [
         d for d in decisions
-        if d.signal != SellSignal.HOLD and d.symbol not in cooldown_symbols
+        if d.signal != SellSignal.HOLD and _allow_sell(d)
     ]
     if not sell_targets:
         return 0
