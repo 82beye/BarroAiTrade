@@ -7,11 +7,17 @@
   POST /api/trading/order                    - 주문 실행
   DELETE /api/trading/order/:order_id        - 주문 취소
   GET /api/trading/order/:order_id           - 주문 상태 조회
+  GET /api/trading/orders                    - 최근 주문 목록 (audit CSV)
 """
 from __future__ import annotations
 
+import csv
 import logging
+from pathlib import Path
 from typing import Optional
+
+_DATA_DIR = Path(__file__).resolve().parents[3] / "data"
+_AUDIT_PATH = _DATA_DIR / "order_audit.csv"
 
 from fastapi import APIRouter, Path, Body, HTTPException, Query
 
@@ -237,3 +243,45 @@ async def get_order_status(
     except Exception as e:
         logger.error(f"주문 상태 조회 실패: {order_id}, {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/trading/orders")
+async def list_orders(
+    limit: int = Query(50, ge=1, le=200, description="최대 주문 수"),
+) -> dict:
+    """최근 주문 목록 — order_audit.csv 기반."""
+    if not _AUDIT_PATH.exists():
+        return {"orders": [], "count": 0}
+
+    rows: list[dict] = []
+    try:
+        with open(_AUDIT_PATH, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                action = row.get("action", "")
+                blocked = row.get("blocked") == "1"
+                if blocked or action == "FAILED":
+                    status = "REJECTED"
+                else:
+                    status = "FILLED"
+                price_str = row.get("price", "MKT") or "MKT"
+                try:
+                    price = 0.0 if price_str == "MKT" else float(price_str)
+                except ValueError:
+                    price = 0.0
+                order_id = row.get("order_no") or row.get("ts", "")
+                rows.append({
+                    "id": order_id,
+                    "symbol": row.get("symbol", ""),
+                    "side": (row.get("side", "buy") or "buy").upper(),
+                    "type": "MARKET" if price_str == "MKT" else "LIMIT",
+                    "quantity": int(row.get("qty", 0) or 0),
+                    "price": price,
+                    "status": status,
+                    "timestamp": row.get("ts", ""),
+                })
+    except Exception as e:
+        logger.error("order audit 읽기 실패: %s", e)
+        return {"orders": [], "count": 0}
+
+    recent = rows[-limit:][::-1]
+    return {"orders": recent, "count": len(recent)}

@@ -1,8 +1,19 @@
 'use client';
 
-import { useTradingStore } from '@/lib/store';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+
+interface Order {
+  id: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  type: 'MARKET' | 'LIMIT';
+  quantity: number;
+  price: number;
+  status: 'PENDING' | 'FILLED' | 'CANCELED' | 'REJECTED';
+  timestamp: string;
+}
 
 const STATUS_COLORS: Record<string, string> = {
   FILLED: 'bg-green-900 text-green-200',
@@ -19,20 +30,24 @@ const STATUS_KO: Record<string, string> = {
 };
 
 export function RecentOrders() {
-  const orders = useTradingStore((state) => state.orders);
+  const [orders, setOrders] = useState<Order[]>([]);
 
-  if (orders.length === 0) {
-    return (
-      <Card className="border-slate-800 bg-slate-900">
-        <CardHeader>
-          <CardTitle className="text-lg">최근 주문</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-slate-400">최근 주문이 없습니다</p>
-        </CardContent>
-      </Card>
-    );
-  }
+  useEffect(() => {
+    async function fetchOrders() {
+      try {
+        const res = await fetch('/api/trading/orders?limit=20');
+        if (res.ok) {
+          const data = await res.json();
+          setOrders(data.orders ?? []);
+        }
+      } catch {
+        // silent — 백엔드 미연결 시 빈 상태 유지
+      }
+    }
+    fetchOrders();
+    const interval = setInterval(fetchOrders, 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <Card className="border-slate-800 bg-slate-900">
@@ -40,30 +55,34 @@ export function RecentOrders() {
         <CardTitle className="text-lg">최근 주문</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-2">
-          {orders.slice(-5).reverse().map((order) => (
-            <div
-              key={order.id}
-              className="flex items-center justify-between rounded-lg bg-slate-800 p-3 text-sm"
-            >
-              <div>
-                <p className="font-medium text-slate-50">{order.symbol}</p>
-                <p className="text-slate-400">
-                  {order.side === 'BUY' ? '매수' : '매도'} {order.quantity}주
-                  {order.type === 'MARKET'
-                    ? ' @ 시장가'
-                    : ` @ ${order.price.toLocaleString()}원`}
-                </p>
-              </div>
-              <Badge
-                variant="secondary"
-                className={STATUS_COLORS[order.status] ?? 'bg-slate-700 text-slate-200'}
+        {orders.length === 0 ? (
+          <p className="text-slate-400">최근 주문이 없습니다</p>
+        ) : (
+          <div className="space-y-2">
+            {orders.slice(0, 5).map((order) => (
+              <div
+                key={order.id}
+                className="flex items-center justify-between rounded-lg bg-slate-800 p-3 text-sm"
               >
-                {STATUS_KO[order.status] ?? order.status}
-              </Badge>
-            </div>
-          ))}
-        </div>
+                <div>
+                  <p className="font-medium text-slate-50">{order.symbol}</p>
+                  <p className="text-slate-400">
+                    {order.side === 'BUY' ? '매수' : '매도'} {order.quantity}주
+                    {order.type === 'MARKET'
+                      ? ' @ 시장가'
+                      : ` @ ${order.price.toLocaleString()}원`}
+                  </p>
+                </div>
+                <Badge
+                  variant="secondary"
+                  className={STATUS_COLORS[order.status] ?? 'bg-slate-700 text-slate-200'}
+                >
+                  {STATUS_KO[order.status] ?? order.status}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

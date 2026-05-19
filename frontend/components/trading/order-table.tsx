@@ -1,8 +1,19 @@
 'use client';
 
-import { useTradingStore } from '@/lib/store';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+
+interface Order {
+  id: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  type: 'MARKET' | 'LIMIT';
+  quantity: number;
+  price: number;
+  status: 'PENDING' | 'FILLED' | 'CANCELED' | 'REJECTED';
+  timestamp: string;
+}
 
 const STATUS_COLORS: Record<string, string> = {
   FILLED: 'bg-green-900 text-green-200',
@@ -19,7 +30,24 @@ const STATUS_KO: Record<string, string> = {
 };
 
 export function OrderTable() {
-  const orders = useTradingStore((state) => state.orders);
+  const [orders, setOrders] = useState<Order[]>([]);
+
+  useEffect(() => {
+    async function fetchOrders() {
+      try {
+        const res = await fetch('/api/trading/orders?limit=50');
+        if (res.ok) {
+          const data = await res.json();
+          setOrders(data.orders ?? []);
+        }
+      } catch {
+        // silent
+      }
+    }
+    fetchOrders();
+    const interval = setInterval(fetchOrders, 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <Card className="border-slate-800 bg-slate-900">
