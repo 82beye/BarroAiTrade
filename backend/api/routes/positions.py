@@ -47,37 +47,45 @@ def _get_gateway():
 
 @router.get("/accounts/balance")
 async def get_balance() -> dict:
-    """
-    계좌 잔고 조회
-
-    응답:
-    ```json
-    {
-      "total_value": 10000000,
-      "available_cash": 5000000,
-      "invested_value": 5000000,
-      "total_pnl": 500000,
-      "total_pnl_pct": 5.0,
-      "timestamp": "2026-04-11T10:00:00Z"
-    }
-    ```
-    """
+    """계좌 잔고 조회 (키움 REST API 실시간)."""
     try:
-        gateway = _get_gateway()
-        balance = await gateway.get_balance()
+        fetcher = _build_kiwoom_fetcher()
+        balance = await fetcher.fetch_balance()
+        deposit = await fetcher.fetch_deposit()
 
-        logger.info(f"잔고 조회: {balance.total_value}")
+        cash = float(deposit.cash)
+        eval_total = float(balance.total_eval)
+        total = float(balance.estimated_deposit)
+
+        holdings = []
+        for h in (balance.holdings or []):
+            holdings.append({
+                "symbol": h.symbol,
+                "name": h.name,
+                "qty": h.qty,
+                "avg_buy_price": float(h.avg_buy_price),
+                "cur_price": float(h.cur_price),
+                "eval_amount": float(h.eval_amount),
+                "pnl": float(h.pnl),
+                "pnl_rate": float(h.pnl_rate),
+            })
+
+        from datetime import datetime, timezone, timedelta
+        now_kst = datetime.now(timezone(timedelta(hours=9)))
 
         return {
-            "total_value": balance.total_value,
-            "available_cash": balance.available_cash,
-            "invested_value": balance.invested_value,
-            "total_pnl": balance.total_pnl,
-            "total_pnl_pct": balance.total_pnl_pct,
-            "timestamp": balance.updated_at.isoformat(),
+            "total_value": total,
+            "available_cash": cash,
+            "invested_value": float(balance.total_purchase),
+            "eval_value": eval_total,
+            "total_pnl": float(balance.total_pnl),
+            "total_pnl_pct": float(balance.total_pnl_rate),
+            "holdings": holdings,
+            "position_count": len(holdings),
+            "timestamp": now_kst.isoformat(),
         }
     except Exception as e:
-        logger.error(f"잔고 조회 실패: {e}")
+        logger.error("잔고 조회 실패: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
