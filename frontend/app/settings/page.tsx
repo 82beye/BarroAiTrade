@@ -65,10 +65,11 @@ export default function SettingsPage() {
         if (riskRes.ok) {
           const risk = await riskRes.json();
           const limits = risk.limits ?? {};
-          // 백엔드는 소수(0.05 = 5%)를 반환하므로 * 100 변환
-          if (limits.stop_loss_pct != null) merged.stopLoss = limits.stop_loss_pct * 100;
+          // 백엔드: 손절/손실한도는 음수 분수(-0.02=-2%), 익절은 양수 분수(0.05=5%)
+          // UI에서는 항상 양수 % (e.g. 2, 3, 5)로 표시·입력
+          if (limits.stop_loss_pct != null) merged.stopLoss = Math.abs(limits.stop_loss_pct * 100);
           if (limits.take_profit_1_pct != null) merged.takeProfit = limits.take_profit_1_pct * 100;
-          if (limits.daily_loss_limit_pct != null) merged.dailyLossLimit = limits.daily_loss_limit_pct * 100;
+          if (limits.daily_loss_limit_pct != null) merged.dailyLossLimit = Math.abs(limits.daily_loss_limit_pct * 100);
           if (limits.max_concurrent_positions != null) merged.maxSymbols = limits.max_concurrent_positions;
         }
 
@@ -101,9 +102,9 @@ export default function SettingsPage() {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            stop_loss_pct: data.stopLoss / 100,
+            stop_loss_pct: -(data.stopLoss / 100),
             take_profit_1_pct: data.takeProfit / 100,
-            daily_loss_limit_pct: data.dailyLossLimit / 100,
+            daily_loss_limit_pct: -(data.dailyLossLimit / 100),
             max_concurrent_positions: data.maxSymbols,
           }),
         }),
