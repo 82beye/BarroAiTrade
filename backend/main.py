@@ -85,6 +85,8 @@ from backend.api.routes.config import router as config_router
 from backend.api.routes.reports import router as reports_router
 from backend.api.routes.metrics import router as metrics_router  # BAR-43
 from backend.api.routes.logs import router as logs_router
+from backend.api.routes.themes_calendar_news import router as tcn_router  # BAR-104
+from backend.api.routes.admin import router as admin_router  # BAR-109
 
 app.include_router(signals_router, prefix="/api")
 app.include_router(risk_router, prefix="/api")
@@ -95,6 +97,9 @@ app.include_router(watchlist_router, prefix="/api")
 app.include_router(config_router, prefix="/api")
 app.include_router(reports_router, prefix="/api")
 app.include_router(logs_router, prefix="/api")
+# themes/calendar/news 라우트는 경로에 /api/ 포함 — prefix 없이 등록
+app.include_router(tcn_router)
+app.include_router(admin_router, prefix="/api/admin")
 # BAR-43: /metrics (Prometheus exposition) — 단, prefix 없음 (Prometheus 표준 경로)
 app.include_router(metrics_router)
 
