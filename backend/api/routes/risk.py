@@ -114,6 +114,10 @@ async def get_risk_status() -> dict:
         breached = daily_pnl_pct <= -abs(daily_loss_limit)
         max_positions = cfg.daily_max_orders
 
+        # risk_engine.limits에서 추가 한도 읽기 (설정 페이지 prefill용)
+        from backend.core.state import app_state as _app_state
+        _eng_limits = _app_state.risk_engine.limits if _app_state.risk_engine else None
+
         result = {
             "current_exposure_pct": round(exposure, 4),
             "daily_pnl_pct": round(daily_pnl_pct, 2),
@@ -123,6 +127,10 @@ async def get_risk_status() -> dict:
             "limits": {
                 "daily_loss_limit_pct": daily_loss_limit / 100,
                 "max_concurrent_positions": max_positions,
+                "stop_loss_pct": float(_eng_limits.stop_loss_pct) if _eng_limits else -0.02,
+                "take_profit_1_pct": float(_eng_limits.take_profit_1_pct) if _eng_limits else 0.05,
+                "take_profit_1_qty_pct": float(_eng_limits.take_profit_1_qty_pct) if _eng_limits else 0.5,
+                "take_profit_2_pct": float(_eng_limits.take_profit_2_pct) if _eng_limits else 0.10,
             },
             "timestamp": datetime.now(timezone(timedelta(hours=9))).isoformat(),
             "status": "ok",
