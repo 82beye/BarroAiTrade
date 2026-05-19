@@ -219,13 +219,24 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
             except Exception:
                 pass
 
-    # P7 (2026-05-20) — cooldown 안 종목 매도 차단, 단 극한 SL(-5% 이하) 만 우회.
-    # 5/19 6 손실 종목 모두 10~17분 매도 (breakeven_stop 2.5% trigger). MIN_HOLD
-    # 10→15분 상향으로 노이즈 매도 회피 + hard SL 우회로 큰 손실은 즉시 차단.
+    # P7+P9 (2026-05-20) — cooldown 안 매도 정책:
+    #   - defensive (STOP_LOSS·BREAKEVEN_STOP·TIME_TIGHTENED_SL) 차단
+    #   - 단 STOP_LOSS rate ≤ -5% (hard SL) 는 우회 (큰 손실 방지)
+    #   - 익절 (TRAILING_STOP·TAKE_PROFIT·PARTIAL_TP) 는 통과 (P9 — 강세 종목 익절 기회 보장)
+    # P7 단독 시 274090 peak +8.1% trail 차단으로 -358k 손실 발생 → P9 보완.
+    _DEFENSIVE_SIGNALS = {
+        SellSignal.STOP_LOSS,
+        SellSignal.BREAKEVEN_STOP,
+        SellSignal.TIME_TIGHTENED_SL,
+    }
+
     def _allow_sell(d) -> bool:
         if d.symbol not in cooldown_symbols:
             return True
-        # cooldown 안 — STOP_LOSS 이면서 -5% 이하 극한이면 우회
+        # cooldown 안 — 익절 신호 (trail/TP/partial_tp) 는 통과
+        if d.signal not in _DEFENSIVE_SIGNALS:
+            return True
+        # defensive 차단 — 단 hard SL 만 우회
         return (
             d.signal == SellSignal.STOP_LOSS
             and float(d.pnl_rate) <= HARD_SL_PCT
