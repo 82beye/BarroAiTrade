@@ -65,7 +65,7 @@ class OrderExecutor:
             OrderResult — 성공 시
             None — 거부 또는 실패 시
         """
-        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
         await self._queue.put((order, gateway, risk_engine, positions, balance, future))
         try:
             return await future
