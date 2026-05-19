@@ -12,6 +12,7 @@ tags: [index, report]
 
 | 피처 | 문서 | 날짜 | 상태 |
 |------|------|------|------|
+| 🔥 **5/19 실거래 분석 + daemon P6~P9 fix (1.74M 회복)** | [[features/2026-05-20-0519-live-trade-p6-p9-fixes\|보기]] | 2026-05-20 | ✅ 완료 |
 | 🔥 **5/18 실거래 분석 + daemon 4+1 fix (P1~P5-a)** | [[features/2026-05-19-0518-live-trade-fixes\|보기]] | 2026-05-19 | ✅ 완료 |
 | 📊 **trail default ON 시뮬 종합 + 일별 승률 분석** | [[features/2026-05-17-trail-default-on-sim\|보기]] | 2026-05-17 | ✅ 완료 |
 | 🆕 **BAR-OPS-09 후속** — 전략 시그널·청산 분리 + S1 정규화 | [[features/BAR-OPS-09-strategy-refactor-2026-05-14.report\|보기]] | 2026-05-14 | ✅ 완료 |

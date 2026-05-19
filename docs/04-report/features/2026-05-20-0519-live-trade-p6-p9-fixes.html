@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>2026-05-20-0519-live-trade-p6-p9-fixes</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<hr />
+<p>tags: [report, operations, daemon, fix, 2026-05-19, 2026-05-20]
+date: 2026-05-20
+related:
+  - "[[2026-05-19-0518-live-trade-fixes]]"
+  - "[[2026-05-17-trail-default-on-sim]]"</p>
+<hr />
+<h1 id="519-daemon-p6p9-fix">5/19 실거래 분석 + daemon P6~P9 fix 통합 보고</h1>
+<h2 id="context">Context</h2>
+<ul>
+<li><strong>분석 대상</strong>: 2026-05-19 실거래 audit (200행 / 5/19 24건) + barro.log (2,305줄)</li>
+<li><strong>선행</strong>: 5/18 P1~P5-a fix 적용 후 첫 운영일</li>
+<li><strong>목표</strong>: P1~P5 fix 검증 + 신규 발견 문제(추매 폭주·노이즈 매도·BEARISH 손실)에 P6~P9 추가 fix</li>
+<li><strong>결과</strong>: P9 적용 시 5/19 -1.03M → +707k (1.74M 회복) 검증</li>
+</ul>
+<h2 id="519-timeline">5/19 실거래 timeline</h2>
+<table>
+<thead>
+<tr>
+<th>시간 (KST)</th>
+<th>사건</th>
+<th style="text-align: right;">거래</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>09:05~09:39</td>
+<td>신규 매수 + 5/18 미청산(122630/069500/080220) 정리 + 분할매도 0건</td>
+<td style="text-align: right;">22</td>
+</tr>
+<tr>
+<td>14:33~14:43</td>
+<td>005500 (SK증권) 추매 + 매도</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td><strong>전체</strong></td>
+<td><strong>분할매도 폭주 X, BLOCKED 0, 14:06 한도 차단 X</strong></td>
+<td style="text-align: right;"><strong>24</strong></td>
+</tr>
+</tbody>
+</table>
+<h2 id="p1p5-fix-519">P1~P5 fix 검증 (5/19 운영 결과)</h2>
+<table>
+<thead>
+<tr>
+<th>fix</th>
+<th style="text-align: right;">5/18</th>
+<th style="text-align: right;">5/19</th>
+<th>결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1 분할매도 차단</td>
+<td style="text-align: right;">19건 (100790 9·005930 7·080220 3)</td>
+<td style="text-align: right;"><strong>0건</strong></td>
+<td>✅ partial_tp_done 보존 정상</td>
+</tr>
+<tr>
+<td>P3 매수 한도 (매수만)</td>
+<td style="text-align: right;">78건 BLOCKED</td>
+<td style="text-align: right;"><strong>0건 BLOCKED</strong></td>
+<td>✅</td>
+</tr>
+<tr>
+<td>09:05 매수 시작 (2a780e0)</td>
+<td style="text-align: right;">09:00:43 부터</td>
+<td style="text-align: right;"><strong>09:05:01 부터</strong></td>
+<td>✅</td>
+</tr>
+<tr>
+<td>미청산 정리</td>
+<td style="text-align: right;">3건 강제 보유</td>
+<td style="text-align: right;"><strong>3건 모두 청산</strong></td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<h2 id="519">5/19 종목별 실거래 결과</h2>
+<table>
+<thead>
+<tr>
+<th>종목</th>
+<th>매수</th>
+<th>매도</th>
+<th style="text-align: right;">net</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>274090 덕산테코피아</td>
+<td>09:05 232주 @30,200</td>
+<td>09:16 232주 @31,600</td>
+<td style="text-align: right;"><strong>+309,453</strong></td>
+<td>익절</td>
+</tr>
+<tr>
+<td>080220 제주반도체</td>
+<td>09:05 27주 (DCA)</td>
+<td>09:26/30 17+17주</td>
+<td style="text-align: right;"><strong>+215,654</strong></td>
+<td>익절</td>
+</tr>
+<tr>
+<td>001430 세아베스틸지주</td>
+<td>09:05 68 + 09:11 34 (추매)</td>
+<td>09:22 102주</td>
+<td style="text-align: right;">-206,644</td>
+<td>손실</td>
+</tr>
+<tr>
+<td>005500 SK증권</td>
+<td>14:33 276 + 14:34 138 (추매)</td>
+<td>14:43 414주</td>
+<td style="text-align: right;">-331,151</td>
+<td>손실</td>
+</tr>
+<tr>
+<td>027360 아주IB투자</td>
+<td>09:16 358 + 09:17 179 (추매)</td>
+<td>09:32 537주</td>
+<td style="text-align: right;">-321,763</td>
+<td>손실</td>
+</tr>
+<tr>
+<td>036930 주성엔지</td>
+<td>09:05 36 + 09:06 18 (추매)</td>
+<td>09:16 54주</td>
+<td style="text-align: right;">-201,346</td>
+<td>손실</td>
+</tr>
+<tr>
+<td>356680 엑스게이트</td>
+<td>09:05 324 + 09:09 162 (추매?)</td>
+<td>09:16 486주</td>
+<td style="text-align: right;">-382,637</td>
+<td>손실</td>
+</tr>
+<tr>
+<td>069500 KODEX 200</td>
+<td>09:05 22 (DCA)</td>
+<td>10:03 66주</td>
+<td style="text-align: right;">-111,192</td>
+<td>손실</td>
+</tr>
+<tr>
+<td>122630 KODEX 레버리지</td>
+<td>(5/18 잔여)</td>
+<td>09:05 48주</td>
+<td style="text-align: right;">-451,000</td>
+<td>5/18 정리</td>
+</tr>
+<tr>
+<td><strong>5/19 신규 net</strong></td>
+<td></td>
+<td></td>
+<td style="text-align: right;"><strong>-1,029,626</strong></td>
+<td>5건 손실</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4">신규 발견 문제 4건</h2>
+<h3 id="p6-4">P6. 동일 종목 매 사이클 중복 매수 (4건 양수 가격 추매)</h3>
+<p>5/19 4건이 DCA(-2%) 아닌 <strong>양수 가격에서 1~6분 만에 추매</strong>:
+- 036930: 09:05:36 → 09:06:38 (62초, +1.5%)
+- 001430: 09:05:24 → 09:11:52 (6분, +1.8%)
+- 027360: 09:16:16 → 09:17:18 (62초, +1.3%)
+- 005500: 14:33:18 → 14:34:19 (61초, +0.6%)</p>
+<p><strong>원인 추정</strong>: <code>_scan_and_buy</code> 의 <code>session_bought.add</code> 누락 또는 <code>pos_store.create_from_order</code> 실패 → 다음 cycle picker 재선정 → 같은 종목 재매수.</p>
+<p><strong>fix</strong>: 이중 안전망
+- <code>recent_buys: dict[str, datetime]</code> process-local 추적 (30분 cooldown)
+- audit log fallback (recent_buys 비어있을 때 audit 직접 조회)</p>
+<h3 id="p7-6-1017">P7. 진입 직후 노이즈 매도 (6건 모두 10~17분 보유 후 매도)</h3>
+<p>5/19 6 손실 종목 모두 진입 후 10~17분 만에 breakeven_stop 발동 (peak +2.5% 도달 후 0% 이하 복귀).</p>
+<p><strong>fix</strong>:
+- <code>MIN_HOLD_MINUTES</code>: 10 → 15분 (5분 추가 유예)
+- <code>HARD_SL_PCT = -5.0</code> — cooldown 안에서도 극한 손실은 즉시 매도</p>
+<h3 id="p8-sidewaysbull-7">P8. 시장 국면 SIDEWAYS·BULL 분류로 매수 7건 폭주</h3>
+<p>기존 daemon BEARISH 만 <code>max_buy=1</code> 적용. 5/19 시장 약세지만 picker bias 로 BULL/SIDEWAYS 분류 → <code>max_buy=2</code> 적용 → 7건 매수 → 5건 손실.</p>
+<p><strong>fix</strong>:
+- SIDEWAYS도 <code>max_buy=1</code> (보수 강화)
+- BEARISH <code>best_pnl &gt; 50k</code> 임계 추가 (강한 신호만)
+- BULL 만 <code>max_buy=2</code> 유지</p>
+<h3 id="p9-p7">P9. P7 부작용 — 강세 종목 익절 회피</h3>
+<p>P7 단독 적용 시 274090 peak +8.1% 도달했어도 cooldown 15분 안이라 trail 차단 → 종일 표류 → 실제 +309k → 시뮬 -49k.</p>
+<p><strong>fix</strong>: cooldown 안 매도 정책 분기
+- 익절(trailing/take_profit/partial_tp) 통과
+- 방어(breakeven/stop_loss -4~-5%) 차단
+- hard SL(-5%) 우회 (P7 유지)</p>
+<h2 id="p6p7p8p9-519-audit">P6+P7+P8+P9 결합 시뮬 (5/19 audit 재시뮬)</h2>
+<table>
+<thead>
+<tr>
+<th>시나리오</th>
+<th style="text-align: right;">net</th>
+<th style="text-align: right;">회복</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5/19 실제</td>
+<td style="text-align: right;">-1,029,626</td>
+<td style="text-align: right;">—</td>
+</tr>
+<tr>
+<td>P6 단독 (T1만)</td>
+<td style="text-align: right;">-725,813 (추정)</td>
+<td style="text-align: right;">+304k</td>
+</tr>
+<tr>
+<td>P6+P7</td>
+<td style="text-align: right;">-463,185</td>
+<td style="text-align: right;">+566k</td>
+</tr>
+<tr>
+<td><strong>P6+P7+P9</strong></td>
+<td style="text-align: right;"><strong>+707,438</strong></td>
+<td style="text-align: right;"><strong>+1,737k</strong> ★</td>
+</tr>
+<tr>
+<td>P6+P7+P8+P9 (5종목 선별)</td>
+<td style="text-align: right;">+686,802</td>
+<td style="text-align: right;">+1,716k</td>
+</tr>
+</tbody>
+</table>
+<h3 id="p9-cooldown">종목별 P9 효과 (cooldown 안 익절 발동)</h3>
+<table>
+<thead>
+<tr>
+<th>종목</th>
+<th style="text-align: right;">실제</th>
+<th style="text-align: right;">P7 단독</th>
+<th style="text-align: right;">P6+P7+P9</th>
+<th>첫 익절</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>001430</td>
+<td style="text-align: right;">-206k</td>
+<td style="text-align: right;">+16k</td>
+<td style="text-align: right;"><strong>+121k</strong></td>
+<td>09:12 ptp1 +3.8% (+7분)</td>
+</tr>
+<tr>
+<td>027360</td>
+<td style="text-align: right;">-322k</td>
+<td style="text-align: right;">-157k</td>
+<td style="text-align: right;"><strong>+162k</strong></td>
+<td>09:22 ptp1 +3.9% (+6분)</td>
+</tr>
+<tr>
+<td>036930</td>
+<td style="text-align: right;">-201k</td>
+<td style="text-align: right;">-122k</td>
+<td style="text-align: right;"><strong>+192k</strong></td>
+<td>09:08 ptp1 +4.0% (+3분)</td>
+</tr>
+<tr>
+<td><strong>274090</strong></td>
+<td style="text-align: right;">+309k</td>
+<td style="text-align: right;">-49k</td>
+<td style="text-align: right;"><strong>+367k</strong></td>
+<td><strong>09:10 TP +5.5% (+5분)</strong> ★</td>
+</tr>
+<tr>
+<td>080220</td>
+<td style="text-align: right;">+215k</td>
+<td style="text-align: right;">+105k</td>
+<td style="text-align: right;">+119k</td>
+<td>09:11 ptp1 + 09:12 TP +6.0%</td>
+</tr>
+<tr>
+<td>005500</td>
+<td style="text-align: right;">-331k</td>
+<td style="text-align: right;">+68k</td>
+<td style="text-align: right;">+68k</td>
+<td>종일 보유 (peak 2.3%)</td>
+</tr>
+<tr>
+<td>356680</td>
+<td style="text-align: right;">-382k</td>
+<td style="text-align: right;">-293k</td>
+<td style="text-align: right;">-293k</td>
+<td>09:16 hard_sl @-5.1%</td>
+</tr>
+<tr>
+<td>069500</td>
+<td style="text-align: right;">-111k</td>
+<td style="text-align: right;">-31k</td>
+<td style="text-align: right;">-31k</td>
+<td>종일 보유</td>
+</tr>
+</tbody>
+</table>
+<p>→ <strong>6/8 종목 익절 또는 본전 전환</strong>.</p>
+<h2 id="fix-520-daemon">누적 fix 정책 도식 (5/20 daemon)</h2>
+<pre><code>[매수]
+  picker top 5
+  → filter (already_held ∪ active ∪ today_sold ∪ session_bought
+            ∪ cooldown_buys (P6 30분) ∪ audit_buys (P6 fallback))
+  → strategy 시뮬 → best_pnl &gt; 0
+  → P8 regime: BULL=2 / SIDEWAYS=1 / BEARISH=1+pnl&gt;50k
+  → P4 고점 진입 차단
+  → recent_buys[symbol] 등록
+
+[매도]
+  cooldown 15분 안 (P7):
+    ✅ trail/tp/ptp 통과 (P9)
+    ✅ STOP_LOSS rate ≤ -5% 통과 (P7 hard SL)
+    ❌ breakeven/SL(-4~-5%) 차단
+  cooldown 후: ExitPolicy 정상 평가
+  P1 partial_tp_done 보존 (분할매도 폭주 방지)
+  P2 trough_pnl_rate 기반 DCA
+  P3 매수만 한도 카운트 (매도 항상 허용)
+</code></pre>
+<h2 id="commits">변경 파일 (commits)</h2>
+<table>
+<thead>
+<tr>
+<th>commit</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>476c1c3</code></td>
+<td>P6 동일 종목 30분 cooldown (recent_buys + audit fallback)</td>
+</tr>
+<tr>
+<td><code>72fa166</code></td>
+<td>P7 매도 cooldown 15분 + hard SL(-5%) 우회</td>
+</tr>
+<tr>
+<td><code>7a49ad9</code></td>
+<td>P8 SIDEWAYS max_buy=1 + BEARISH best_pnl&gt;50k</td>
+</tr>
+<tr>
+<td><code>baca0e2</code></td>
+<td>P9 cooldown 안 익절 신호 통과</td>
+</tr>
+</tbody>
+</table>
+<p>모두 <code>scripts/intraday_buy_daemon.py</code> 단일 파일 수정.</p>
+<h2 id="_1">신규 도구</h2>
+<ul>
+<li><code>scripts/_replay_0519_with_p678.py</code> — 5/19 audit 기반 P6+P7+P8+P9 적용 시뮬</li>
+</ul>
+<h2 id="_2">후속 후보</h2>
+<ul>
+<li><strong>P10. 강세 종목 시초가 진입 차단</strong> — 5/19 09:05 동시 매수 5건 중 4건 손실. 09:05~09:10 변동성 측정 후 진입</li>
+<li><strong>P11. 종목별 일중 추세 BEARISH 차단</strong> — picker bias 우회. 종목 자체의 10봉 추세가 약세면 매수 차단</li>
+<li><strong>P5-a 활성화 재검토</strong> — 5/19·5/20 데이터로 sl_time_stages 효과 추가 검증</li>
+</ul>
+<h2 id="_3">참조</h2>
+<ul>
+<li>이전 5/18 보고: [[2026-05-19-0518-live-trade-fixes]]</li>
+<li>trail default ON 보고: [[2026-05-17-trail-default-on-sim]]</li>
+</ul>
+</body>
+</html>
