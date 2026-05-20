@@ -103,7 +103,7 @@ class LiveOrderGate:
         # 2026-05-19 P3 fix: 기존 _count_today_orders 가 매수+매도 합계라
         # 분할매도 폭주 시(5/18 100790 9번 등) 매수가 조기 차단됨.
         # 매수만 카운트로 의미 일치 (5/18 매수 15 + 매도 35 = 50 → 매수만 15 → 통과).
-        if side == OrderSide.BUY:
+        if side == OrderSide.BUY and self._policy.daily_max_orders > 0:
             today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             count = self._count_today_buys(today)
             if count >= self._policy.daily_max_orders:
