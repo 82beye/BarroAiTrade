@@ -93,6 +93,37 @@ class FZoneParams:
     watermelon_lookback: int = 60
     watermelon_bonus: float = 1.0
 
+    @classmethod
+    def for_intraday(cls) -> "FZoneParams":
+        """1분봉 F존 — 2026-05-21 신규.
+
+        일봉 → 1분봉 스케일 (5봉=5분이 너무 짧아 30분 사용):
+        - impulse_lookback : 5 → 30봉 (30분)
+        - pullback_max_candles : 10 → 60봉 (1시간)
+        - ma_periods : [5,20,60] → [20,60,240] (20분·1시간·4시간)
+        - min_candles : 60 → 240
+        - impulse_min_gain_pct : 3% → 1.5% (1분봉 작은 단위)
+        - pullback_min/max : -5%/-0.5% → -3%/-0.3%
+        - bounce_min_gain_pct : 0.5% → 0.3%
+        - sf_impulse_min_gain_pct : 5% → 2.5%
+        """
+        return cls(
+            impulse_min_gain_pct=0.015,
+            impulse_volume_ratio=2.0,
+            impulse_lookback=30,
+            pullback_min_pct=-0.03,
+            pullback_max_pct=-0.003,
+            pullback_volume_ratio=0.7,
+            pullback_max_candles=60,
+            ma_periods=[20, 60, 240],
+            ma_support_tolerance=0.005,
+            bounce_min_gain_pct=0.003,
+            bounce_volume_ratio=1.2,
+            sf_impulse_min_gain_pct=0.025,
+            sf_volume_ratio=3.0,
+            min_candles=240,
+        )
+
 
 # ── 분석 결과 ─────────────────────────────────────────────────────────────────
 
