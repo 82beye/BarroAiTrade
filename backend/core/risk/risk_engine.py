@@ -56,7 +56,7 @@ class RiskEngine:
                     return False, reason
 
             # 총 익스포저 체크
-            invested = sum(p.quantity * p.current_price for p in positions.values())
+            invested = sum(self._pos_value(p) for p in positions.values())
             new_exposure_pct = (invested + order_value) / self._total_value if self._total_value > 0 else 1.0
             if new_exposure_pct > self.limits.max_total_exposure_pct:
                 reason = f"총 익스포저 한도 초과: {new_exposure_pct:.1%} > {self.limits.max_total_exposure_pct:.1%}"
@@ -156,8 +156,15 @@ class RiskEngine:
 
     # ── 상태 조회 ──────────────────────────────────────────────────────────────
 
-    def get_status(self, positions: Dict[str, Position]) -> RiskStatus:
-        invested = sum(p.quantity * p.current_price for p in positions.values()) if positions else 0
+    @staticmethod
+    def _pos_value(p) -> float:
+        """Position 객체 또는 plain dict 양쪽에서 quantity * current_price 계산."""
+        if hasattr(p, "quantity"):
+            return float(p.quantity) * float(p.current_price)
+        return float(p.get("quantity", 0)) * float(p.get("current_price", 0))
+
+    def get_status(self, positions: Dict[str, Any]) -> RiskStatus:
+        invested = sum(self._pos_value(p) for p in positions.values()) if positions else 0
         exposure_pct = invested / self._total_value if self._total_value > 0 else 0.0
         daily_limit_breached = self._daily_pnl_pct <= self.limits.daily_loss_limit_pct
         return RiskStatus(
