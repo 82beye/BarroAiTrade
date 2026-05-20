@@ -23,8 +23,14 @@ interface ScanResult {
 }
 
 const SIGNAL_LABELS: Record<string, { label: string; color: string }> = {
-  blue_line: { label: '블루라인 (돌파)', color: 'bg-blue-500' },
-  f_zone: { label: 'F존 (모멘텀)', color: 'bg-purple-500' },
+  blue_line: { label: '블루라인', color: 'bg-blue-500' },
+  f_zone: { label: 'F존', color: 'bg-purple-500' },
+  sf_zone: { label: 'SF존', color: 'bg-violet-600' },
+  swing_38: { label: '38스윙', color: 'bg-teal-600' },
+  gold_zone: { label: '골드존', color: 'bg-yellow-600' },
+  watermelon: { label: '수박', color: 'bg-green-600' },
+  crypto_breakout: { label: '돌파', color: 'bg-orange-500' },
+  blue_dotted_line: { label: '파란점선', color: 'bg-sky-600' },
   buy: { label: '매수', color: 'bg-green-600' },
   sell: { label: '매도', color: 'bg-red-600' },
 };
