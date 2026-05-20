@@ -28,6 +28,7 @@ class SellSignal(str, Enum):
     BREAKEVEN_STOP = "breakeven_stop"
     PARTIAL_TP = "partial_tp"
     TIME_TIGHTENED_SL = "time_tightened_sl"
+    SHORT_TERM_HIGH = "short_term_high"   # 2026-05-21 — 단기 고점 캔들 패턴 매도
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,9 @@ class PositionContext:
     partial_tp_done: bool = False
     entry_time: Optional[str] = None
     strategy: str = ""
+    # 2026-05-21 — 1분봉 시퀀스 (단기 고점 매도 평가용, optional).
+    # daemon 이 fetch_minute_history 결과 전달. None 이면 SHORT_TERM_HIGH 평가 skip.
+    minute_candles: Optional[list] = None
 
 
 def _hold_days(entry_time: Optional[str]) -> int:
@@ -200,6 +204,28 @@ def evaluate_holding(
 
     peak = Decimal(str(ctx.peak_pnl_rate))
     days = _hold_days(ctx.entry_time)
+
+    # ── 0. 단기 고점 캔들 패턴 매도 (P10, 2026-05-21) ──────────────
+    # 1분봉 시퀀스가 있고 일정 익절 구간(≥ partial_tp_pct)에 진입 후 단기 고점 형성 시
+    # 차트 패턴 (도지·위꼬리·연속 음봉) 인식 → 매도. 운영 1분봉 fetch 필수.
+    # 우선순위: trailing 보다 먼저 — 단기 고점 인식이 더 정밀.
+    if (
+        ctx.minute_candles
+        and len(ctx.minute_candles) >= 2
+        and rate >= policy.partial_tp_pct  # 최소 익절 구간 도달 시만 평가
+    ):
+        from backend.core.strategy.short_term_high_exit import (
+            detect_short_term_high_exit,
+        )
+        ste = detect_short_term_high_exit(ctx.minute_candles)
+        if ste.signal:
+            return HoldingDecision(
+                symbol=h.symbol, name=h.name, qty=qty, sell_qty=qty,
+                avg_buy_price=h.avg_buy_price, cur_price=h.cur_price,
+                pnl=h.pnl, pnl_rate=rate,
+                signal=SellSignal.SHORT_TERM_HIGH,
+                reason=f"단기 고점 캔들 ({ste.pattern}): {ste.reason}",
+            )
 
     # ── 1. 트레일링 스톱 (고점 추적 매도) ──────────────────────────
     # peak이 trailing_start 이상 도달했었고,

@@ -123,6 +123,11 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     active_positions = pos_store.load_all()
     contexts: dict[str, PositionContext] = {}
 
+    # 2026-05-21 — 단기 고점 매도 평가용 1분봉 fetch (각 보유 종목).
+    # 익절 구간(rate ≥ partial_tp_pct) 도달 종목만 fetch (API 부담 절감).
+    fetcher_for_exit = KiwoomNativeCandleFetcher(oauth=oauth)
+    minute_cache: dict[str, list] = {}
+
     for h in balance.holdings:
         pos = active_positions.get(h.symbol)
         if pos:
@@ -140,11 +145,26 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
                 dirty = True
             if dirty:
                 pos_store.upsert(pos)
+
+            # SHORT_TERM_HIGH 평가용 1분봉 — 익절 구간(+3%) 도달 시만 fetch
+            minute_candles = None
+            if cur_rate >= 3.0:
+                try:
+                    bars = await fetcher_for_exit.fetch_minute(symbol=h.symbol, tic_scope="1")
+                    today_str = _now_kst().strftime("%Y-%m-%d")
+                    minute_candles = [
+                        b for b in bars if b.timestamp.strftime("%Y-%m-%d") == today_str
+                    ]
+                    minute_cache[h.symbol] = minute_candles
+                except Exception:
+                    pass
+
             contexts[h.symbol] = PositionContext(
                 peak_pnl_rate=pos.peak_pnl_rate,
                 partial_tp_done=pos.partial_tp_done,
                 entry_time=pos.entry_time,
                 strategy=pos.strategy,
+                minute_candles=minute_candles,
             )
 
     decisions = evaluate_all(balance.holdings, policy, contexts)
