@@ -82,7 +82,7 @@ class TestGoldZoneStrategyV2:
         # None 또는 EntrySignal 모두 정상 (BB/Fib/RSI 동시 충족 확률성)
         assert result is None or result.strategy_id == "gold_zone_v1"
         if result is not None:
-            assert result.signal_type == "blue_line"  # 5 enum 제약
+            assert result.signal_type == "gold_zone"
             assert result.metadata.get("gold_zone_subtype") == "gold_zone"
 
 

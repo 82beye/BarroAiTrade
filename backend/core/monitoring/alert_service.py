@@ -102,6 +102,9 @@ class AlertService:
             "f_zone": "F존",
             "sf_zone": "SF존",
             "crypto_breakout": "돌파",
+            "swing_38": "38스윙",
+            "gold_zone": "골드존",
+            "blue_dotted_line": "파란점선(스크리너)",
         }
         if not signals:
             await self._send(AlertLevel.INFO, "당일 분석 종목", "스캔 완료 — 신호 없음")

@@ -80,7 +80,7 @@ class GoldZoneStrategy(Strategy):
             symbol=ctx.symbol,
             name=ctx.name or ctx.symbol,
             price=float(df["close"].iloc[-1]),
-            signal_type="blue_line",  # 5 enum 제약 — gold_zone subtype 은 metadata
+            signal_type="gold_zone",
             score=round(float(score), 2),
             reason=(
                 f"골드존: BB하단({bb_score:.2f}) + Fib({fib_score:.2f}) + RSI회복({rsi_score:.2f})"

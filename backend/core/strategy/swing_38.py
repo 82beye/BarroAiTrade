@@ -86,7 +86,7 @@ class Swing38Strategy(Strategy):
             symbol=ctx.symbol,
             name=ctx.name or ctx.symbol,
             price=float(df["close"].iloc[-1]),
-            signal_type="blue_line",  # 5 enum 제약
+            signal_type="swing_38",
             score=round(float(score), 2),
             reason=(
                 f"38스윙: 임펄스 {impulse['gain_pct']*100:.1f}% + "

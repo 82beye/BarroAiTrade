@@ -100,7 +100,7 @@ class TestSwing38StrategyV2:
         result = s._analyze_v2(ctx)
         assert result is None or result.strategy_id == "swing_38_v1"
         if result is not None:
-            assert result.signal_type == "blue_line"
+            assert result.signal_type == "swing_38"
             assert result.metadata.get("swing_38_subtype") == "swing_38"
 
 
