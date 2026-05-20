@@ -131,7 +131,7 @@ def _build_daily_report(report_date: date) -> dict:
             pass
 
     # reports 마크다운에서 PnL 보강 시도
-    report_path = Path(f"reports/{report_date.isoformat()}.md")
+    report_path = _DATA_DIR / "reports" / f"{report_date.isoformat()}.md"
     if report_path.exists():
         try:
             _enrich_from_report(trades, report_path)
