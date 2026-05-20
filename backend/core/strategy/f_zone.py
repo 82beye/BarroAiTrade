@@ -94,6 +94,40 @@ class FZoneParams:
     watermelon_bonus: float = 1.0
 
     @classmethod
+    def for_5min(cls) -> "FZoneParams":
+        """5분봉 F존 — 2026-05-21 신규.
+
+        1분봉 노이즈 회피 + 일봉 너무 느린 중간 timeframe. 단기 모멘텀 종목
+        (시초~10:30) 패턴 인식에 적합.
+
+        일봉 → 5분봉 스케일:
+        - impulse_lookback     : 5 → 12봉 (1시간)
+        - pullback_max_candles : 10 → 12봉 (1시간)
+        - ma_periods           : [5,20,60] → [12, 36, 72] (1·3·6시간)
+        - impulse_min_gain_pct : 3% → 2.0%
+        - pullback_min/max     : -5%/-0.5% → -4%/-0.4%
+        - bounce_min_gain_pct  : 0.5% → 0.5% (유지)
+        - sf_impulse_min_gain_pct: 5% → 3.5%
+        - min_candles          : 60 → 72 (6시간)
+        """
+        return cls(
+            impulse_min_gain_pct=0.020,
+            impulse_volume_ratio=2.0,
+            impulse_lookback=12,
+            pullback_min_pct=-0.04,
+            pullback_max_pct=-0.004,
+            pullback_volume_ratio=0.75,
+            pullback_max_candles=12,
+            ma_periods=[12, 36, 72],
+            ma_support_tolerance=0.008,
+            bounce_min_gain_pct=0.005,
+            bounce_volume_ratio=1.15,
+            sf_impulse_min_gain_pct=0.035,
+            sf_volume_ratio=3.0,
+            min_candles=72,
+        )
+
+    @classmethod
     def for_intraday(cls) -> "FZoneParams":
         """1분봉 F존 — 2026-05-21 v2 튜닝.
 

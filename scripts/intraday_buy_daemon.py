@@ -491,9 +491,25 @@ async def _scan_and_buy(
                 today_str = datetime.now(timezone.utc).astimezone(KST).strftime("%Y-%m-%d")
                 day_bars = [b for b in minute_bars if b.timestamp.strftime("%Y-%m-%d") == today_str]
                 if day_bars:
+                    # P10 (2026-05-21) — 시초가 폭등 차단.
+                    # 142280 5/20 시초가 +28% 같은 케이스 진입 차단 (눌림목 패턴
+                    # 안 맞고 매물대 형성으로 손실 위험).
+                    first_open = day_bars[0].open
+                    cur = float(c.cur_price)
+                    if first_open > 0:
+                        intraday_change_pct = (cur - first_open) / first_open * 100
+                        MAX_INTRADAY_CHANGE_PCT = 15.0
+                        if intraday_change_pct >= MAX_INTRADAY_CHANGE_PCT:
+                            ts_p = _now_kst().strftime("%H:%M:%S")
+                            print(
+                                f"  [{ts_p}][SKIP-P10] {c.symbol} {c.name:<14} 시초가 "
+                                f"{first_open:,.0f} → cur {cur:,.0f} "
+                                f"(+{intraday_change_pct:.1f}% ≥ {MAX_INTRADAY_CHANGE_PCT}%) — 시초가 폭등 차단"
+                            )
+                            continue
+
                     day_high = max(b.high for b in day_bars)
                     last_bar = day_bars[-1]
-                    cur = float(c.cur_price)
                     proximity_pct = ((day_high - cur) / day_high * 100) if day_high > 0 else 0.0
                     MIN_HIGH_PROXIMITY_PCT = 1.5
                     # momentum 인정 조건 (둘 중 하나):
