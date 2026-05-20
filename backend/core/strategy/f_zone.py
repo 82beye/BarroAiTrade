@@ -95,33 +95,31 @@ class FZoneParams:
 
     @classmethod
     def for_intraday(cls) -> "FZoneParams":
-        """1분봉 F존 — 2026-05-21 신규.
+        """1분봉 F존 — 2026-05-21 v2 튜닝.
 
-        일봉 → 1분봉 스케일 (5봉=5분이 너무 짧아 30분 사용):
-        - impulse_lookback : 5 → 30봉 (30분)
-        - pullback_max_candles : 10 → 60봉 (1시간)
-        - ma_periods : [5,20,60] → [20,60,240] (20분·1시간·4시간)
-        - min_candles : 60 → 240
-        - impulse_min_gain_pct : 3% → 1.5% (1분봉 작은 단위)
-        - pullback_min/max : -5%/-0.5% → -3%/-0.3%
-        - bounce_min_gain_pct : 0.5% → 0.3%
-        - sf_impulse_min_gain_pct : 5% → 2.5%
+        v1 (1.5% impulse) → 142280 5/20 신호 미발생 → 임계 완화:
+        - impulse_min_gain_pct : 1.5% → 1.0%
+        - impulse_lookback     : 30 → 15봉
+        - pullback_max_candles : 60 → 30봉
+        - pullback_volume_ratio: 0.7 → 0.85 (1분봉 거래량 변동 큼)
+        - bounce_volume_ratio  : 1.2 → 1.1
+        - min_candles          : 240 → 120 (5분봉 240봉=20시간 = 부담)
         """
         return cls(
-            impulse_min_gain_pct=0.015,
+            impulse_min_gain_pct=0.010,
             impulse_volume_ratio=2.0,
-            impulse_lookback=30,
+            impulse_lookback=15,
             pullback_min_pct=-0.03,
             pullback_max_pct=-0.003,
-            pullback_volume_ratio=0.7,
-            pullback_max_candles=60,
-            ma_periods=[20, 60, 240],
+            pullback_volume_ratio=0.85,
+            pullback_max_candles=30,
+            ma_periods=[20, 60, 120],
             ma_support_tolerance=0.005,
             bounce_min_gain_pct=0.003,
-            bounce_volume_ratio=1.2,
-            sf_impulse_min_gain_pct=0.025,
+            bounce_volume_ratio=1.1,
+            sf_impulse_min_gain_pct=0.020,
             sf_volume_ratio=3.0,
-            min_candles=240,
+            min_candles=120,
         )
 
 
