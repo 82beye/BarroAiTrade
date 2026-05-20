@@ -47,7 +47,7 @@ class PenTestSuite:
         # repo.find_by_user_id(malicious_id) 호출 — 정상 None 반환 시 차단
         import asyncio
         try:
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 repo.find_by_user_id(malicious_id)
             )
             # 정상: None 또는 단일 user 반환 (다른 user 데이터 노출 X)

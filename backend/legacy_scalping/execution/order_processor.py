@@ -211,7 +211,7 @@ class OrderProcessor:
             logger.debug(f"중복 매수 차단: [{signal.code}] (보유/대기 중)")
             return False
 
-        future = asyncio.get_event_loop().create_future()
+        future = asyncio.get_running_loop().create_future()
         await self._queue.put(OrderRequest(
             action=OrderAction.BUY,
             signal=signal,
@@ -228,7 +228,7 @@ class OrderProcessor:
             logger.warning(f"추가매수 거부: [{signal.code}] 보유 포지션 없음")
             return False
 
-        future = asyncio.get_event_loop().create_future()
+        future = asyncio.get_running_loop().create_future()
         await self._queue.put(OrderRequest(
             action=OrderAction.ADD_BUY,
             signal=signal,
@@ -238,7 +238,7 @@ class OrderProcessor:
 
     async def submit_sell(self, signal: ExitSignal) -> bool:
         """매도 신호 제출. 결과를 기다려서 반환한다."""
-        future = asyncio.get_event_loop().create_future()
+        future = asyncio.get_running_loop().create_future()
         await self._queue.put(OrderRequest(
             action=OrderAction.SELL,
             signal=signal,
@@ -248,7 +248,7 @@ class OrderProcessor:
 
     async def submit_force_liquidate(self) -> int:
         """전 포지션 강제 청산 요청. 청산된 종목 수를 반환."""
-        future = asyncio.get_event_loop().create_future()
+        future = asyncio.get_running_loop().create_future()
         await self._queue.put(OrderRequest(
             action=OrderAction.FORCE_LIQUIDATE,
             result_future=future,
