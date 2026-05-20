@@ -14,7 +14,7 @@ interface RestTicker {
 }
 
 export function OrderForm() {
-  const { addOrder, tickers } = useTradingStore();
+  const { addOrder, tickers, triggerOrderRefresh } = useTradingStore();
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [restTicker, setRestTicker] = useState<RestTicker | null>(null);
@@ -81,6 +81,7 @@ export function OrderForm() {
         timestamp: order.timestamp ?? new Date().toISOString(),
       });
 
+      triggerOrderRefresh();
       setStatus({ type: 'success', message: `${formData.symbol} 주문이 실행되었습니다.` });
       setTimeout(() => setStatus(null), 4000);
     } catch (error) {

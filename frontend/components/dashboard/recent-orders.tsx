@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useTradingStore } from '@/lib/store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
@@ -31,6 +32,7 @@ const STATUS_KO: Record<string, string> = {
 
 export function RecentOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const orderRefreshSignal = useTradingStore((state) => state.orderRefreshSignal);
 
   useEffect(() => {
     async function fetchOrders() {
@@ -47,7 +49,7 @@ export function RecentOrders() {
     fetchOrders();
     const interval = setInterval(fetchOrders, 30_000);
     return () => clearInterval(interval);
-  }, []);
+  }, [orderRefreshSignal]);
 
   return (
     <Card className="border-slate-800 bg-slate-900">

@@ -74,6 +74,10 @@ interface TradingStore {
   updateOrder: (orderId: string, update: Partial<Order>) => void;
   getOrders: (symbol?: string) => Order[];
 
+  // 주문 즉시 갱신 신호 (order-form 성공 후 increment → polling 컴포넌트가 즉시 fetch)
+  orderRefreshSignal: number;
+  triggerOrderRefresh: () => void;
+
   // 포지션
   positions: Position[];
   setPositions: (positions: Position[]) => void;
@@ -126,6 +130,10 @@ export const useTradingStore = create<TradingStore>((set, get) => ({
     })),
   getOrders: (symbol) =>
     symbol ? get().orders.filter((o) => o.symbol === symbol) : get().orders,
+
+  // 주문 즉시 갱신 신호
+  orderRefreshSignal: 0,
+  triggerOrderRefresh: () => set((state) => ({ orderRefreshSignal: state.orderRefreshSignal + 1 })),
 
   // 포지션
   positions: [],
