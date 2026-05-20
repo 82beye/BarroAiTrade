@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>2026-05-21-0520-live-trade-verification</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<hr />
+<p>tags: [report, operations, daemon, verification, 2026-05-20, 2026-05-21]
+date: 2026-05-21
+related:
+  - "[[2026-05-20-0519-live-trade-p6-p9-fixes]]"
+  - "[[2026-05-19-0518-live-trade-fixes]]"</p>
+<hr />
+<h1 id="520-p1p3-p6p9-906k">5/20 실거래 검증 — P1·P3 정상 작동 + P6~P9 시뮬 효과 +906k</h1>
+<h2 id="context">Context</h2>
+<ul>
+<li><strong>분석 대상</strong>: 2026-05-20 실거래 audit (234행 / 5/20 34건) + barro.log (1,286줄)</li>
+<li><strong>선행 fix</strong>: P1~P5-a (5/19 보고), P6~P9 (5/20 오전 push)</li>
+<li><strong>목표</strong>: 5/20 운영일 P1·P3 검증 + P6~P9 시뮬 비교 + 5/21 적용 준비</li>
+<li><strong>결과</strong>: P1·P3 정상 작동 확인, P6~P9 commit timing 으로 5/20 미적용, 시뮬 +906k 효과 입증</li>
+</ul>
+<h2 id="520-3">5/20 운영 통계 — 3일 누적 비교</h2>
+<table>
+<thead>
+<tr>
+<th>지표</th>
+<th style="text-align: right;">5/18</th>
+<th style="text-align: right;">5/19</th>
+<th style="text-align: right;"><strong>5/20</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>매수 ORDERED</td>
+<td style="text-align: right;">39</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">20</td>
+</tr>
+<tr>
+<td>매도 ORDERED</td>
+<td style="text-align: right;">21</td>
+<td style="text-align: right;">13</td>
+<td style="text-align: right;">13</td>
+</tr>
+<tr>
+<td><strong>BLOCKED</strong></td>
+<td style="text-align: right;">78</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;"><strong>0</strong> ✅</td>
+</tr>
+<tr>
+<td><strong>분할매도 폭주</strong></td>
+<td style="text-align: right;">19건</td>
+<td style="text-align: right;">0건</td>
+<td style="text-align: right;"><strong>0건</strong> ✅</td>
+</tr>
+<tr>
+<td><strong>미청산</strong></td>
+<td style="text-align: right;">3건</td>
+<td style="text-align: right;">3건(5/18 잔여)</td>
+<td style="text-align: right;"><strong>0건</strong> ✅</td>
+</tr>
+</tbody>
+</table>
+<h2 id="p1p3-fix">P1·P3 fix 운영 검증 — 안정성 ★★★</h2>
+<table>
+<thead>
+<tr>
+<th>fix</th>
+<th>5/20 결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>P1 partial_tp_done 보존</strong></td>
+<td>11 종목 모두 매도 1~2회만 (분할매도 폭주 X) ✅</td>
+</tr>
+<tr>
+<td><strong>P3 매수 한도 매수만 카운트</strong></td>
+<td>50건 미달 (매수 20건), BLOCKED 0건 ✅</td>
+</tr>
+<tr>
+<td><strong>active_positions = {}</strong></td>
+<td>미청산 0건 — 모두 청산 ✅</td>
+</tr>
+</tbody>
+</table>
+<h2 id="p6p9-commit-timing">P6~P9 미적용 — commit timing 이슈</h2>
+<table>
+<thead>
+<tr>
+<th>commit</th>
+<th>push 시각</th>
+<th>5/20 daemon 적용?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>476c1c3</code> P6 (30분 cooldown)</td>
+<td>5/20 오전</td>
+<td>❌ daemon 09:05 시작 후 push</td>
+</tr>
+<tr>
+<td><code>72fa166</code> P7 (15분 매도 cooldown)</td>
+<td>5/20 오전</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><code>7a49ad9</code> P8 (SIDEWAYS=1)</td>
+<td>5/20 오전</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><code>baca0e2</code> P9 (cooldown 안 익절)</td>
+<td>5/20 오전</td>
+<td>❌</td>
+</tr>
+</tbody>
+</table>
+<p>→ 5/20 daemon 은 P5-a 코드(5/19 22:51 마지막)로 가동 → 추매 패턴 여전.</p>
+<h2 id="520-p6">5/20 추매 패턴 (P6 적용 시 차단 가능)</h2>
+<table>
+<thead>
+<tr>
+<th>종목</th>
+<th>1차 → 2차</th>
+<th style="text-align: right;">간격</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>077970</td>
+<td>09:05:29 → 09:06:31</td>
+<td style="text-align: right;">62초</td>
+</tr>
+<tr>
+<td>010170</td>
+<td>09:42:09 → 09:43:10</td>
+<td style="text-align: right;">61초</td>
+</tr>
+<tr>
+<td>005950</td>
+<td>09:35:49 → 09:37:53</td>
+<td style="text-align: right;">2분</td>
+</tr>
+<tr>
+<td>046890</td>
+<td>09:07:54 → 09:12:05</td>
+<td style="text-align: right;">4분</td>
+</tr>
+<tr>
+<td>253840</td>
+<td>10:10:05 → 10:14:11</td>
+<td style="text-align: right;">4분</td>
+</tr>
+<tr>
+<td>069540</td>
+<td>10:55 → 11:07 → 11:10</td>
+<td style="text-align: right;">12분/3분</td>
+</tr>
+<tr>
+<td>336570</td>
+<td>09:06:44 → 09:21:53</td>
+<td style="text-align: right;">15분</td>
+</tr>
+<tr>
+<td>069540 (3번 매수)</td>
+<td>T1·T2·T3</td>
+<td style="text-align: right;">30분 안</td>
+</tr>
+</tbody>
+</table>
+<p>→ 8 종목에서 추매 발생 (P6 cooldown 적용 시 모두 차단).</p>
+<h2 id="520-vs-p6p7p9">시뮬 결과 — 5/20 실제 vs P6+P7+P9 가정</h2>
+<table>
+<thead>
+<tr>
+<th>종목</th>
+<th style="text-align: right;">실제 net</th>
+<th style="text-align: right;">P6+P7+P9 net</th>
+<th style="text-align: right;">차이</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>077970</td>
+<td style="text-align: right;">-206k</td>
+<td style="text-align: right;">-210k</td>
+<td style="text-align: right;">-4k</td>
+</tr>
+<tr>
+<td>336570</td>
+<td style="text-align: right;">-271k</td>
+<td style="text-align: right;">-203k</td>
+<td style="text-align: right;">+68k</td>
+</tr>
+<tr>
+<td>046890</td>
+<td style="text-align: right;">-121k</td>
+<td style="text-align: right;">-201k</td>
+<td style="text-align: right;">-80k</td>
+</tr>
+<tr>
+<td>142280</td>
+<td style="text-align: right;">+174k</td>
+<td style="text-align: right;"><strong>+302k (tp)</strong></td>
+<td style="text-align: right;">+128k</td>
+</tr>
+<tr>
+<td>036930</td>
+<td style="text-align: right;">+307k</td>
+<td style="text-align: right;">+230k</td>
+<td style="text-align: right;">-77k</td>
+</tr>
+<tr>
+<td>005930</td>
+<td style="text-align: right;">-197k</td>
+<td style="text-align: right;">-193k</td>
+<td style="text-align: right;">+4k</td>
+</tr>
+<tr>
+<td>005950</td>
+<td style="text-align: right;">-293k</td>
+<td style="text-align: right;">-252k</td>
+<td style="text-align: right;">+41k</td>
+</tr>
+<tr>
+<td><strong>010170</strong></td>
+<td style="text-align: right;"><strong>-279k</strong></td>
+<td style="text-align: right;"><strong>+212k (ptp1+tp)</strong></td>
+<td style="text-align: right;"><strong>+491k ★</strong></td>
+</tr>
+<tr>
+<td>253840</td>
+<td style="text-align: right;">-182k</td>
+<td style="text-align: right;">-195k</td>
+<td style="text-align: right;">-13k</td>
+</tr>
+<tr>
+<td><strong>069540</strong></td>
+<td style="text-align: right;"><strong>-333k</strong></td>
+<td style="text-align: right;"><strong>+15k (trail)</strong></td>
+<td style="text-align: right;"><strong>+348k ★</strong></td>
+</tr>
+<tr>
+<td><strong>합계 (10종목)</strong></td>
+<td style="text-align: right;"><strong>-1,401k</strong></td>
+<td style="text-align: right;"><strong>-495k</strong></td>
+<td style="text-align: right;"><strong>+906k</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="_1">핵심 케이스</h3>
+<p><strong>010170 (T1+추매 → 시뮬 T1만 + 익절 통과)</strong>: -279k → <strong>+212k (+491k)</strong>
+- 실제: 09:42 매수 + 09:43 추매(P6 대상) → 09:51 -3.9% 매도
+- 시뮬: T1 197주만 → 10:30 ptp1 +3.9% 매도 50% + 10:32 TP +5.8% 매도 50%</p>
+<p><strong>069540 (3번 추매 → 시뮬 T1만 + trail)</strong>: -333k → <strong>+15k (+348k)</strong>
+- 실제: 10:55 + 11:07 + 11:10 (1637주) → 11:15 -3.5% 매도
+- 시뮬: T1 818주 → 11:05 trail +0.5% 매도</p>
+<p><strong>142280 (분할매도 → 시뮬 전량 TP)</strong>: +174k → <strong>+302k (+128k)</strong>
+- 실제: 매도 2번 분할
+- 시뮬: 09:20 TP +6.8% 전량</p>
+<h2 id="3-fix">3일 누적 fix 효과 추정</h2>
+<table>
+<thead>
+<tr>
+<th>영업일</th>
+<th style="text-align: right;">실제 net</th>
+<th style="text-align: right;">fix 적용 시뮬</th>
+<th style="text-align: right;">절감</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5/18</td>
+<td style="text-align: right;">-1,547k (P1~P5-a 미적용)</td>
+<td style="text-align: right;">(P1~P5 가정) -300k</td>
+<td style="text-align: right;">+1,247k</td>
+</tr>
+<tr>
+<td>5/19</td>
+<td style="text-align: right;">-1,029k (P6~P9 미적용)</td>
+<td style="text-align: right;">P6+P7+P9: <strong>+707k</strong></td>
+<td style="text-align: right;">+1,737k</td>
+</tr>
+<tr>
+<td><strong>5/20</strong></td>
+<td style="text-align: right;"><strong>-1,401k</strong> (P6~P9 미적용)</td>
+<td style="text-align: right;"><strong>P6+P7+P9: -495k</strong></td>
+<td style="text-align: right;"><strong>+906k</strong></td>
+</tr>
+<tr>
+<td><strong>3일 합</strong></td>
+<td style="text-align: right;"><strong>-3,977k</strong></td>
+<td style="text-align: right;"><strong>-88k</strong></td>
+<td style="text-align: right;"><strong>+3,889k</strong></td>
+</tr>
+</tbody>
+</table>
+<p>→ <strong>3 영업일 누적 약 4M 손실이 fix 모두 적용 시 거의 본전 수준</strong> 추정.</p>
+<h2 id="521">5/21 적용 기대</h2>
+<p>5/21 daemon 가동 시 P6~P9 모두 적용:
+- <strong>P6</strong>: 30분 재진입 cooldown → 추매 차단
+- <strong>P7</strong>: 매도 cooldown 15분 + hard SL 우회 → 노이즈 매도 회피
+- <strong>P8</strong>: SIDEWAYS max_buy=1 → 보수 운영
+- <strong>P9</strong>: cooldown 안 익절 통과 → 강세 종목 익절 보장</p>
+<p>5/19·5/20 추매 패턴이 5/21 부터 자동 차단되어 실거래 net 큰 폭 개선 기대.</p>
+<h2 id="commits">변경 파일 (commits)</h2>
+<table>
+<thead>
+<tr>
+<th>commit</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>본 보고서</td>
+<td>docs/04-report/features/2026-05-21-0520-live-trade-verification.md</td>
+</tr>
+</tbody>
+</table>
+<p>코드 변경 없음 — P6~P9 commits (<code>476c1c3</code>/<code>72fa166</code>/<code>7a49ad9</code>/<code>baca0e2</code>) 가 5/21 daemon 가동 시 자동 적용.</p>
+<h2 id="_2">신규 도구</h2>
+<ul>
+<li><code>scripts/_replay_0520_with_p679.py</code> — 5/20 audit 기반 P6+P7+P9 적용 시뮬</li>
+</ul>
+<h2 id="_3">후속</h2>
+<ul>
+<li><strong>5/21 운영 결과 추적</strong> — P6~P9 적용 후 실거래 net 변화 측정</li>
+<li><strong>P5-a sl_time_stages 재검증</strong> — 5/21+ 데이터로 시간별 SL 단계 효과 측정</li>
+<li><strong>P10 시초가 변동성 진입 차단</strong> — 5/20 09:05~09:10 동시 매수 다수 → 변동성 측정 후 진입</li>
+</ul>
+<h2 id="_4">참조</h2>
+<ul>
+<li>이전 5/19 보고 (P6~P9 도출): [[2026-05-20-0519-live-trade-p6-p9-fixes]]</li>
+<li>이전 5/18 보고 (P1~P5-a): [[2026-05-19-0518-live-trade-fixes]]</li>
+<li>trail default ON: [[2026-05-17-trail-default-on-sim]]</li>
+</ul>
+</body>
+</html>
