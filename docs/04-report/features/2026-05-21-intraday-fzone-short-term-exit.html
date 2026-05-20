@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>2026-05-21-intraday-fzone-short-term-exit</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<hr />
+<p>tags: [report, strategy, intraday, fzone, exit-signal, 2026-05-21]
+date: 2026-05-21
+related:
+  - "[[2026-05-21-0520-live-trade-verification]]"
+  - "[[bar-46-47-f-sf-zone-deep-analysis]]"</p>
+<hr />
+<h1 id="1-f">1분봉 F존 + 단기 고점 캔들 인식 매도 모듈 — 이미지 패턴 코드화</h1>
+<h2 id="context">Context</h2>
+<p>사용자 제시 차트 (142280 5/20 1분봉):
+- <strong>매수 기준선</strong> (09:15) / <strong>매수 시그널</strong> (09:30) — 눌림목 매수 패턴
+- <strong>매도 기준선</strong> (09:18) / <strong>매도 시그널</strong> (09:43~45) — 단기 고점 매물대 패턴</p>
+<p>기존 F존 코드는 일봉 기반 5단계 매수 + % 기반 청산만 지원. 이미지의 1분봉 차트 패턴 매매 코드화 진행.</p>
+<h2 id="step-1">Step 1: 단기 고점 캔들 인식 매도 모듈</h2>
+<p><code>backend/core/strategy/short_term_high_exit.py</code> 신규</p>
+<h3 id="3-1-sell">3 패턴 (1 충족 시 SELL)</h3>
+<table>
+<thead>
+<tr>
+<th>패턴</th>
+<th>조건</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>DOJI</strong></td>
+<td>body/range &lt; 15% (open ≈ close)</td>
+<td>결정 미루는 매물대</td>
+</tr>
+<tr>
+<td><strong>UPPER_WICK</strong></td>
+<td>wick ≥ body × 1.0 AND wick ≥ 가격 × 0.5%</td>
+<td>셀러 출현 (위꼬리 음봉/도지)</td>
+</tr>
+<tr>
+<td><strong>RED_FOLLOW</strong></td>
+<td>직전 봉 peak + 현재 봉 음봉</td>
+<td>고점 직후 매도세</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_1">선행 조건</h3>
+<ul>
+<li>현재 봉 high 가 최근 30봉 peak 의 0.3% 안 (peak_tolerance_pct)</li>
+<li>익절 구간 도달 (rate ≥ partial_tp_pct 3.0%) — <code>evaluate_holding</code> 에서 평가</li>
+</ul>
+<h3 id="142280-520">142280 5/20 검증</h3>
+<table>
+<thead>
+<tr>
+<th>시각</th>
+<th>OHLC</th>
+<th>패턴</th>
+<th>결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>09:15</td>
+<td>5,660/5,770/5,610/5,620</td>
+<td>HOLD</td>
+<td>고점 미근접</td>
+</tr>
+<tr>
+<td><strong>09:18</strong></td>
+<td>5,850/5,900/5,770/5,810</td>
+<td><strong>upper_wick</strong></td>
+<td><strong>SELL ★ (매도 기준선)</strong></td>
+</tr>
+<tr>
+<td>09:21</td>
+<td>6,120/6,290/6,100/6,175</td>
+<td>upper_wick</td>
+<td>SELL (추가 고점)</td>
+</tr>
+<tr>
+<td><strong>09:45</strong></td>
+<td>6,310/6,310/6,310/6,310</td>
+<td><strong>doji</strong></td>
+<td><strong>SELL ★ (매도 시그널)</strong></td>
+</tr>
+</tbody>
+</table>
+<h2 id="step-2-sellsignalshort_term_high">Step 2: SellSignal.SHORT_TERM_HIGH 통합</h2>
+<p><code>backend/core/risk/holding_evaluator.py</code></p>
+<pre><code class="language-python">class SellSignal:
+    ...
+    SHORT_TERM_HIGH = &quot;short_term_high&quot;   # 신규
+
+class PositionContext:
+    ...
+    minute_candles: Optional[list] = None  # 1분봉 시퀀스
+
+def evaluate_holding(h, policy, ctx):
+    # 우선순위 0 (trailing 이전)
+    if ctx.minute_candles and rate &gt;= policy.partial_tp_pct:
+        ste = detect_short_term_high_exit(ctx.minute_candles)
+        if ste.signal:
+            return HoldingDecision(signal=SHORT_TERM_HIGH, ...)
+</code></pre>
+<h3 id="daemon-intraday_buy_daemonpy">daemon 통합 (<code>intraday_buy_daemon.py</code>)</h3>
+<ul>
+<li><code>_evaluate_and_sell</code> 에서 익절 구간(+3%) 도달 종목만 fetch_minute → 1분봉 전달</li>
+<li>API 부담 절감 (모든 보유 fetch 안 함)</li>
+</ul>
+<h3 id="_2">통합 검증</h3>
+<p>142280 5/20 09:15 entry @5,620 → 09:18 cur @5,810 (rate +3.38%)
+→ <strong>signal=short_term_high, pattern=upper_wick</strong> ✅</p>
+<h2 id="step-3-1-f-fzoneparamsfor_intraday">Step 3: 1분봉 F존 (<code>FZoneParams.for_intraday()</code>)</h2>
+<p><code>backend/core/strategy/f_zone.py</code></p>
+<h3 id="v1-v2">v1 → v2 튜닝</h3>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>일봉 default</th>
+<th>v1 intraday</th>
+<th><strong>v2 intraday</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>impulse_min_gain_pct</td>
+<td>3.0%</td>
+<td>1.5%</td>
+<td><strong>1.0%</strong></td>
+</tr>
+<tr>
+<td>impulse_lookback</td>
+<td>5봉</td>
+<td>30봉</td>
+<td><strong>15봉</strong></td>
+</tr>
+<tr>
+<td>pullback_min/max</td>
+<td>-5%/-0.5%</td>
+<td>-3%/-0.3%</td>
+<td>-3%/-0.3%</td>
+</tr>
+<tr>
+<td>pullback_max_candles</td>
+<td>10</td>
+<td>60봉</td>
+<td><strong>30봉</strong></td>
+</tr>
+<tr>
+<td>pullback_volume_ratio</td>
+<td>0.7</td>
+<td>0.7</td>
+<td><strong>0.85</strong></td>
+</tr>
+<tr>
+<td>ma_periods</td>
+<td>[5,20,60]</td>
+<td>[20,60,240]</td>
+<td><strong>[20,60,120]</strong></td>
+</tr>
+<tr>
+<td>ma_support_tolerance</td>
+<td>1.0%</td>
+<td>0.5%</td>
+<td>0.5%</td>
+</tr>
+<tr>
+<td>bounce_min_gain_pct</td>
+<td>0.5%</td>
+<td>0.3%</td>
+<td>0.3%</td>
+</tr>
+<tr>
+<td>bounce_volume_ratio</td>
+<td>1.2</td>
+<td>1.2</td>
+<td><strong>1.1</strong></td>
+</tr>
+<tr>
+<td>min_candles</td>
+<td>60</td>
+<td>240</td>
+<td><strong>120</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="v2">v2 검증</h3>
+<table>
+<thead>
+<tr>
+<th>종목</th>
+<th>일자/시각</th>
+<th>신호</th>
+<th style="text-align: right;">score</th>
+<th>패턴</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>274090 덕산테코피아</strong></td>
+<td>5/19 09:10</td>
+<td><strong>f_zone</strong> ★</td>
+<td style="text-align: right;"><strong>6.68</strong></td>
+<td>기준봉 +4.3% 18.4x / 눌림 -1.7% / 반등 +2.1%</td>
+</tr>
+<tr>
+<td><strong>080220 제주반도체</strong></td>
+<td>5/19 09:11</td>
+<td><strong>f_zone</strong> ★</td>
+<td style="text-align: right;"><strong>6.83</strong></td>
+<td>기준봉 +2.6% 2.2x / 눌림 -0.6% / 반등 +1.2%</td>
+</tr>
+<tr>
+<td><strong>080220</strong></td>
+<td>5/19 09:12</td>
+<td><strong>f_zone</strong> ★</td>
+<td style="text-align: right;"><strong>7.45</strong></td>
+<td>반등 강화 (+2.1% 2.5x)</td>
+</tr>
+<tr>
+<td>142280</td>
+<td>5/20 09:25~35</td>
+<td>no signal</td>
+<td style="text-align: right;">—</td>
+<td>시초가 폭등 후 매물대 — 일반 5단계 미적용</td>
+</tr>
+</tbody>
+</table>
+<p>→ <strong>5/19 실제 익절 종목(274090 +309k / 080220 +215k) 진입 시점 1분봉 F존 신호 정확 인식</strong>.</p>
+<h2 id="commits">변경 파일 (commits)</h2>
+<table>
+<thead>
+<tr>
+<th>commit</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>eac68e0</code></td>
+<td>Step 1+2 — short_term_high_exit 모듈 + evaluate_holding 통합 + daemon 1분봉 fetch</td>
+</tr>
+<tr>
+<td><code>58e32fa</code></td>
+<td>Step 3 v1 — FZoneParams.for_intraday() factory</td>
+</tr>
+<tr>
+<td><code>7a36f72</code></td>
+<td>Step 3 v2 튜닝 — 임계 완화로 신호 빈도 확보</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_3">사용 방법</h2>
+<h3 id="1-f_1">1분봉 F존 진입</h3>
+<pre><code class="language-python">from backend.core.strategy.f_zone import FZoneStrategy, FZoneParams
+intra = FZoneStrategy(FZoneParams.for_intraday())
+sig = intra.analyze(ctx)  # ctx.candles = 1분봉 시퀀스
+</code></pre>
+<h3 id="_4">단기 고점 매도 평가</h3>
+<pre><code class="language-python">from backend.core.risk.holding_evaluator import PositionContext, evaluate_holding
+ctx = PositionContext(
+    ...,
+    minute_candles=minute_bars_today,  # 보유 종목 5/20 1분봉
+)
+decision = evaluate_holding(h, policy, ctx)
+if decision.signal == SellSignal.SHORT_TERM_HIGH:
+    # 매도 실행
+</code></pre>
+<h2 id="_5">운영 통합 상태</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>운영 daemon 적용</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Step 1+2 단기 고점 매도</td>
+<td>✅ 적용 (commit eac68e0)</td>
+<td>익절 구간 도달 시 1분봉 fetch + 평가</td>
+</tr>
+<tr>
+<td>Step 3 1분봉 F존 매수</td>
+<td>⚪ 인프라만 도입</td>
+<td>daemon 통합은 별도 PR (API 부담 검토 후)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_6">제한·한계</h2>
+<ol>
+<li><strong>142280 시초가 폭등 패턴 미인식</strong> — 5단계 일반 패턴 안 맞음. 별도 모듈 필요 (시초가 +20% 종목 진입 차단·역추격 모듈)</li>
+<li><strong>1분봉 fetch API 부담</strong> — 모든 picker 종목 매 사이클 fetch 는 부담. 익절 구간 도달 종목만 fetch (현재 daemon 구현)</li>
+<li><strong>v2 튜닝값 광범위 검증 필요</strong> — 274090·080220 외 다른 종목·시점 누적 검증</li>
+</ol>
+<h2 id="_7">후속 후보</h2>
+<ul>
+<li><strong>운영 daemon 1분봉 F존 매수 통합</strong> — picker top 종목 fetch_minute → FZoneIntraday 평가 → 일봉 신호와 병행</li>
+<li><strong>시초가 폭등 종목 진입 차단</strong> (P10) — 09:00 시초가 +N% 종목 제외</li>
+<li><strong>5분봉 F존</strong> — 1분봉 노이즈 회피 + 일봉 너무 느린 중간 timeframe</li>
+</ul>
+<h2 id="_8">참조</h2>
+<ul>
+<li>5/20 검증 보고: [[2026-05-21-0520-live-trade-verification]]</li>
+<li>F존/SF존 로직: [[bar-46-47-f-sf-zone-deep-analysis]]</li>
+<li>사용자 차트 이미지: 142280 5/20 09:15·09:18·09:30·09:43 패턴</li>
+</ul>
+</body>
+</html>
