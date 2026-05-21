@@ -46,6 +46,13 @@ class Swing38Params:
     bounce_lookback: int = 5
     min_candles: int = 60
 
+    # BAR-OPS-09 Phase 6 — 변동성 필터: ATR% < min_atr_pct 시 진입 거부.
+    # default 0.0 (필터 비활성) — 기존 baseline 회귀 보존.
+    # IntradaySimulator 시뮬 진입점에서 명시 override (0.035) — 저변동주 가짜 시그널 차단.
+    # 패턴: 5/15 LG씨엔에스 -514k (flu% 7.5%), 5/14 삼성전자 -80k (flu% 4.2%) 등
+    min_atr_pct: float = 0.0
+    atr_n: int = 14
+
 
 class Swing38Strategy(Strategy):
     """38스윙 — 임펄스 + Fib 0.382 되돌림 + 반등."""
@@ -59,6 +66,12 @@ class Swing38Strategy(Strategy):
         p = self.params
         if len(ctx.candles) < p.min_candles:
             return None
+
+        # BAR-OPS-09 Phase 6: 변동성 필터 — ATR% < min_atr_pct 시 진입 거부 (저변동·고가주 가짜 시그널 방지)
+        if p.min_atr_pct > 0:
+            atr_pct = self._atr_pct(ctx.candles, n=p.atr_n)
+            if atr_pct < p.min_atr_pct:
+                return None
 
         df = self._to_dataframe(ctx.candles)
 
@@ -218,6 +231,31 @@ class Swing38Strategy(Strategy):
             "fib_target": p.fib_target,
             "fib_tolerance": p.fib_tolerance,
         }
+
+    @staticmethod
+    def _atr_pct(candles: List[OHLCV], n: int = 14) -> float:
+        """True Range 평균 / 마지막 close 비율 — 종목 변동성 측정.
+
+        f_zone/blue_line/gold_zone._atr_pct 와 동일 공식. 순환 import 회피 위해 자체 구현.
+        """
+        if len(candles) < 2:
+            return 0.0
+        n = min(n, len(candles) - 1)
+        trs: list[float] = []
+        for i in range(1, n + 1):
+            c = candles[-i]
+            prev = candles[-i - 1]
+            tr = max(
+                c.high - c.low,
+                abs(c.high - prev.close),
+                abs(c.low - prev.close),
+            )
+            trs.append(tr)
+        atr = sum(trs) / len(trs) if trs else 0.0
+        last_close = candles[-1].close
+        if last_close <= 0:
+            return 0.0
+        return atr / last_close
 
 
 __all__ = ["Swing38Strategy", "Swing38Params"]
