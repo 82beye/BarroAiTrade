@@ -303,7 +303,12 @@ class TradingOrchestrator:
                         logger.info("당일 분석 스캔 시작: %d종목", len(app_state.watchlist))
                         try:
                             from backend.core.scanner import SignalScanner
-                            scanner = SignalScanner(gateway)
+                            from backend.core.strategy.f_zone import FZoneParams
+                            # BAR-44 변동성 필터 운영 경로 적용 — ATR% < 3.5% 차단 (저변동·고가주 가짜 시그널 방지)
+                            scanner = SignalScanner(
+                                gateway,
+                                f_zone_params=FZoneParams(min_atr_pct=0.035),
+                            )
                             signals = await scanner.scan(app_state.watchlist)
                             last_scan_time = now
                             logger.info("당일 분석 스캔 완료: %d개 신호", len(signals))
