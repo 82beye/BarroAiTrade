@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Area, AreaChart, BarChart, Bar, ComposedChart,
@@ -63,33 +63,30 @@ export default function BalancePage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'overview' | 'holdings' | 'pnl'>('overview');
 
-  const fetchData = useCallback(async () => {
+  useEffect(() => {
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
     setLoading(true);
-    try {
-      const [histRes, balRes, pnlRes] = await Promise.all([
-        fetch(`/api/reports/balance-history?days=${days}`),
-        fetch('/api/accounts/balance'),
-        fetch(`/api/reports/realized-pnl?days=${days}`),
-      ]);
 
-      if (histRes.ok) {
-        const json = await histRes.json();
-        setHistoryData(json.points ?? []);
+    (async () => {
+      try {
+        const [histRes, balRes, pnlRes] = await Promise.all([
+          fetch(`/api/reports/balance-history?days=${days}`, { signal }),
+          fetch('/api/accounts/balance', { signal }),
+          fetch(`/api/reports/realized-pnl?days=${days}`, { signal }),
+        ]);
+        if (histRes.ok) setHistoryData((await histRes.json()).points ?? []);
+        if (balRes.ok) setRealtime(await balRes.json());
+        if (pnlRes.ok) setPnlData(await pnlRes.json());
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') console.error(err);
+      } finally {
+        setLoading(false);
       }
-      if (balRes.ok) {
-        setRealtime(await balRes.json());
-      }
-      if (pnlRes.ok) {
-        setPnlData(await pnlRes.json());
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
+    })();
+
+    return () => ctrl.abort();
   }, [days]);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
 
   const formatKRW = (v: number) => {
     if (Math.abs(v) >= 1_0000_0000) return `${(v / 1_0000_0000).toFixed(1)}`;
