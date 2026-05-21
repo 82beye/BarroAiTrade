@@ -384,6 +384,7 @@ def render_decisions_table(decisions: list[HoldingDecision]) -> str:
         SellSignal.BREAKEVEN_STOP: "BE",
         SellSignal.PARTIAL_TP: "P-TP",
         SellSignal.TIME_TIGHTENED_SL: "T-SL",
+        SellSignal.SHORT_TERM_HIGH: "STH",
     }
     for d in decisions:
         sig_label = sig_labels.get(d.signal, d.signal.value)
