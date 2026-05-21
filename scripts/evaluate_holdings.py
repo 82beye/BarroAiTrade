@@ -25,6 +25,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+
 from pydantic import SecretStr
 
 from backend.core.gateway.kiwoom_native_account import KiwoomNativeAccountFetcher
@@ -65,7 +67,7 @@ async def _run(args) -> int:
         return 0
 
     # PolicyConfig 자동 로드 (BAR-OPS-32) — CLI default 인 경우만 override
-    cfg = PolicyConfigStore("data/policy.json").load()
+    cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
     tp = args.tp if args.tp != 5.0 else cfg.take_profit_pct
     sl = args.sl if args.sl != -4.0 else cfg.stop_loss_pct
     policy = ExitPolicy(
@@ -217,14 +219,14 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="보유 종목 매도 시그널 평가 (BAR-OPS-20)")
     ap.add_argument("--tp", type=float, default=5.0, help="take_profit %% (기본 5.0)")
     ap.add_argument("--sl", type=float, default=-4.0, help="stop_loss %% (기본 -4.0, policy.json 우선)")
-    ap.add_argument("--pos-log", default="data/active_positions.json",
+    ap.add_argument("--pos-log", default=str(_DATA_DIR / "active_positions.json"),
                     help="활성 포지션 메타 경로")
     ap.add_argument("--auto-sell", action="store_true",
                     help="TP/SL 도달 종목 LiveOrderGate 매도")
     ap.add_argument("--dry-run", action="store_true", default=True,
                     help="DRY_RUN (기본). 실 매도는 --no-dry-run + LIVE_TRADING_ENABLED")
     ap.add_argument("--no-dry-run", action="store_false", dest="dry_run")
-    ap.add_argument("--audit-log", default="data/order_audit.csv",
+    ap.add_argument("--audit-log", default=str(_DATA_DIR / "order_audit.csv"),
                     help="audit CSV (OPS-17)")
     ap.add_argument("--daily-max-orders", type=int, default=50,
                     help="일일 거래수 한도 (기본 50)")
