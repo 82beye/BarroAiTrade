@@ -21,6 +21,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+
 from pydantic import SecretStr
 
 from decimal import Decimal
@@ -41,8 +43,8 @@ from backend.core.risk.balance_gate import evaluate_risk_gate
 from backend.core.risk.holding_evaluator import ExitPolicy, evaluate_all
 from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
 
-_LOG_PATH = "data/simulation_log.csv"
-_AUDIT_PATH = "data/order_audit.csv"
+_LOG_PATH = str(_DATA_DIR / "simulation_log.csv")
+_AUDIT_PATH = str(_DATA_DIR / "order_audit.csv")
 _CONFIRM_STORE = OrderConfirmStore(ttl_seconds=300)            # 5분 TTL
 
 
@@ -254,7 +256,7 @@ async def _cmd_confirm_sell(bot: TelegramBot, msg: dict) -> str:
     return "\n".join(lines)
 
 
-_POLICY_PATH = "data/policy.json"
+_POLICY_PATH = str(_DATA_DIR / "policy.json")
 
 
 async def _cmd_policy(bot: TelegramBot, msg: dict) -> str:

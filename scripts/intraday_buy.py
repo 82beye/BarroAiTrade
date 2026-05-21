@@ -23,6 +23,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+
 from pydantic import SecretStr
 
 from backend.core.backtester import IntradaySimulator
@@ -52,7 +54,7 @@ def _build_oauth() -> KiwoomNativeOAuth:
 
 
 async def _run(args) -> int:
-    cfg = PolicyConfigStore("data/policy.json").load()
+    cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
     oauth = _build_oauth()
     picker = KiwoomNativeLeaderPicker(
         oauth=oauth, min_flu_rate=args.min_flu, min_score=cfg.min_score,
@@ -217,8 +219,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true", default=True)
     ap.add_argument("--no-dry-run", action="store_false", dest="dry_run")
     ap.add_argument("--telegram", action="store_true", help="텔레그램 알림")
-    ap.add_argument("--audit-log", default="data/order_audit.csv")
-    ap.add_argument("--pos-log", default="data/active_positions.json")
+    ap.add_argument("--audit-log", default=str(_DATA_DIR / "order_audit.csv"))
+    ap.add_argument("--pos-log", default=str(_DATA_DIR / "active_positions.json"))
     args = ap.parse_args()
     sys.exit(asyncio.run(_run(args)))
 

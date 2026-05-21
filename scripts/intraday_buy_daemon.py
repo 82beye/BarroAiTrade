@@ -98,7 +98,7 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     if _now_kst().time() < SELL_START:
         return 0
 
-    cfg = PolicyConfigStore("data/policy.json").load()
+    cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
     account = KiwoomNativeAccountFetcher(oauth=oauth)
     balance = await account.fetch_balance()
 
@@ -348,7 +348,7 @@ async def _scan_and_buy(
     if _now_kst().time() < BUY_START:
         return 0
 
-    cfg = PolicyConfigStore("data/policy.json").load()
+    cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
     picker = KiwoomNativeLeaderPicker(
         oauth=oauth, min_flu_rate=args.min_flu, min_score=cfg.min_score,
     )
@@ -734,8 +734,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true", default=True)
     ap.add_argument("--no-dry-run", action="store_false", dest="dry_run")
     ap.add_argument("--telegram", action="store_true", help="텔레그램 알림")
-    ap.add_argument("--audit-log", default="data/order_audit.csv")
-    ap.add_argument("--pos-log", default="data/active_positions.json")
+    ap.add_argument("--audit-log", default=str(_DATA_DIR / "order_audit.csv"))
+    ap.add_argument("--pos-log", default=str(_DATA_DIR / "active_positions.json"))
     args = ap.parse_args()
 
     loop = asyncio.new_event_loop()

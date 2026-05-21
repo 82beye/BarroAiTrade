@@ -22,6 +22,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+
 from datetime import datetime, timezone
 
 from pydantic import SecretStr
@@ -67,7 +69,7 @@ def _build_oauth() -> KiwoomNativeOAuth:
 
 async def _run(args) -> int:
     # PolicyConfig 자동 로드 — CLI 명시 X 인 옵션만 config 값 사용 (BAR-OPS-32)
-    cfg = PolicyConfigStore("data/policy.json").load()
+    cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
     if args.min_score == 0.0:
         args.min_score = cfg.min_score
     if args.max_per_position == 0.30:
@@ -361,12 +363,12 @@ def main() -> None:
         help="실 주문 활성화 (LIVE_TRADING_ENABLED 환경변수 필요)",
     )
     ap.add_argument(
-        "--audit-log", default="data/order_audit.csv",
-        help="주문 감사 CSV 경로 (기본 data/order_audit.csv)",
+        "--audit-log", default=str(_DATA_DIR / "order_audit.csv"),
+        help="주문 감사 CSV 경로",
     )
     ap.add_argument(
-        "--pos-log", default="data/active_positions.json",
-        help="활성 포지션 메타 경로 (기본 data/active_positions.json)",
+        "--pos-log", default=str(_DATA_DIR / "active_positions.json"),
+        help="활성 포지션 메타 경로",
     )
     ap.add_argument(
         "--sl", type=float, default=-4.0,
