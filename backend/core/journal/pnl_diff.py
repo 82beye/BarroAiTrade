@@ -92,7 +92,7 @@ def compare(
             real_trades=real_count[sym],
             bias=_bias(sim_v, real_v),
         ))
-    out.sort(key=lambda d: -abs(d.diff))
+    out.sort(key=lambda d: -(abs(d.diff_pct) if d.diff_pct is not None else 0))
     return out
 
 
