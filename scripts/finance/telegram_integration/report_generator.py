@@ -13,13 +13,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-# 전략별 목표가/손절가 기준
+# 전략별 목표가/손절가 기준 — EntrySignal.signal_type Literal 전종 등록
 _STRATEGY_LEVELS = {
-    "f_zone":          {"tp1": 0.03, "tp2": 0.05, "sl": -0.02, "label": "F존"},
-    "sf_zone":         {"tp1": 0.05, "tp2": 0.10, "sl": -0.03, "label": "SF존(슈퍼존)"},
-    "blue_line":       {"tp1": 0.03, "tp2": 0.07, "sl": -0.02, "label": "파란점선"},
-    "watermelon":      {"tp1": 0.04, "tp2": 0.08, "sl": -0.02, "label": "수박"},
-    "crypto_breakout": {"tp1": 0.05, "tp2": 0.10, "sl": -0.03, "label": "돌파"},
+    "f_zone":           {"tp1": 0.03,  "tp2": 0.05,  "sl": -0.02,  "label": "F존"},
+    "sf_zone":          {"tp1": 0.05,  "tp2": 0.10,  "sl": -0.03,  "label": "SF존(슈퍼존)"},
+    "blue_line":        {"tp1": 0.03,  "tp2": 0.07,  "sl": -0.02,  "label": "파란점선"},
+    "blue_dotted_line": {"tp1": 0.03,  "tp2": 0.07,  "sl": -0.02,  "label": "파란점선(스크리너)"},
+    "watermelon":       {"tp1": 0.04,  "tp2": 0.08,  "sl": -0.02,  "label": "수박"},
+    "crypto_breakout":  {"tp1": 0.05,  "tp2": 0.10,  "sl": -0.03,  "label": "돌파"},
+    "swing_38":         {"tp1": 0.025, "tp2": 0.05,  "sl": -0.015, "label": "38스윙"},
+    "gold_zone":        {"tp1": 0.02,  "tp2": 0.04,  "sl": -0.015, "label": "골드존"},
 }
 
 # 점수별 신호 강도 레이블
