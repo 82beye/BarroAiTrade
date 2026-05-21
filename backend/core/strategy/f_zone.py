@@ -481,28 +481,9 @@ class FZoneStrategy(Strategy):
 
     @staticmethod
     def _atr_pct(candles: List[OHLCV], n: int = 14) -> float:
-        """True Range 평균 / 마지막 close 비율 — 종목 변동성 측정.
-
-        IntradaySimulator._atr_pct 와 동일 공식. 순환 import 회피 위해 정적 메서드로 자체 구현.
-        """
-        if len(candles) < 2:
-            return 0.0
-        n = min(n, len(candles) - 1)
-        trs: list[float] = []
-        for i in range(1, n + 1):
-            c = candles[-i]
-            prev = candles[-i - 1]
-            tr = max(
-                c.high - c.low,
-                abs(c.high - prev.close),
-                abs(c.low - prev.close),
-            )
-            trs.append(tr)
-        atr = sum(trs) / len(trs) if trs else 0.0
-        last_close = candles[-1].close
-        if last_close <= 0:
-            return 0.0
-        return atr / last_close
+        """ATR% wrapper — see backend.core.strategy.indicators.atr_pct (Phase 7 refactor)."""
+        from backend.core.strategy.indicators import atr_pct
+        return atr_pct(candles, n=n)
 
     @staticmethod
     def _to_dataframe(candles: List[OHLCV]) -> pd.DataFrame:
