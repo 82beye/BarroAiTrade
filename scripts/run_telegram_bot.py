@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -36,15 +37,19 @@ from backend.core.journal.simulation_log import (
     SimulationLogger,
     summarize_by_strategy,
 )
+from backend.core.journal.active_positions import ActivePositionStore
 from backend.core.notify.order_confirm import OrderConfirmStore, PendingOrder
 from backend.core.notify.telegram import TelegramNotifier, SELL_TAGS
 from backend.core.notify.telegram_bot import TelegramBot
 from backend.core.risk.balance_gate import evaluate_risk_gate
-from backend.core.risk.holding_evaluator import ExitPolicy, evaluate_all
+from backend.core.risk.holding_evaluator import (
+    ExitPolicy, PositionContext, STRATEGY_EXIT_PROFILES, evaluate_all,
+)
 from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
 
 _LOG_PATH = str(_DATA_DIR / "simulation_log.csv")
 _AUDIT_PATH = str(_DATA_DIR / "order_audit.csv")
+_POS_LOG = str(_DATA_DIR / "active_positions.json")
 _CONFIRM_STORE = OrderConfirmStore(ttl_seconds=300)            # 5분 TTL
 
 
@@ -54,6 +59,41 @@ def _build_oauth() -> KiwoomNativeOAuth:
         app_secret=SecretStr(os.environ["KIWOOM_APP_SECRET"]),
         base_url=os.environ.get("KIWOOM_BASE_URL", "https://mockapi.kiwoom.com"),
     )
+
+
+async def _build_contexts(
+    oauth, holdings, policy: ExitPolicy
+) -> dict[str, PositionContext]:
+    """보유 종목 PositionContext 빌드 + 익절 구간 종목 1분봉 fetch."""
+    pos_store = ActivePositionStore(_POS_LOG)
+    active_positions = pos_store.load_all()
+    fetcher = KiwoomNativeCandleFetcher(oauth=oauth)
+    contexts: dict[str, PositionContext] = {}
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for h in holdings:
+        pos = active_positions.get(h.symbol)
+        if not pos:
+            continue
+        cur_rate = float(h.pnl_rate)
+        _strat_key = (pos.strategy or "").replace("_v1", "").replace("_v2", "")
+        _strat_partial_tp = float(
+            STRATEGY_EXIT_PROFILES.get(_strat_key, {}).get("partial_tp_pct", policy.partial_tp_pct)
+        )
+        minute_candles = None
+        if cur_rate >= _strat_partial_tp:
+            try:
+                bars = await fetcher.fetch_minute(symbol=h.symbol, tic_scope="1")
+                minute_candles = [b for b in bars if b.timestamp.strftime("%Y-%m-%d") == today_str]
+            except Exception:
+                pass
+        contexts[h.symbol] = PositionContext(
+            peak_pnl_rate=pos.peak_pnl_rate,
+            partial_tp_done=pos.partial_tp_done,
+            entry_time=pos.entry_time,
+            strategy=pos.strategy,
+            minute_candles=minute_candles,
+        )
+    return contexts
 
 
 async def _cmd_help(bot: TelegramBot, msg: dict) -> str:
@@ -118,8 +158,11 @@ async def _cmd_eval(bot: TelegramBot, msg: dict) -> str:
     balance = await account.fetch_balance()
     if not balance.holdings:
         return "보유 종목 없음"
-    decisions = evaluate_all(balance.holdings, ExitPolicy())
-    lines = [f"📋 *보유 평가* ({len(decisions)} 종목, TP +5% / SL -2%)"]
+    policy = ExitPolicy()
+    contexts = await _build_contexts(oauth, balance.holdings, policy)
+    decisions = evaluate_all(balance.holdings, policy, contexts)
+    mode = "적응형" if contexts else "기본"
+    lines = [f"📋 *보유 평가* ({len(decisions)} 종목, {mode})"]
     for d in decisions:
         sig = "🔵 HOLD" if d.signal.value == "hold" else SELL_TAGS.get(d.signal.value, f"❓ {d.signal.value}")
         lines.append(f"`{d.symbol}` {d.name} {float(d.pnl_rate):+.2f}% {sig}")
@@ -203,7 +246,9 @@ async def _cmd_sell_execute(bot: TelegramBot, msg: dict) -> str:
     balance = await account.fetch_balance()
     if not balance.holdings:
         return "보유 종목 없음 — 발급 X"
-    decisions = evaluate_all(balance.holdings, ExitPolicy())
+    policy = ExitPolicy()
+    contexts = await _build_contexts(oauth, balance.holdings, policy)
+    decisions = evaluate_all(balance.holdings, policy, contexts)
     targets = [d for d in decisions if d.signal.value != "hold"]
     if not targets:
         return "TP/SL 도달 종목 없음 (모두 HOLD) — 발급 X"
