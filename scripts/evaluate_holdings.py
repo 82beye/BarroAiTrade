@@ -125,6 +125,7 @@ async def _run(args) -> int:
     _SELL_SIGNALS = {
         SellSignal.STOP_LOSS, SellSignal.TRAILING_STOP,
         SellSignal.BREAKEVEN_STOP, SellSignal.TIME_TIGHTENED_SL,
+        SellSignal.SHORT_TERM_HIGH,
     }
     sl_symbols = {d.symbol for d in decisions if d.signal in _SELL_SIGNALS}
 
