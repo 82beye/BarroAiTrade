@@ -148,9 +148,13 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
             if dirty:
                 pos_store.upsert(pos)
 
-            # SHORT_TERM_HIGH 평가용 1분봉 — 익절 구간(+3%) 도달 시만 fetch
+            # SHORT_TERM_HIGH 평가용 1분봉 — 전략별 partial_tp_pct 도달 시만 fetch
+            _strat_key = (pos.strategy or "").replace("_v1", "").replace("_v2", "")
+            _strat_partial_tp = float(
+                STRATEGY_EXIT_PROFILES.get(_strat_key, {}).get("partial_tp_pct", policy.partial_tp_pct)
+            )
             minute_candles = None
-            if cur_rate >= 3.0:
+            if cur_rate >= _strat_partial_tp:
                 try:
                     bars = await fetcher_for_exit.fetch_minute(symbol=h.symbol, tic_scope="1")
                     today_str = _now_kst().strftime("%Y-%m-%d")
