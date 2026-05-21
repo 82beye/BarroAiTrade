@@ -37,7 +37,7 @@ from backend.core.journal.simulation_log import (
     summarize_by_strategy,
 )
 from backend.core.notify.order_confirm import OrderConfirmStore, PendingOrder
-from backend.core.notify.telegram import TelegramNotifier
+from backend.core.notify.telegram import TelegramNotifier, SELL_TAGS
 from backend.core.notify.telegram_bot import TelegramBot
 from backend.core.risk.balance_gate import evaluate_risk_gate
 from backend.core.risk.holding_evaluator import ExitPolicy, evaluate_all
@@ -121,7 +121,7 @@ async def _cmd_eval(bot: TelegramBot, msg: dict) -> str:
     decisions = evaluate_all(balance.holdings, ExitPolicy())
     lines = [f"📋 *보유 평가* ({len(decisions)} 종목, TP +5% / SL -2%)"]
     for d in decisions:
-        sig = {"hold": "🔵 HOLD", "take_profit": "✅ TP", "stop_loss": "🛑 SL"}[d.signal.value]
+        sig = "🔵 HOLD" if d.signal.value == "hold" else SELL_TAGS.get(d.signal.value, f"❓ {d.signal.value}")
         lines.append(f"`{d.symbol}` {d.name} {float(d.pnl_rate):+.2f}% {sig}")
     return "\n".join(lines)
 
@@ -219,7 +219,7 @@ async def _cmd_sell_execute(bot: TelegramBot, msg: dict) -> str:
         "*예정 매도*",
     ]
     for d in targets:
-        sig = "✅ TP" if d.signal.value == "take_profit" else "🛑 SL"
+        sig = SELL_TAGS.get(d.signal.value, f"🛑 {d.signal.value}")
         lines.append(
             f"`{d.symbol}` {d.name} {float(d.pnl_rate):+.2f}% qty={d.qty} {sig}"
         )

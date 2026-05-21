@@ -192,4 +192,7 @@ __all__ = [
     "TelegramNotifier",
     "format_buy_alert", "format_sell_alert",
     "format_simulation_summary", "format_blocked_alert",
+    "SELL_TAGS",
 ]
+
+SELL_TAGS = _SELL_TAGS
