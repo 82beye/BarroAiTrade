@@ -168,20 +168,24 @@ class LiveOrderGate:
         price: Optional[Decimal], order_no: Optional[str],
         return_code: Optional[int], blocked: bool, reason: str = "",
     ) -> None:
-        new_file = not self._audit_path.exists()
-        with open(self._audit_path, "a", encoding="utf-8", newline="") as f:
-            w = csv.writer(f)
-            if new_file:
-                w.writerow(_AUDIT_HEADERS)
-            w.writerow([
-                datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                action, side.value, symbol, qty,
-                str(price) if price is not None else "MKT",
-                order_no or "",
-                str(return_code) if return_code is not None else "",
-                "1" if blocked else "0",
-                reason,
-            ])
+        try:
+            new_file = not self._audit_path.exists()
+            with open(self._audit_path, "a", encoding="utf-8", newline="") as f:
+                w = csv.writer(f)
+                if new_file:
+                    w.writerow(_AUDIT_HEADERS)
+                w.writerow([
+                    datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    action, side.value, symbol, qty,
+                    str(price) if price is not None else "MKT",
+                    order_no or "",
+                    str(return_code) if return_code is not None else "",
+                    "1" if blocked else "0",
+                    reason,
+                ])
+        except OSError as exc:
+            logger.error("audit log write failed (%s) — %s %s not recorded",
+                         type(exc).__name__, action, symbol)
 
     async def _notify_blocked(self, side: OrderSide, symbol: str, reason: str) -> None:
         if not self._notifier:
@@ -199,7 +203,8 @@ class LiveOrderGate:
         with open(self._audit_path, "r", encoding="utf-8", newline="") as f:
             r = csv.DictReader(f)
             for row in r:
-                if row["ts"].startswith(today) and row["action"] in {"ORDERED", "DRY_RUN"}:
+                if (row.get("ts", "").startswith(today)
+                        and row.get("action") in {"ORDERED", "DRY_RUN"}):
                     n += 1
         return n
 
@@ -211,8 +216,8 @@ class LiveOrderGate:
         with open(self._audit_path, "r", encoding="utf-8", newline="") as f:
             r = csv.DictReader(f)
             for row in r:
-                if (row["ts"].startswith(today)
-                        and row["action"] in {"ORDERED", "DRY_RUN"}
+                if (row.get("ts", "").startswith(today)
+                        and row.get("action") in {"ORDERED", "DRY_RUN"}
                         and row.get("side") == "buy"):
                     n += 1
         return n
