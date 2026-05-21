@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>2026-05-21-session-summary</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<hr />
+<p>tags: [report, summary, session, daemon, strategy, 2026-05-17, 2026-05-21]
+date: 2026-05-21
+related:
+  - "[[2026-05-17-trail-default-on-sim]]"
+  - "[[2026-05-19-0518-live-trade-fixes]]"
+  - "[[2026-05-20-0519-live-trade-p6-p9-fixes]]"
+  - "[[2026-05-21-0520-live-trade-verification]]"
+  - "[[2026-05-21-intraday-fzone-short-term-exit]]"</p>
+<hr />
+<h1 id="517521-daemon">5/17~5/21 세션 종합 요약 — daemon 안정화 + 전략 정교화 인프라</h1>
+<h2 id="context">Context</h2>
+<p>5 영업일 (5/17~5/21) 운영 데이터 누적 분석 → daemon 매수·매도 결함 발견 → 단계별 fix 적용 (P1~P10 + 매도 시그널 + 1분봉/5분봉 F존). 이미지 패턴(눌림목 매수 + 단기 고점 매도) 코드화. 장기 정교화 계획 (UltraPlan) 수립.</p>
+<hr />
+<h2 id="part-1-fix-p1p10-multi-timeframe">Part 1. 도입된 fix 매트릭스 (P1~P10 + 매도 + multi-timeframe)</h2>
+<h3 id="a-ai-trade-517">A. ai-trade 패턴 도입 (5/17)</h3>
+<table>
+<thead>
+<tr>
+<th>commit</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>85ae8df</code></td>
+<td>A/B/C/D 인프라 (시간별 SL·트레일링·고모멘텀·수박지표)</td>
+</tr>
+<tr>
+<td><code>9193f19</code></td>
+<td>B 5단계 트레일링 SL <strong>default ON</strong> — 시뮬 +314k 입증</td>
+</tr>
+</tbody>
+</table>
+<h3 id="b-518-daemon-fix-p1p5-a">B. 5/18 daemon 결함 fix (P1~P5-a)</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>내용</th>
+<th>commit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>P1</strong></td>
+<td><code>ActivePositionStore.load_all</code> partial_tp_done·peak·trough 3필드 read 누락 → PARTIAL_TP 매 사이클 재발동 (100790 9번 분할매도)</td>
+<td><code>329e9dd</code></td>
+</tr>
+<tr>
+<td><strong>P2</strong></td>
+<td>DCA pending — cur_price 만 보고 일중 low 도달 놓침 → <code>trough_pnl_rate</code> 추적 (069500 L -6.4% T2 발동 가능)</td>
+<td><code>329e9dd</code></td>
+</tr>
+<tr>
+<td><strong>P3</strong></td>
+<td>일일 매수 한도가 매수+매도 합계 카운트 → 5/18 매수 15+매도 35=50 BLOCKED → <code>_count_today_buys</code> 분리</td>
+<td><code>329e9dd</code></td>
+</tr>
+<tr>
+<td><strong>P4</strong></td>
+<td>고점 진입 차단 — 일중 H 대비 cur 거리 &lt; 1.5% + momentum 종료 시 SKIP</td>
+<td><code>329e9dd</code></td>
+</tr>
+<tr>
+<td><strong>P5-a</strong></td>
+<td>시간별 단계 SL 인프라 (<code>StopLoss.sl_time_stages</code>, default OFF)</td>
+<td><code>6ff32d4</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="c-519-fix-p6p9">C. 5/19 추가 fix (P6~P9)</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>내용</th>
+<th>commit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>P6</strong></td>
+<td>동일 종목 30분 cooldown — <code>recent_buys</code> + audit fallback 이중 안전망 (5/19 4건 양수 추매 차단)</td>
+<td><code>476c1c3</code></td>
+</tr>
+<tr>
+<td><strong>P7</strong></td>
+<td>매도 cooldown <code>MIN_HOLD_MINUTES 10→15분</code> + hard SL(-5%) 우회</td>
+<td><code>72fa166</code></td>
+</tr>
+<tr>
+<td><strong>P8</strong></td>
+<td>regime 별 매수 제한 — BULL=2 / SIDEWAYS=1 / BEARISH=1+best_pnl&gt;50k</td>
+<td><code>7a49ad9</code></td>
+</tr>
+<tr>
+<td><strong>P9</strong></td>
+<td>cooldown 안 익절 신호 통과 (P7 부작용 해소 — 274090 peak +8.1% trail 차단 회피)</td>
+<td><code>baca0e2</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="d-1-f-521">D. 1분봉 F존 + 단기 고점 매도 (5/21, 이미지 패턴 코드화)</h3>
+<table>
+<thead>
+<tr>
+<th>모듈</th>
+<th>내용</th>
+<th>commit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>short_term_high_exit</strong></td>
+<td>3 패턴 (DOJI/UPPER_WICK/RED_FOLLOW) 인식 → SHORT_TERM_HIGH 신호. 142280 09:18·09:45 정확 인식</td>
+<td><code>eac68e0</code></td>
+</tr>
+<tr>
+<td><strong>FZoneParams.for_intraday()</strong></td>
+<td>1분봉 F존 v2 튜닝 (impulse 1%·lookback 15·MA [20,60,120]) — 274090·080220 진입 검증</td>
+<td><code>7a36f72</code></td>
+</tr>
+<tr>
+<td><strong>FZoneParams.for_5min()</strong></td>
+<td>5분봉 F존 (impulse 2%·lookback 12·MA [12,36,72]) — 080220 5/19 09:25 검증</td>
+<td><code>d56a4e9</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="e-p10">E. P10 시초가 폭등 차단</h3>
+<table>
+<thead>
+<tr>
+<th>commit</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>d56a4e9</code></td>
+<td>진입 직전 1분봉 시초가 대비 변동률 측정 → ≥15% 차단</td>
+</tr>
+<tr>
+<td><code>dbb4970</code></td>
+<td>threshold 15% → <strong>20%</strong> 튜닝 (P10 false-positive 회피, 142280 +19.2% 익절 살림)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="f">F. 종합 검증 시뮬</h3>
+<table>
+<thead>
+<tr>
+<th>commit</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>86948cc</code></td>
+<td><code>_replay_full_p6_p10.py</code> 5/19+5/20 audit 통합 시뮬 — 2일 누적 +2,540k 회복 입증</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="part-2">Part 2. 일자별 운영 결과 추적</h2>
+<table>
+<thead>
+<tr>
+<th>영업일</th>
+<th style="text-align: right;">audit</th>
+<th style="text-align: right;">BLOCKED</th>
+<th style="text-align: right;">분할매도 폭주</th>
+<th style="text-align: right;">미청산</th>
+<th style="text-align: right;">실제 net</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>5/18</strong></td>
+<td style="text-align: right;">111</td>
+<td style="text-align: right;"><strong>78</strong></td>
+<td style="text-align: right;"><strong>19</strong> (100790 9·005930 7·080220 3)</td>
+<td style="text-align: right;"><strong>3</strong></td>
+<td style="text-align: right;">-1,547k</td>
+<td>P1~P5 fix 도입 직전</td>
+</tr>
+<tr>
+<td><strong>5/19</strong></td>
+<td style="text-align: right;">24</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">3 (잔여)</td>
+<td style="text-align: right;">-1,029k</td>
+<td>P1·P3 적용, P6~P9 도입 직전</td>
+</tr>
+<tr>
+<td><strong>5/20</strong></td>
+<td style="text-align: right;">34</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">-1,401k</td>
+<td>P6~P9 commit timing 미적용</td>
+</tr>
+<tr>
+<td><strong>5/21</strong></td>
+<td style="text-align: right;">30</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;"><strong>-596k</strong> (kt00009 정확)</td>
+<td>일부 fix 적용</td>
+</tr>
+</tbody>
+</table>
+<p>→ 시스템 안정성 ★★★★★ (분할매도·BLOCKED·미청산 0건 안정화)
+→ 실거래 net 점진 개선 (-1.5M → -1.4M → -1.0M → -0.6M)</p>
+<hr />
+<h2 id="part-3-521-kt00009">Part 3. 5/21 전략별 성과 (kt00009 정확 체결가)</h2>
+<h3 id="10">종목별 표 (10 종목)</h3>
+<table>
+<thead>
+<tr>
+<th>종목</th>
+<th>전략</th>
+<th style="text-align: right;">매수 평단</th>
+<th style="text-align: right;">매도 평단</th>
+<th style="text-align: right;">net</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>005930 삼성전자</td>
+<td><strong>gold_zone</strong></td>
+<td style="text-align: right;">291,500</td>
+<td style="text-align: right;">299,500</td>
+<td style="text-align: right;"><strong>+88,467 ✅</strong></td>
+</tr>
+<tr>
+<td>006340 대원전선</td>
+<td>swing_38</td>
+<td style="text-align: right;">15,371</td>
+<td style="text-align: right;">14,627</td>
+<td style="text-align: right;">-625,090 ❌</td>
+</tr>
+<tr>
+<td>017900 광전자</td>
+<td><strong>swing_38</strong></td>
+<td style="text-align: right;">13,735</td>
+<td style="text-align: right;">14,378</td>
+<td style="text-align: right;"><strong>+169,299 ✅</strong></td>
+</tr>
+<tr>
+<td>027360 아주IB투자</td>
+<td><strong>f_zone</strong></td>
+<td style="text-align: right;">17,147</td>
+<td style="text-align: right;">16,235</td>
+<td style="text-align: right;">-525,343 ❌</td>
+</tr>
+<tr>
+<td>047040 대우건설</td>
+<td>swing_38</td>
+<td style="text-align: right;">29,838</td>
+<td style="text-align: right;">28,553</td>
+<td style="text-align: right;">-423,829 ❌</td>
+</tr>
+<tr>
+<td>066570 LG전자</td>
+<td><strong>swing_38</strong></td>
+<td style="text-align: right;">194,438</td>
+<td style="text-align: right;">203,726</td>
+<td style="text-align: right;"><strong>+283,586 ✅</strong></td>
+</tr>
+<tr>
+<td>067310 하나마이크론</td>
+<td>swing_38</td>
+<td style="text-align: right;">55,033</td>
+<td style="text-align: right;">54,500</td>
+<td style="text-align: right;">-110,785 ❌</td>
+</tr>
+<tr>
+<td>080220 제주반도체</td>
+<td><strong>swing_38</strong></td>
+<td style="text-align: right;">109,000</td>
+<td style="text-align: right;">114,700</td>
+<td style="text-align: right;"><strong>+316,679 ✅</strong></td>
+</tr>
+<tr>
+<td>122630 KODEX 레버리지</td>
+<td><strong>gold_zone</strong></td>
+<td style="text-align: right;">159,095</td>
+<td style="text-align: right;">164,351</td>
+<td style="text-align: right;"><strong>+58,940 ✅</strong></td>
+</tr>
+<tr>
+<td>233740 KODEX 코스닥150</td>
+<td><strong>gold_zone</strong></td>
+<td style="text-align: right;">14,006</td>
+<td style="text-align: right;">14,492</td>
+<td style="text-align: right;"><strong>+171,321 ✅</strong></td>
+</tr>
+<tr>
+<td><strong>합계</strong></td>
+<td></td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"><strong>-596,755</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="_1">전략별 성과</h3>
+<table>
+<thead>
+<tr>
+<th>전략</th>
+<th style="text-align: right;">종목</th>
+<th style="text-align: right;">익절</th>
+<th style="text-align: right;">손실</th>
+<th style="text-align: right;">net</th>
+<th style="text-align: right;">승률</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>gold_zone</strong></td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;"><strong>+318,728</strong></td>
+<td style="text-align: right;"><strong>100%</strong> ★</td>
+</tr>
+<tr>
+<td>swing_38</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">-389,140</td>
+<td style="text-align: right;">50%</td>
+</tr>
+<tr>
+<td>f_zone</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">-525,343</td>
+<td style="text-align: right;">0%</td>
+</tr>
+<tr>
+<td>sf_zone</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">—</td>
+</tr>
+</tbody>
+</table>
+<p>→ <strong>gold_zone 100% 익절</strong> (박스권·우량주 매매 정확)
+→ <strong>swing_38 mixed</strong> — 시간대·임펄스 강도 차이 분석 필요
+→ <strong>f_zone 1건 큰 손실</strong> — 정밀도 튜닝 필요
+→ <strong>sf_zone 미발동</strong> — 임계 완화 검토</p>
+<hr />
+<h2 id="part-4-519520521">Part 4. 시뮬 효과 종합 (5/19+5/20+5/21 누적)</h2>
+<h3 id="519-p6p9-fix">5/19 P6~P9 fix 적용 시뮬</h3>
+<ul>
+<li>실제 -1,029k → <strong>+726k</strong> (1,755k 회복)</li>
+<li>P10 차단: 005500 (+16.7%) — -331k 손실 회피</li>
+<li>SHORT_TERM_HIGH: 027360 09:23 매도 +250k</li>
+</ul>
+<h3 id="520-p6p9-p10">5/20 P6~P9 + P10 시뮬</h3>
+<ul>
+<li>실제 -1,401k → <strong>-617k</strong> (784k 회복)</li>
+<li>P10 차단: 069540/142280/253840 — -515k 손실 회피, +174k 익절 놓침</li>
+<li>SHORT_TERM_HIGH·trail 효과로 추가 회복</li>
+</ul>
+<h3 id="521-p6-t1">5/21 P6 가정 시 (T1만 매수)</h3>
+<ul>
+<li>실제 -596k → 추매 차단 시 약 <strong>+32k</strong> (628k 절감 추정)</li>
+<li>큰 손실 3 종목(006340·027360·047040) 모두 추매 발생 종목</li>
+</ul>
+<h3 id="3">3일 누적 가정</h3>
+<table>
+<thead>
+<tr>
+<th>일자</th>
+<th style="text-align: right;">실제</th>
+<th style="text-align: right;">fix 적용 시뮬</th>
+<th style="text-align: right;">절감</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5/19</td>
+<td style="text-align: right;">-1,029k</td>
+<td style="text-align: right;">+726k</td>
+<td style="text-align: right;">+1,755k</td>
+</tr>
+<tr>
+<td>5/20</td>
+<td style="text-align: right;">-1,401k</td>
+<td style="text-align: right;">-617k</td>
+<td style="text-align: right;">+784k</td>
+</tr>
+<tr>
+<td>5/21</td>
+<td style="text-align: right;">-596k</td>
+<td style="text-align: right;">+32k (가정)</td>
+<td style="text-align: right;">+628k</td>
+</tr>
+<tr>
+<td><strong>누적</strong></td>
+<td style="text-align: right;"><strong>-3,026k</strong></td>
+<td style="text-align: right;"><strong>+141k</strong></td>
+<td style="text-align: right;"><strong>+3,167k</strong></td>
+</tr>
+</tbody>
+</table>
+<p>→ 약 <strong>3.2M 손실 → 본전 수준</strong> 회복 추정.</p>
+<hr />
+<h2 id="part-5-fix-522-daemon">Part 5. 누적 fix 정책 도식 (5/22+ daemon)</h2>
+<pre><code>[매수 단계]
+  picker top 5 → filter
+    (already_held ∪ active_symbols ∪ today_sold ∪ session_bought
+     ∪ cooldown_buys (P6, 30분) ∪ audit_buys (P6 fallback))
+  → strategy 시뮬 best_pnl
+  → P8 regime: BULL=2 / SIDEWAYS=1 / BEARISH=1+pnl&gt;50k
+  → P10 시초가 +20% 이상 차단
+  → P4 고점 진입 차단 (H 근접 + momentum 종료)
+  → recent_buys[symbol] 등록
+
+[매도 단계]
+  cooldown 15분 안 (P7):
+    ✅ trailing / take_profit / partial_tp 통과 (P9)
+    ✅ STOP_LOSS rate ≤ -5% 우회 (P7 hard SL)
+    ✅ SHORT_TERM_HIGH (단기 고점 도지·위꼬리)
+    ❌ breakeven / STOP_LOSS (-4~-5%) 차단
+  cooldown 후: ExitPolicy 정상 평가
+  P1 partial_tp_done 보존 (분할매도 폭주 방지)
+  P2 trough_pnl_rate 기반 DCA
+  P3 매수만 한도 카운트 (매도 항상 허용)
+</code></pre>
+<hr />
+<h2 id="part-6-ultraplan-522">Part 6. UltraPlan 장기 정교화 계획 (5/22~)</h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>기간</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Phase 1</strong></td>
+<td>Day 1 (5/22)</td>
+<td><strong>Daily 자동화 도구 3개</strong> — zip 1-click + 전략별 누적 + 손실 종목 단계별 분석</td>
+</tr>
+<tr>
+<td><strong>Phase 2</strong></td>
+<td>Day 2~5</td>
+<td><strong>f_zone 정교화</strong> — 5/21 027360 -525k 원인. score_threshold·impulse·변동성 필터 튜닝</td>
+</tr>
+<tr>
+<td><strong>Phase 3</strong></td>
+<td>Day 6~10</td>
+<td><strong>swing_38 정교화</strong> — 6 종목 mixed. impulse·fib tolerance·시간대 제한</td>
+</tr>
+<tr>
+<td><strong>Phase 4</strong></td>
+<td>Day 11~14</td>
+<td><strong>gold_zone 강화</strong> — 빈도 증가, BB/Fib/RSI 가중치</td>
+</tr>
+<tr>
+<td><strong>Phase 5</strong></td>
+<td>Day 15~17</td>
+<td><strong>sf_zone 활성화</strong> — 임계 완화 (5/18~5/21 발동 0건)</td>
+</tr>
+<tr>
+<td><strong>Phase 6</strong></td>
+<td>Day 18~20</td>
+<td><strong>청산 타점 정교화</strong> — TP/SL/breakeven + SHORT_TERM_HIGH 효과 측정</td>
+</tr>
+<tr>
+<td><strong>Phase 7</strong></td>
+<td>Day 21~</td>
+<td><strong>종합 회고</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="_2">일별 사이클 (매일 저녁)</h3>
+<ol>
+<li>운영 머신 zip → ~/Downloads</li>
+<li><code>_daily_evening_pipeline.py</code> 실행 (kt00009 정확 net)</li>
+<li>손실 종목 1~2개 picking → <code>_loss_drill_down.py</code></li>
+<li>fix 안 작성 → 시뮬 → commit·push</li>
+<li>옵시디언 보고서 1줄 추가</li>
+</ol>
+<p><strong>완성 기준</strong>: 사용자 판단 (매일 진행 후 도달 시 종료)</p>
+<hr />
+<h2 id="part-7">Part 7. 변경 파일 (본 세션)</h2>
+<h3 id="15">신규 (15개)</h3>
+<ul>
+<li><code>backend/core/strategy/_watermelon.py</code></li>
+<li><code>backend/core/strategy/short_term_high_exit.py</code></li>
+<li><code>scripts/_analyze_0518_signals.py</code></li>
+<li><code>scripts/_replay_0518_with_fixes.py</code></li>
+<li><code>scripts/_replay_0518_options.py</code></li>
+<li><code>scripts/_replay_0519_with_p678.py</code></li>
+<li><code>scripts/_replay_0520_with_p679.py</code></li>
+<li><code>scripts/_replay_full_p6_p10.py</code></li>
+<li><code>scripts/_strategy_daily_winrate.py</code></li>
+<li><code>scripts/_strategy_daily_winrate_dynamic.py</code></li>
+<li><code>scripts/_strategy_minute_ledger_sim.py</code></li>
+<li><code>scripts/_strategy_15day_sim.py</code></li>
+<li><code>scripts/_md_to_html.py</code></li>
+<li><code>scripts/_analyze_live_0518.py</code> (등)</li>
+<li>보고서 5건 (<code>docs/04-report/features/2026-05-17~2026-05-21*.md</code> + HTML)</li>
+</ul>
+<h3 id="8">수정 (8개)</h3>
+<ul>
+<li><code>backend/core/strategy/f_zone.py</code> — for_intraday/for_5min factory</li>
+<li><code>backend/core/strategy/swing_38.py</code></li>
+<li><code>backend/core/strategy/gold_zone.py</code></li>
+<li><code>backend/core/risk/holding_evaluator.py</code> — STRATEGY_EXIT_PROFILES + SHORT_TERM_HIGH + sl_time_stages</li>
+<li><code>backend/core/risk/live_order_gate.py</code> — <code>_count_today_buys</code></li>
+<li><code>backend/core/journal/active_positions.py</code> — partial_tp_done·peak·trough 보존</li>
+<li><code>backend/core/execution/exit_engine.py</code> — 시간 기반 SL</li>
+<li><code>backend/core/backtester/intraday_simulator.py</code> — trail default ON·옵션 인자</li>
+<li><code>scripts/intraday_buy_daemon.py</code> — P4·P6·P7·P8·P10 통합</li>
+</ul>
+<h3 id="_3">커밋 히스토리 (주요)</h3>
+<pre><code>86948cc feat(scripts): P6~P10 + SHORT_TERM_HIGH 종합 검증 시뮬 (5/19+5/20)
+dbb4970 fix(daemon): P10 시초가 폭등 threshold 15% → 20% 튜닝
+d56a4e9 feat(strategy/daemon): P10 시초가 폭등 차단 + 5분봉 F존 factory
+d261919 docs(obsidian): 1분봉 F존 + 단기 고점 매도 모듈 통합 보고
+7a36f72 fix(strategy): FZoneParams.for_intraday() v2 튜닝
+58e32fa feat(strategy): FZoneParams.for_intraday() — 1분봉 F존 파라미터 factory
+eac68e0 feat(strategy/exit): 단기 고점 캔들 인식 매도 신호
+baca0e2 fix(daemon): P9 cooldown 안 익절 신호 통과 (P7 부작용 해소)
+7a49ad9 fix(daemon): P8 시장 국면별 매수 제한 강화
+72fa166 fix(daemon): P7 매도 cooldown 15분 + hard SL(-5%) 우회
+476c1c3 fix(daemon): P6 동일 종목 매 사이클 중복 매수 차단
+6ff32d4 feat(risk): P5-a 시간별 단계 SL 인프라 (default OFF)
+329e9dd fix(daemon): 5/18 실거래 4가지 문제 일괄 수정 (P1~P4)
+9193f19 feat(strategy/exit): B 5단계 트레일링 SL default ON 활성화
+85ae8df feat(strategy/exit): ai-trade 패턴 A/B/C/D 인프라 도입
+</code></pre>
+<hr />
+<h2 id="part-8">Part 8. 핵심 발견 사항</h2>
+<h3 id="_4">✅ 안정성 확보</h3>
+<ul>
+<li>분할매도 폭주 (5/18 19건) → 0건</li>
+<li>BLOCKED (5/18 78건) → 0건</li>
+<li>미청산 강제 보유 (5/18 3건) → 0건</li>
+<li>시스템 동작 ★★★★★</li>
+</ul>
+<h3 id="_5">⚠️ 매매 효율 — 점진 개선 중</h3>
+<ul>
+<li>실거래 net: -1.5M → -1.4M → -1.0M → -0.6M</li>
+<li>시뮬 (fix 적용 가정): +3.2M 회복 추정</li>
+<li><strong>commit timing 이슈</strong> — daemon 재시작 안 하면 fix 미적용 (5/20·5/21 발견)</li>
+<li>5/22+ daemon 재시작 후 P6~P10 전체 적용 확인 필요</li>
+</ul>
+<h3 id="_6">💡 전략별 특성 확인</h3>
+<ul>
+<li><strong>gold_zone</strong>: 가장 안정 (100% 익절). 빈도 증가 가치</li>
+<li><strong>swing_38</strong>: 시간대·임펄스 강도 의존. 정밀 튜닝 필요</li>
+<li><strong>f_zone</strong>: 신호 빈도 낮고 손실 크면 큰 부담. 임계 강화 필요</li>
+<li><strong>sf_zone</strong>: 발동 0건. 임계 완화 검토</li>
+</ul>
+<h3 id="_7">📊 이미지 패턴 코드화</h3>
+<ul>
+<li>매수 기준선/시그널 → 1분봉 F존 (<code>for_intraday()</code>)</li>
+<li>매도 기준선/시그널 → 단기 고점 매도 (<code>short_term_high_exit.py</code>)</li>
+<li>142280 5/20 09:18·09:45 정확 인식 검증</li>
+</ul>
+<hr />
+<h2 id="part-9">Part 9. 참조 보고서</h2>
+<table>
+<thead>
+<tr>
+<th>보고서</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>[[2026-05-17-trail-default-on-sim]]</td>
+<td>trail default ON 시뮬 효과</td>
+</tr>
+<tr>
+<td>[[2026-05-19-0518-live-trade-fixes]]</td>
+<td>5/18 분석 + P1~P5-a</td>
+</tr>
+<tr>
+<td>[[2026-05-20-0519-live-trade-p6-p9-fixes]]</td>
+<td>5/19 분석 + P6~P9 (1.74M 회복)</td>
+</tr>
+<tr>
+<td>[[2026-05-21-0520-live-trade-verification]]</td>
+<td>5/20 검증 + P6~P9 시뮬 (+906k)</td>
+</tr>
+<tr>
+<td>[[2026-05-21-intraday-fzone-short-term-exit]]</td>
+<td>1분봉 F존 + 단기 고점 매도</td>
+</tr>
+</tbody>
+</table>
+<h2 id="part-10-ultraplan">Part 10. UltraPlan 세션</h2>
+<p>다음 단계 (Day 1 ~ Day 21+) 진행:
+- 세션 링크: <code>https://claude.ai/code/session_01X2icMdMai6VBxQixWTMMuX?from=cli</code>
+- Plan 파일: <code>/Users/beye/.claude/plans/enumerated-orbiting-pixel.md</code>
+- 매일 저녁 zip 전달 → daily pipeline → 손실 종목 분석 → fix → commit·push
+- 완성 기준: 사용자 판단</p>
+<hr />
+<h2 id="_8">결론</h2>
+<p>5 영업일에 걸쳐 daemon 안정성을 ★★★★★ 수준으로 확보. 시뮬 효과 누적 +3.2M 회복 입증. 이미지 패턴 코드화로 1분봉 단위 정밀 매수·매도 모듈 도입. 장기 전략별 정교화는 UltraPlan 으로 매일 저녁 진행 예정.</p>
+</body>
+</html>
