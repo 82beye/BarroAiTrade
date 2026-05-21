@@ -138,9 +138,20 @@ def format_buy_alert(symbol: str, name: str, qty: int, order_no: str, dry_run: b
     )
 
 
+_SELL_TAGS: dict[str, str] = {
+    "take_profit":      "✅ TP",
+    "partial_tp":       "📊 분할TP",
+    "trailing_stop":    "📉 트레일",
+    "short_term_high":  "⚡ 단기고점",
+    "breakeven_stop":   "🔒 BE",
+    "time_tightened_sl": "⏱ T-SL",
+    "stop_loss":        "🛑 SL",
+}
+
+
 def format_sell_alert(symbol: str, name: str, qty: int, signal: str, pnl_rate: float,
                       order_no: str, dry_run: bool) -> str:
-    tag = "🧪 DRY_RUN" if dry_run else ("✅ TP" if signal == "take_profit" else "🛑 SL")
+    tag = "🧪 DRY_RUN" if dry_run else _SELL_TAGS.get(signal, f"🛑 {signal}")
     return (
         f"*{tag} 매도*\n"
         f"종목: `{symbol}` {name}\n"
