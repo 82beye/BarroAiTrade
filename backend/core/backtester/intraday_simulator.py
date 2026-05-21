@@ -161,9 +161,11 @@ def _build_strategies(
 
             out.append(SFZoneStrategy())
         elif sid == "gold_zone":
-            from backend.core.strategy.gold_zone import GoldZoneStrategy
+            from backend.core.strategy.gold_zone import GoldZoneStrategy, GoldZoneParams
 
-            out.append(GoldZoneStrategy())
+            # BAR-OPS-09 Phase 4: 변동성 필터 명시 적용 — LG계열(저변동·고가주) 가짜 시그널 차단.
+            # default 0.0 (회귀 보존), 시뮬 진입점에서만 0.035 활성화 (f_zone 동일 패턴).
+            out.append(GoldZoneStrategy(GoldZoneParams(min_atr_pct=0.035)))
         elif sid == "swing_38":
             from backend.core.strategy.swing_38 import Swing38Strategy
 
