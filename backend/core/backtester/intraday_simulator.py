@@ -158,8 +158,12 @@ def _build_strategies(
             out.append(FZoneStrategy(FZoneParams(min_atr_pct=0.035)))
         elif sid == "sf_zone":
             from backend.core.strategy.sf_zone import SFZoneStrategy
+            from backend.core.strategy.f_zone import FZoneParams
 
-            out.append(SFZoneStrategy())
+            # BAR-OPS-09 Phase 5: 변동성 필터 명시 적용 — sf_zone 의 inner FZoneStrategy 에 min_atr_pct=0.035.
+            # default 0.0 (회귀 보존), 시뮬 진입점에서만 0.035 활성화 (Phase 4 gold_zone 동일 패턴).
+            # 누적 발동 5건 모두 flu% ≥10.2% — ATR% 도 충분히 높을 가능성, 100% win 보존 기대.
+            out.append(SFZoneStrategy(FZoneParams(min_atr_pct=0.035)))
         elif sid == "gold_zone":
             from backend.core.strategy.gold_zone import GoldZoneStrategy, GoldZoneParams
 
