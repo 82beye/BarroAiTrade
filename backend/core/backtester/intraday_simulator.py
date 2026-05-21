@@ -193,9 +193,12 @@ def _build_strategies(
             # default 0.0 (회귀 보존), 시뮬 진입점에서만 0.035 활성화 (f_zone 동일 패턴).
             out.append(GoldZoneStrategy(GoldZoneParams(min_atr_pct=0.035)))
         elif sid == "swing_38":
-            from backend.core.strategy.swing_38 import Swing38Strategy
+            from backend.core.strategy.swing_38 import Swing38Strategy, Swing38Params
 
-            out.append(Swing38Strategy())
+            # BAR-OPS-09 Phase 6: 변동성 필터 명시 적용 — 저변동주 가짜 시그널 차단 (Phase 4/5 동일 패턴).
+            # default 0.0 (회귀 보존), 시뮬 진입점에서만 0.035 활성화.
+            # 누적 손실 패턴: 5/15 LG씨엔에스 -514k (flu% 7.5%), 5/14 삼성전자 -80k (flu% 4.2%) 등.
+            out.append(Swing38Strategy(Swing38Params(min_atr_pct=0.035)))
         elif sid == "scalping_consensus":
             from backend.core.strategy.scalping_consensus import (
                 ScalpingConsensusStrategy,

@@ -7,7 +7,7 @@ PositionSize / HealthCheck / Baseline / crypto.
 
 from __future__ import annotations
 
-from datetime import datetime, time as dtime, timezone
+from datetime import datetime, time as dtime, timedelta, timezone
 from decimal import Decimal
 
 import numpy as np
@@ -168,3 +168,47 @@ class TestSwing38BaselineRegression:
         reports = run_baseline(seed=42, num_candles=250)
         assert len(reports["f_zone_v1"].trades) == 6
         assert len(reports["blue_line_v1"].trades) == 12
+
+
+class TestSwing38VolatilityFilter:
+    """BAR-OPS-09 Phase 6 — Swing38 변동성 필터 (Phase 4/5 동일 패턴).
+
+    저변동주 손실 패턴 차단:
+    - 5/15 LG씨엔에스 -514k (10 trades, win 0%, flu% 7.5%)
+    - 5/14 삼성전자 -80k (2 trades, win 0%, flu% 4.2%)
+    - 5/15 SFA반도체 -54k (12 trades, win 0%, flu% 15.8%)
+    """
+
+    def _candles(self, atr_target_pct: float, n: int = 70):
+        out = []
+        t0 = datetime(2026, 5, 1, 9, 0)
+        base = 1000
+        tr = base * atr_target_pct
+        for i in range(n):
+            out.append(OHLCV(
+                symbol="TEST",
+                timestamp=t0 + timedelta(days=i),
+                open=base, high=base + tr / 2, low=base - tr / 2, close=base,
+                volume=10000, market_type=MarketType.STOCK,
+            ))
+        return out
+
+    def test_atr_pct_static_computation(self):
+        candles = self._candles(0.05)
+        atr = Swing38Strategy._atr_pct(candles, n=14)
+        assert 0.04 <= atr <= 0.06, f"atr={atr}, ~5% 예상"
+
+    def test_low_atr_rejected_when_filter_enabled(self):
+        s = Swing38Strategy(Swing38Params(min_atr_pct=0.035))
+        candles = self._candles(0.02, n=70)
+        ctx = AnalysisContext(symbol="LOW_VOL", candles=candles, market_type=MarketType.STOCK)
+        result = s._analyze_v2(ctx)
+        assert result is None, "저변동 종목 진입 거부 실패"
+
+    def test_default_filter_disabled(self):
+        s = Swing38Strategy()
+        assert s.params.min_atr_pct == 0.0
+
+    def test_default_atr_n_is_14(self):
+        s = Swing38Strategy()
+        assert s.params.atr_n == 14
