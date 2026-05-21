@@ -686,28 +686,13 @@ def _day_change_pct(candles_window: list[OHLCV]) -> Decimal:
 
 
 def _atr_pct(candles_window: list[OHLCV], n: int = 14) -> Decimal:
-    """최근 n봉의 True Range 평균을 마지막 close 로 나눈 비율 (예: 0.025 = 2.5%).
+    """ATR% wrapper — see backend.core.strategy.indicators.atr_pct (Phase 7 refactor).
 
-    분봉/일봉 무관 동일 공식. 종목별 변동성 적응 SL 계산에 사용.
+    Strategy 들이 float 을 받는 반면 IntradaySimulator 는 Decimal 계산에 사용하므로
+    여기서 변환.
     """
-    if len(candles_window) < 2:
-        return Decimal("0")
-    n = min(n, len(candles_window) - 1)
-    trs = []
-    for i in range(1, n + 1):
-        c = candles_window[-i]
-        prev = candles_window[-i - 1]
-        tr = max(
-            c.high - c.low,
-            abs(c.high - prev.close),
-            abs(c.low - prev.close),
-        )
-        trs.append(tr)
-    atr = sum(trs) / len(trs) if trs else 0.0
-    last_close = candles_window[-1].close
-    if last_close <= 0:
-        return Decimal("0")
-    return Decimal(str(atr / last_close))
+    from backend.core.strategy.indicators import atr_pct
+    return Decimal(str(atr_pct(candles_window, n=n)))
 
 
 __all__ = [
