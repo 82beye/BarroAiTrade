@@ -13,6 +13,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Query, HTTPException
 
 from backend.core.scanner import SignalScanner
+from backend.core.strategy.f_zone import FZoneParams
 from backend.models.signal import EntrySignal
 from backend.models.market import MarketType
 from backend.core.state import app_state
@@ -64,7 +65,11 @@ async def scan_signals(
         }
 
     try:
-        scanner = SignalScanner(gateway)
+        # BAR-44 변동성 필터 운영 경로 적용 — ATR% < 3.5% 차단 (저변동·고가주 가짜 시그널 방지)
+        scanner = SignalScanner(
+            gateway,
+            f_zone_params=FZoneParams(min_atr_pct=0.035),
+        )
         signals = await scanner.scan(symbol_list)
         return {
             "market_type": market_type,
