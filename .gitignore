@@ -62,6 +62,12 @@ htmlcov/
 # Runtime data (SQLite, OHLCV cache 등)
 data/
 
+# Phase 1 daily pipeline 런타임 산출물 (analysis/*.py 는 추적 유지)
+analysis/imports/
+analysis/strategy_ledger.csv
+analysis/strategy_perf.csv
+analysis/strategy_perf.png
+
 # Obsidian — config 는 공유, UI 상태·캐시·플러그인 데이터만 ignore
 docs/.obsidian/graph.json
 docs/.obsidian/workspace.json
