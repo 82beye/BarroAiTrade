@@ -253,7 +253,8 @@ async def _cmd_sell_execute(bot: TelegramBot, msg: dict) -> str:
     if not targets:
         return "TP/SL 도달 종목 없음 (모두 HOLD) — 발급 X"
     pending = [
-        PendingOrder(symbol=d.symbol, name=d.name, qty=d.qty, side="sell")
+        PendingOrder(symbol=d.symbol, name=d.name, qty=d.qty, side="sell",
+                     signal=d.signal.value)
         for d in targets
     ]
     batch = _CONFIRM_STORE.issue(chat_id=chat_id, orders=pending)
@@ -290,12 +291,20 @@ async def _cmd_confirm_sell(bot: TelegramBot, msg: dict) -> str:
     dry_run = os.environ.get("LIVE_TRADING_ENABLED", "").lower() not in {"1", "true", "yes", "on"}
     executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=dry_run)
     gate = LiveOrderGate(executor=executor, audit_path=_AUDIT_PATH, policy=GatePolicy())
+    pos_store = ActivePositionStore(_POS_LOG)
     lines = [f"🚀 *매도 실행* (dry\\_run={dry_run})"]
     for o in batch.orders:
         try:
             r = await gate.place_sell(symbol=o.symbol, qty=o.qty)
             tag = "🧪 DRY_RUN" if r.dry_run else "✅ ORDERED"
             lines.append(f"{tag} `{o.symbol}` qty={o.qty}")
+            if o.signal == "partial_tp":
+                pos = pos_store.load_all().get(o.symbol)
+                if pos:
+                    pos.partial_tp_done = True
+                    pos_store.upsert(pos)
+            else:
+                pos_store.remove(o.symbol)
         except Exception as e:
             lines.append(f"❌ `{o.symbol}` {type(e).__name__}: {str(e)[:80]}")
     return "\n".join(lines)

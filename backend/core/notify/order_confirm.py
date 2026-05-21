@@ -29,6 +29,7 @@ class PendingOrder:
     name: str
     qty: int
     side: str = "buy"        # "buy" / "sell" (BAR-OPS-27)
+    signal: str = ""         # SellSignal.value — 매도 후 position store 업데이트용
 
 
 @dataclass
