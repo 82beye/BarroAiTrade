@@ -498,7 +498,7 @@ async def _scan_and_buy(
                     cur = float(c.cur_price)
                     if first_open > 0:
                         intraday_change_pct = (cur - first_open) / first_open * 100
-                        MAX_INTRADAY_CHANGE_PCT = 15.0
+                        MAX_INTRADAY_CHANGE_PCT = 20.0
                         if intraday_change_pct >= MAX_INTRADAY_CHANGE_PCT:
                             ts_p = _now_kst().strftime("%H:%M:%S")
                             print(
