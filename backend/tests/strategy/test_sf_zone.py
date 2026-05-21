@@ -12,6 +12,7 @@ from decimal import Decimal
 import pytest
 
 from backend.core.strategy.base import Strategy
+from backend.core.strategy.f_zone import FZoneParams
 from backend.core.strategy.sf_zone import SFZoneStrategy
 from backend.models.strategy import Account
 
@@ -133,3 +134,29 @@ class TestSFZoneBaselineRegression:
         # F존 베이스라인 보존 (SF존은 별도 strategy 라 baseline 영향 0)
         f = reports["f_zone_v1"]
         assert len(f.trades) == 6, f"F존 거래 수 회귀 ({len(f.trades)} ≠ 6)"
+
+
+class TestSFZoneVolatilityFilter:
+    """BAR-OPS-09 Phase 5 — sf_zone 변동성 필터 (inner FZoneStrategy delegate).
+
+    sf_zone 은 delegate 패턴 — inner FZoneStrategy 의 ATR 게이트로 차단.
+    IntradaySimulator 시뮬 진입점(intraday_simulator.py:163)에서 명시 override
+    FZoneParams(min_atr_pct=0.035) 적용 — Phase 4 gold_zone 동일 패턴.
+
+    누적 41 runs / 5 발동 (100% win) — 발동 종목 모두 flu% ≥10.2% 라 영향 적을 가능성.
+    """
+
+    def test_explicit_override_propagates_to_inner(self):
+        """SFZoneStrategy(FZoneParams(min_atr_pct=0.035)) → inner.params.min_atr_pct=0.035."""
+        s = SFZoneStrategy(FZoneParams(min_atr_pct=0.035))
+        assert s._inner.params.min_atr_pct == 0.035
+
+    def test_default_inner_atr_disabled(self):
+        """default (params=None) → inner.params.min_atr_pct=0.0 (baseline 회귀 보존)."""
+        s = SFZoneStrategy()
+        assert s._inner.params.min_atr_pct == 0.0
+
+    def test_inner_atr_n_default(self):
+        """inner default atr_n=14 — f_zone 동일 표준."""
+        s = SFZoneStrategy()
+        assert s._inner.params.atr_n == 14
