@@ -22,6 +22,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+
 from pydantic import SecretStr
 
 from backend.core.backtester import IntradaySimulator
@@ -333,7 +335,7 @@ def _save_refined_signals(signals: list, regime) -> None:
             for c, strategy, pnl in signals
         ],
     }
-    path = Path("data/refined_signals.json")
+    path = _DATA_DIR / "refined_signals.json"
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -636,7 +638,7 @@ async def _save_balance_snapshot(oauth) -> None:
         today_str = _now_kst().strftime("%Y-%m-%d")
         now_str = _now_kst().isoformat()
 
-        path = Path("data/balance_history.json")
+        path = _DATA_DIR / "balance_history.json"
         history: list[dict] = []
         if path.exists():
             try:
