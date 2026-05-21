@@ -32,6 +32,11 @@ class BlueLineParams:
     min_gain_pct: float = 0.005   # 최소 상승률: 0.5%
     min_candles: int = 60
 
+    # BAR-OPS-09 Phase 3 — 변동성 필터: ATR% < min_atr_pct 시 진입 거부.
+    # default 0.0 (필터 비활성) — 기존 회귀 보존. 운영 적용은 SignalScanner 명시 override.
+    min_atr_pct: float = 0.0
+    atr_n: int = 14
+
 
 class BlueLineStrategy(Strategy):
     """블루라인 전략 엔진"""
@@ -55,6 +60,16 @@ class BlueLineStrategy(Strategy):
         p = self.params
         if len(candles) < p.min_candles:
             return None
+
+        # BAR-OPS-09 Phase 3: 변동성 필터 — ATR% < min_atr_pct 시 진입 거부 (저변동·고가주 가짜 시그널 방지)
+        if p.min_atr_pct > 0:
+            atr_pct = self._atr_pct(candles, n=p.atr_n)
+            if atr_pct < p.min_atr_pct:
+                logger.debug(
+                    "%s: ATR%% 임계 미달 (%.3f < %.3f) — blue_line 진입 거부",
+                    symbol, atr_pct, p.min_atr_pct,
+                )
+                return None
 
         df = self._to_dataframe(candles)
 
@@ -113,3 +128,28 @@ class BlueLineStrategy(Strategy):
         df = pd.DataFrame(rows)
         df.set_index("timestamp", inplace=True)
         return df
+
+    @staticmethod
+    def _atr_pct(candles: List[OHLCV], n: int = 14) -> float:
+        """True Range 평균 / 마지막 close 비율 — 종목 변동성 측정.
+
+        f_zone._atr_pct 와 동일 공식. 순환 import 회피 위해 정적 메서드로 자체 구현.
+        """
+        if len(candles) < 2:
+            return 0.0
+        n = min(n, len(candles) - 1)
+        trs: list[float] = []
+        for i in range(1, n + 1):
+            c = candles[-i]
+            prev = candles[-i - 1]
+            tr = max(
+                c.high - c.low,
+                abs(c.high - prev.close),
+                abs(c.low - prev.close),
+            )
+            trs.append(tr)
+        atr = sum(trs) / len(trs) if trs else 0.0
+        last_close = candles[-1].close
+        if last_close <= 0:
+            return 0.0
+        return atr / last_close
