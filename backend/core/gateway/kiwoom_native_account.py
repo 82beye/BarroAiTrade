@@ -303,6 +303,7 @@ class KiwoomNativeAccountFetcher:
         url = f"{self._oauth.base_url}{_ACCT_PATH}"
         _retries = 3
         _retry_delay = 1.0
+        _auth_retried = False
         try:
             for attempt in range(_retries):
                 try:
@@ -325,6 +326,14 @@ class KiwoomNativeAccountFetcher:
                         continue
                     resp.raise_for_status()
                     data = resp.json()
+                    # rc=3 인증 실패 → 토큰 무효화 후 1회 재시도
+                    rc = data.get("return_code")
+                    if rc == 3 and not _auth_retried:
+                        _auth_retried = True
+                        logger.warning("account 인증 실패 tr=%s — 토큰 재발급 후 재시도", tr_id)
+                        self._oauth.invalidate_token()
+                        token = await self._oauth.get_token()
+                        continue
                     # 연속조회 헤더 보존
                     data["_cont_yn"] = resp.headers.get("cont-yn", "N")
                     data["_next_key"] = resp.headers.get("next-key", "")

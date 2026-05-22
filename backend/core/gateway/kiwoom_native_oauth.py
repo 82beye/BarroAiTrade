@@ -66,8 +66,16 @@ class KiwoomNativeOAuth:
             now = datetime.now()
             if self._token and (self._token.expires_at - now).total_seconds() > self._margin:
                 return self._token
+            logger.info("OAuth 토큰 발급/갱신 시도 (기존 만료: %s)",
+                        self._token.expires_at.isoformat() if self._token else "없음")
             self._token = await self._issue(now)
+            logger.info("OAuth 토큰 갱신 완료 (만료: %s)", self._token.expires_at.isoformat())
             return self._token
+
+    def invalidate_token(self) -> None:
+        """토큰 무효화 — API에서 인증 실패(rc=3) 시 호출."""
+        self._token = None
+        logger.warning("OAuth 토큰 무효화됨 — 다음 호출 시 재발급")
 
     async def _issue(self, now: datetime) -> KiwoomNativeToken:
         url = f"{self._base_url}/oauth2/token"
