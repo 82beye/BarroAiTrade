@@ -125,7 +125,10 @@ async def get_risk_status() -> dict:
             "daily_limit_breached": breached,
             "new_entry_blocked": breached,
             "limits": {
-                "daily_loss_limit_pct": daily_loss_limit / 100,
+                "daily_loss_limit_pct": (
+                    float(_eng_limits.daily_loss_limit_pct) if _eng_limits
+                    else daily_loss_limit / 100
+                ),
                 "max_concurrent_positions": max_positions,
                 "stop_loss_pct": float(_eng_limits.stop_loss_pct) if _eng_limits else -0.02,
                 "take_profit_1_pct": float(_eng_limits.take_profit_1_pct) if _eng_limits else 0.05,
