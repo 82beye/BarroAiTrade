@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, time as dtime
 from typing import List, Optional
 
 import pandas as pd
@@ -36,6 +36,11 @@ class BlueLineParams:
     # default 0.0 (필터 비활성) — 기존 회귀 보존. 운영 적용은 SignalScanner 명시 override.
     min_atr_pct: float = 0.0
     atr_n: int = 14
+
+    # BAR-OPS-09 Phase 8f — 진입 시간 게이트: 마지막 candle.time() >= entry_time_cutoff 시 차단.
+    # default None (비활성) — 기존 회귀 보존. 운영(SignalScanner) 진입점에서 dtime(14, 0) override.
+    # Phase 8c/8d/8e 동일 패턴 — 장 후반 진입 손실 패턴 차단.
+    entry_time_cutoff: Optional[dtime] = None
 
 
 class BlueLineStrategy(Strategy):
@@ -68,6 +73,16 @@ class BlueLineStrategy(Strategy):
                 logger.debug(
                     "%s: ATR%% 임계 미달 (%.3f < %.3f) — blue_line 진입 거부",
                     symbol, atr_pct, p.min_atr_pct,
+                )
+                return None
+
+        # BAR-OPS-09 Phase 8f: 진입 시간 게이트 — 장 후반 진입 차단 (청산 여유 부족 손실 방지).
+        if p.entry_time_cutoff is not None:
+            last_ts = candles[-1].timestamp
+            if last_ts.time() >= p.entry_time_cutoff:
+                logger.debug(
+                    "%s: 진입 시간 cutoff 도달 (%s >= %s) — blue_line 진입 거부",
+                    symbol, last_ts.time(), p.entry_time_cutoff,
                 )
                 return None
 
