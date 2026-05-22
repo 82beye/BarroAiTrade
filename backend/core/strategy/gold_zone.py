@@ -54,6 +54,12 @@ class GoldZoneParams:
     min_atr_pct: float = 0.0
     atr_n: int = 14
 
+    # BAR-OPS-09 Phase 8d — 진입 시간 게이트: 마지막 candle.time() >= entry_time_cutoff 시 차단.
+    # default None (비활성) — 기존 회귀 보존. IntradaySimulator 시뮬 진입점에서 dtime(14, 0) override.
+    # 패턴: 5/22 379800 KODEX 미국S&P500 진입 15:01 (장 마감 19분 전, w=0.5 약한 시그널) 같은 위험 차단.
+    # 운영 분봉 candle 기준 작동 (Phase 8c swing_38 와 동일 패턴).
+    entry_time_cutoff: Optional[dtime] = None
+
 
 class GoldZoneStrategy(Strategy):
     """골드존 — BB 하단 + Fib 0.382~0.618 + RSI 회복."""
@@ -72,6 +78,12 @@ class GoldZoneStrategy(Strategy):
         if p.min_atr_pct > 0:
             atr_pct = self._atr_pct(ctx.candles, n=p.atr_n)
             if atr_pct < p.min_atr_pct:
+                return None
+
+        # BAR-OPS-09 Phase 8d: 진입 시간 게이트 — 장 후반 진입 차단 (청산 여유 부족 손실 방지).
+        if p.entry_time_cutoff is not None:
+            last_ts = ctx.candles[-1].timestamp
+            if last_ts.time() >= p.entry_time_cutoff:
                 return None
 
         df = self._to_dataframe(ctx.candles)

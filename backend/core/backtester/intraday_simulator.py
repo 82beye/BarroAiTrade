@@ -189,9 +189,13 @@ def _build_strategies(
         elif sid == "gold_zone":
             from backend.core.strategy.gold_zone import GoldZoneStrategy, GoldZoneParams
 
-            # BAR-OPS-09 Phase 4: 변동성 필터 명시 적용 — LG계열(저변동·고가주) 가짜 시그널 차단.
-            # default 0.0 (회귀 보존), 시뮬 진입점에서만 0.035 활성화 (f_zone 동일 패턴).
-            out.append(GoldZoneStrategy(GoldZoneParams(min_atr_pct=0.035)))
+            # BAR-OPS-09 Phase 4: 변동성 필터 (min_atr_pct=0.035) — LG계열 차단.
+            # BAR-OPS-09 Phase 8d: 진입 시간 게이트 (entry_time_cutoff=14:00) — 379800 15:01 같은 위험 진입 차단.
+            # default 회귀 보존, 일봉 시뮬은 시간 게이트 효과 미미 (분봉 운영에 영향).
+            out.append(GoldZoneStrategy(GoldZoneParams(
+                min_atr_pct=0.035,
+                entry_time_cutoff=dtime(14, 0),
+            )))
         elif sid == "swing_38":
             from backend.core.strategy.swing_38 import Swing38Strategy, Swing38Params
 
