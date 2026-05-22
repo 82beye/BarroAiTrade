@@ -115,7 +115,7 @@ class CryptoBreakoutStrategy(Strategy):
         rows = [
             {"timestamp": c.timestamp, "open": c.open, "high": c.high,
              "low": c.low, "close": c.close, "volume": c.volume}
-            for c in reversed(candles)
+            for c in candles
         ]
         df = pd.DataFrame(rows)
         df.set_index("timestamp", inplace=True)
