@@ -53,6 +53,13 @@ class Swing38Params:
     min_atr_pct: float = 0.0
     atr_n: int = 14
 
+    # BAR-OPS-09 Phase 8 — 진입 점수 임계 (impulse*0.4 + fib*0.4 + bounce*0.2 < min_score 차단).
+    # BAR-175 score 0-10 스케일 정규화 후 — default 3.0 (기존 0.3 × 10).
+    # IntradaySimulator 시뮬 진입점에서 5.0 override (기존 0.5 × 10).
+    # 패턴: 5/22 LG전자 -148k / 삼성전기 -124k 같은 약한 swing 시그널(w=0.3 BEARISH) 진입 차단.
+    # 운영 차단은 별도 — scripts/intraday_buy_daemon.py 의 regime_weights() 임계 추가 필요 (별도 BAR).
+    min_score: float = 3.0
+
 
 class Swing38Strategy(Strategy):
     """38스윙 — 임펄스 + Fib 0.382 되돌림 + 반등."""
@@ -91,10 +98,10 @@ class Swing38Strategy(Strategy):
             return None
 
         impulse_score = min(1.0, impulse["gain_pct"] / 0.10)  # 5%~10% 정규화
-        # 0-10 스케일 정규화 (다른 v2 전략과 통일 — BacktestConfig.min_signal_score=4.0 기준)
+        # BAR-175 score 0-10 스케일 정규화 + BAR-OPS-09 Phase 8 min_score 파라미터화
         raw = impulse_score * 0.4 + fib_score * 0.4 + bounce_score * 0.2
         score = raw * 10.0
-        if score < 3.0:
+        if score < p.min_score:
             return None
 
         return EntrySignal(

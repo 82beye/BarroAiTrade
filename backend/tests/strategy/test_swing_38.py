@@ -212,3 +212,33 @@ class TestSwing38VolatilityFilter:
     def test_default_atr_n_is_14(self):
         s = Swing38Strategy()
         assert s.params.atr_n == 14
+
+
+class TestSwing38ScoreThreshold:
+    """BAR-OPS-09 Phase 8 — 진입 점수 임계 파라미터화 (기존 하드코딩 0.3 → min_score).
+
+    5/22 swing_38 약한 시그널 진입 (w=0.3 BEARISH) 손실 패턴 차단 목적:
+    - 5/22 LG전자 -148k (w=0.3 BEARISH 가중치, 두 번 진입)
+    - 5/22 삼성전기 -124k
+    """
+
+    def test_default_min_score_preserves_0_3(self):
+        """default min_score=0.3 — 기존 하드코딩 임계 보존 (baseline 회귀)."""
+        s = Swing38Strategy()
+        assert s.params.min_score == 0.3, (
+            "default min_score 변경 — baseline 회귀 깨질 위험"
+        )
+
+    def test_explicit_override_higher_threshold(self):
+        """IntradaySimulator 시뮬 진입점이 min_score=0.5 명시 override."""
+        s = Swing38Strategy(Swing38Params(min_score=0.5))
+        assert s.params.min_score == 0.5
+
+    def test_intraday_simulator_uses_min_score_0_5(self):
+        """_build_strategies('swing_38') 가 min_score=0.5 적용 검증."""
+        from backend.core.backtester.intraday_simulator import _build_strategies
+        out = _build_strategies(['swing_38'])
+        assert len(out) == 1
+        assert out[0].params.min_score == 0.5, (
+            "IntradaySimulator swing_38 분기에서 min_score=0.5 적용 실패"
+        )
