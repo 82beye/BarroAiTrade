@@ -151,7 +151,7 @@ class KiwoomNativeOrderExecutor:
                 await client.aclose()
             await asyncio.sleep(self._rate)
 
-        rc = data.get("return_code")
+        rc = data.get("return_code", -1)
         if rc != 0:
             raise RuntimeError(
                 f"kiwoom-native cancel error: orig={original_order_no} "
@@ -225,7 +225,7 @@ class KiwoomNativeOrderExecutor:
                 await client.aclose()
             await asyncio.sleep(self._rate)
 
-        rc = data.get("return_code")
+        rc = data.get("return_code", -1)
         if rc != 0:
             raise RuntimeError(
                 f"kiwoom-native order error: side={side.value} symbol={symbol} "
