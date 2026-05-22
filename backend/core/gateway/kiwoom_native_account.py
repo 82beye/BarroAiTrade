@@ -268,7 +268,8 @@ class KiwoomNativeAccountFetcher:
                 pnl_amt = _signed_decimal(r.get("pl_amt", r.get("rlzt_pfls", "0")))
                 cmsn = _abs_decimal(r.get("cmsn_amt", r.get("cmsn", "0")))
                 tax = _abs_decimal(r.get("tax_amt", r.get("tax", "0")))
-                net = _signed_decimal(r.get("net_pl_amt", r.get("rlzt_pfls", "0")))
+                raw_net = r.get("net_pl_amt")
+                net = _signed_decimal(raw_net) if raw_net is not None else (pnl_amt - cmsn - tax)
                 all_items.append(DailyPnLEntry(
                     date=dt, pnl_amount=pnl_amt,
                     commission=cmsn, tax=tax, net_pnl=net,
