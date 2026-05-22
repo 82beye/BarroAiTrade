@@ -161,7 +161,7 @@ class ExitPlan(BaseModel):
         total = sum((t.qty_pct for t in v), Decimal(0))
         if total > Decimal("1.0001"):
             raise ValueError(f"take_profits qty_pct 합계 {total} > 1.0")
-        return v
+        return sorted(v, key=lambda t: t.price)
 
     @field_validator("trail_stages", mode="before")
     @classmethod
