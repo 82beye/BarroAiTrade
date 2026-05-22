@@ -353,7 +353,7 @@ class StrategyBacktester:
         if open_trade is not None:
             last_price = candles[-1].close
             pnl = self._calc_weighted_pnl(
-                open_trade, last_price, remaining_ratio
+                open_trade, last_price, remaining_ratio, ep
             )
             open_trade.exit_time = candles[-1].timestamp
             open_trade.exit_price = last_price
@@ -586,18 +586,13 @@ class StrategyBacktester:
 
     @staticmethod
     def _calc_weighted_pnl(
-        trade: BacktestTrade, close_price: float, remaining_ratio: float
+        trade: BacktestTrade, close_price: float, remaining_ratio: float,
+        ep: "ExitParams",
     ) -> float:
         """미청산 포지션의 가중 평균 pnl 계산"""
         entry = trade.entry_price
         current_pnl = (close_price - entry) / entry if entry > 0 else 0.0
         if trade.tp1_filled and trade.tp1_exit_price:
-            ep = ExitParams(
-                take_profit_1_pct=0.03,
-                take_profit_1_ratio=0.5,
-                take_profit_2_pct=0.05,
-                stop_loss_pct=-0.02,
-            )
             tp1_pnl = (trade.tp1_exit_price - entry) / entry
             return tp1_pnl * ep.take_profit_1_ratio + current_pnl * remaining_ratio
         return current_pnl
