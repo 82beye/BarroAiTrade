@@ -86,6 +86,12 @@ class FZoneParams:
     min_atr_pct: float = 0.0
     atr_n: int = 14
 
+    # BAR-OPS-09 Phase 8e — 진입 시간 게이트: 마지막 candle.time() >= entry_time_cutoff 시 차단.
+    # default None (비활성) — 기존 회귀 보존. 운영(SignalScanner) + 시뮬(IntradaySimulator) 진입점에서 dtime(14, 0) override.
+    # 패턴: 5/22 f_zone 036930 13:49 재진입 같은 장 후반 진입 차단 (청산 여유 부족 손실 방지).
+    # Phase 8c swing_38 / Phase 8d gold_zone 와 동일 패턴.
+    entry_time_cutoff: Optional[dtime] = None
+
 
 # ── 분석 결과 ─────────────────────────────────────────────────────────────────
 
@@ -159,6 +165,16 @@ class FZoneStrategy(Strategy):
                 logger.debug(
                     "%s: ATR%% 임계 미달 (%.3f < %.3f) — f_zone 진입 거부",
                     symbol, atr_pct, p.min_atr_pct,
+                )
+                return None
+
+        # BAR-OPS-09 Phase 8e: 진입 시간 게이트 — 장 후반 진입 차단 (청산 여유 부족 손실 방지).
+        if p.entry_time_cutoff is not None:
+            last_ts = candles[-1].timestamp
+            if last_ts.time() >= p.entry_time_cutoff:
+                logger.debug(
+                    "%s: 진입 시간 cutoff 도달 (%s >= %s) — f_zone 진입 거부",
+                    symbol, last_ts.time(), p.entry_time_cutoff,
                 )
                 return None
 

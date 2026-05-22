@@ -155,7 +155,8 @@ def _build_strategies(
             # F1 변동성 필터를 운영·시뮬 진입점에서 명시 적용 (default 는 0.0 으로
             # BAR-44 baseline 회귀 보존, 여기서만 0.035 활성화).
             # 2026-05-14 백테스트 +186k 효과 검증 — LESSON_S1_NORMALIZATION 참조.
-            out.append(FZoneStrategy(FZoneParams(min_atr_pct=0.035)))
+            # BAR-OPS-09 Phase 8e: 진입 시간 게이트 (14:00) — 장 후반 진입 차단.
+            out.append(FZoneStrategy(FZoneParams(min_atr_pct=0.035, entry_time_cutoff=dtime(14, 0))))
         elif sid == "sf_zone":
             from backend.core.strategy.sf_zone import SFZoneStrategy
             from backend.core.strategy.f_zone import FZoneParams

@@ -251,14 +251,16 @@ class TradingOrchestrator:
                     if last_scan_time is None or (now - last_scan_time) >= _DAILY_SCAN_INTERVAL_SEC:
                         logger.info("당일 분석 스캔 시작: %d종목", len(app_state.watchlist))
                         try:
+                            from datetime import time as _dtime
                             from backend.core.scanner import SignalScanner
                             from backend.core.strategy.f_zone import FZoneParams
                             from backend.core.strategy.blue_line import BlueLineParams
-                            # BAR-OPS-09 Phase 2/3: 변동성 필터 운영 경로 적용 — ATR% < 3.5% 차단 (저변동·고가주 가짜 시그널 방지)
+                            # BAR-OPS-09 Phase 2/3: 변동성 필터 운영 경로 적용 — ATR% < 3.5% 차단 (저변동·고가주).
+                            # BAR-OPS-09 Phase 8e/8f: 진입 시간 게이트 — 14:00 이후 운영 신규 진입 차단 (장 후반 청산 여유 부족 손실 방지).
                             scanner = SignalScanner(
                                 gateway,
-                                f_zone_params=FZoneParams(min_atr_pct=0.035),
-                                blue_line_params=BlueLineParams(min_atr_pct=0.035),
+                                f_zone_params=FZoneParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
+                                blue_line_params=BlueLineParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
                             )
                             signals = await scanner.scan(app_state.watchlist)
                             last_scan_time = now
