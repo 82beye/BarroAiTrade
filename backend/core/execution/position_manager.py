@@ -71,11 +71,16 @@ class PositionManager:
 
     def get_daily_pnl(self) -> Tuple[float, float]:
         """오늘 실현 손익과 수익률 반환 (pnl, pnl_pct)"""
+        today = datetime.now().date().isoformat()
+        today_trades = [
+            t for t in self._trade_history
+            if t.get("exit_time", "")[:10] == today
+        ]
         total_invested = sum(
             t.get("entry_price", 0) * t.get("quantity", 0)
-            for t in self._trade_history
+            for t in today_trades
         )
-        total_pnl = sum(t.get("pnl", 0) for t in self._trade_history)
+        total_pnl = sum(t.get("pnl", 0) for t in today_trades)
         pnl_pct = total_pnl / total_invested if total_invested > 0 else 0.0
         return total_pnl, pnl_pct
 
