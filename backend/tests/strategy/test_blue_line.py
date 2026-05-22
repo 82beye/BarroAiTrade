@@ -8,7 +8,7 @@ default 0.0 은 기존 회귀 보존.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, time as dtime, timedelta
 
 from backend.core.strategy.blue_line import BlueLineParams, BlueLineStrategy
 from backend.models.market import MarketType, OHLCV
@@ -63,3 +63,33 @@ class TestBlueLineVolatilityFilter:
         """default atr_n=14 — f_zone 과 동일 표준."""
         s = BlueLineStrategy()
         assert s.params.atr_n == 14
+
+
+class TestBlueLineEntryTimeGate:
+    """BAR-OPS-09 Phase 8f — BlueLine 진입 시간 게이트 (Phase 8c/8d/8e 동일 패턴)."""
+
+    def _candles_at(self, hour: int, minute: int, n: int = 70):
+        out = []
+        t0 = datetime(2026, 5, 22, hour, minute)
+        for i in range(n):
+            out.append(OHLCV(
+                symbol="TEST",
+                timestamp=t0 + timedelta(minutes=i),
+                open=1000, high=1010, low=990, close=1000,
+                volume=10000, market_type=MarketType.STOCK,
+            ))
+        return out
+
+    def test_default_no_time_gate(self):
+        """default entry_time_cutoff=None — 기존 회귀 보존."""
+        s = BlueLineStrategy()
+        assert s.params.entry_time_cutoff is None
+
+    def test_late_entry_blocked_with_cutoff_14_00(self):
+        """cutoff=14:00 시 마지막 candle 시각 >= 14:00 입력 차단."""
+        s = BlueLineStrategy(BlueLineParams(entry_time_cutoff=dtime(14, 0)))
+        late_candles = self._candles_at(13, 0, 70)
+        assert late_candles[-1].timestamp.time() >= dtime(14, 0)
+        ctx = AnalysisContext(symbol="LATE", candles=late_candles, market_type=MarketType.STOCK)
+        result = s._analyze_v2(ctx)
+        assert result is None, "장 후반 진입 차단 실패"

@@ -12,6 +12,8 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Query, HTTPException
 
+from datetime import time as _dtime
+
 from backend.core.scanner import SignalScanner
 from backend.core.strategy.f_zone import FZoneParams
 from backend.core.strategy.blue_line import BlueLineParams
@@ -66,11 +68,12 @@ async def scan_signals(
         }
 
     try:
-        # BAR-OPS-09 Phase 2/3: 변동성 필터 운영 경로 적용 — ATR% < 3.5% 차단 (저변동·고가주 가짜 시그널 방지)
+        # BAR-OPS-09 Phase 2/3: 변동성 필터 운영 경로 적용 — ATR% < 3.5% 차단.
+        # BAR-OPS-09 Phase 8e/8f: 진입 시간 게이트 — 14:00 이후 운영 신규 진입 차단.
         scanner = SignalScanner(
             gateway,
-            f_zone_params=FZoneParams(min_atr_pct=0.035),
-            blue_line_params=BlueLineParams(min_atr_pct=0.035),
+            f_zone_params=FZoneParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
+            blue_line_params=BlueLineParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
         )
         signals = await scanner.scan(symbol_list)
         return {
