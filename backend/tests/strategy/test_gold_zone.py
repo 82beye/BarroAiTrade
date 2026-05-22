@@ -223,3 +223,48 @@ class TestGoldZoneVolatilityFilter:
         """default atr_n=14 — f_zone/blue_line 과 동일 표준."""
         s = GoldZoneStrategy()
         assert s.params.atr_n == 14
+
+
+class TestGoldZoneEntryTimeGate:
+    """BAR-OPS-09 Phase 8d — 진입 시간 게이트 (장 후반 진입 차단).
+
+    5/22 위험 진입 차단 목적:
+    - 379800 KODEX 미국S&P500 15:01 진입 (장 마감 19분 전, w=0.5 약한 시그널)
+    - 229200 KODEX 코스닥150 13:50 진입 → -1.65% 손실 (cutoff 14:00 에는 통과, 13:00 이상 cutoff 필요시 차단)
+
+    Phase 8c swing_38 와 동일 패턴.
+    """
+
+    def _candles_at(self, hour: int, minute: int, n: int = 70):
+        out = []
+        t0 = datetime(2026, 5, 22, hour, minute)
+        for i in range(n):
+            out.append(OHLCV(
+                symbol="TEST",
+                timestamp=t0 + timedelta(minutes=i),
+                open=1000, high=1010, low=990, close=1000,
+                volume=10000, market_type=MarketType.STOCK,
+            ))
+        return out
+
+    def test_default_no_time_gate(self):
+        """default entry_time_cutoff=None — 기존 회귀 보존."""
+        s = GoldZoneStrategy()
+        assert s.params.entry_time_cutoff is None
+
+    def test_late_entry_blocked_with_cutoff_14_00(self):
+        """cutoff=14:00 시 마지막 candle 시각 >= 14:00 입력 차단."""
+        s = GoldZoneStrategy(GoldZoneParams(entry_time_cutoff=dtime(14, 0)))
+        late_candles = self._candles_at(13, 0, 70)
+        assert late_candles[-1].timestamp.time() >= dtime(14, 0)
+        ctx = AnalysisContext(symbol="LATE", candles=late_candles, market_type=MarketType.STOCK)
+        result = s._analyze_v2(ctx)
+        assert result is None, "장 후반 진입 차단 실패"
+
+    def test_intraday_simulator_uses_cutoff_14_00(self):
+        """_build_strategies('gold_zone') 가 entry_time_cutoff=dtime(14, 0) 적용."""
+        from backend.core.backtester.intraday_simulator import _build_strategies
+        out = _build_strategies(['gold_zone'])
+        assert out[0].params.entry_time_cutoff == dtime(14, 0), (
+            "IntradaySimulator gold_zone 분기에서 entry_time_cutoff=14:00 적용 실패"
+        )
