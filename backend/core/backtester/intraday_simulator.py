@@ -173,10 +173,11 @@ def _build_strategies(
         elif sid == "swing_38":
             from backend.core.strategy.swing_38 import Swing38Strategy, Swing38Params
 
-            # BAR-OPS-09 Phase 6: 변동성 필터 명시 적용 — 저변동주 가짜 시그널 차단 (Phase 4/5 동일 패턴).
-            # default 0.0 (회귀 보존), 시뮬 진입점에서만 0.035 활성화.
-            # 누적 손실 패턴: 5/15 LG씨엔에스 -514k (flu% 7.5%), 5/14 삼성전자 -80k (flu% 4.2%) 등.
-            out.append(Swing38Strategy(Swing38Params(min_atr_pct=0.035)))
+            # BAR-OPS-09 Phase 6: 변동성 필터 명시 적용 (min_atr_pct=0.035) — 저변동주 차단.
+            # BAR-OPS-09 Phase 8: 진입 점수 임계 강화 (min_score=0.5) — 약한 시그널 차단.
+            # default 는 회귀 보존 (min_atr_pct=0.0, min_score=0.3 = 기존 임계).
+            # 5/22 LG전자 -148k / 삼성전기 -124k 같은 약한 swing 진입 시뮬 차단 기대.
+            out.append(Swing38Strategy(Swing38Params(min_atr_pct=0.035, min_score=0.5)))
         elif sid == "scalping_consensus":
             from backend.core.strategy.scalping_consensus import (
                 ScalpingConsensusStrategy,
