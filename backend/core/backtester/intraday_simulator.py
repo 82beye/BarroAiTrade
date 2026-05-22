@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import csv
 import logging
-from datetime import datetime
+from datetime import datetime, time as dtime
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
@@ -195,11 +195,16 @@ def _build_strategies(
         elif sid == "swing_38":
             from backend.core.strategy.swing_38 import Swing38Strategy, Swing38Params
 
-            # BAR-OPS-09 Phase 6: 변동성 필터 명시 적용 (min_atr_pct=0.035) — 저변동주 차단.
-            # BAR-OPS-09 Phase 8: 진입 점수 임계 강화 (min_score=0.5) — 약한 시그널 차단.
-            # default 는 회귀 보존 (min_atr_pct=0.0, min_score=0.3 = 기존 임계).
-            # 5/22 LG전자 -148k / 삼성전기 -124k 같은 약한 swing 진입 시뮬 차단 기대.
-            out.append(Swing38Strategy(Swing38Params(min_atr_pct=0.035, min_score=0.5)))
+            # BAR-OPS-09 Phase 6: 변동성 필터 (min_atr_pct=0.035) — 저변동주 차단.
+            # BAR-OPS-09 Phase 8a: 진입 점수 임계 (min_score=0.5) — 약한 시그널 차단.
+            # BAR-OPS-09 Phase 8c: 진입 시간 게이트 (entry_time_cutoff=14:00) — 장 후반 진입 차단.
+            # default 회귀 보존 (모두 비활성). 일봉 시뮬은 시간 게이트 효과 미미 (분봉 운영에 영향).
+            # 5/22 손실 패턴: LG전자 13:48 -148k, 삼성전기 14:40 -124k.
+            out.append(Swing38Strategy(Swing38Params(
+                min_atr_pct=0.035,
+                min_score=0.5,
+                entry_time_cutoff=dtime(14, 0),
+            )))
         elif sid == "scalping_consensus":
             from backend.core.strategy.scalping_consensus import (
                 ScalpingConsensusStrategy,

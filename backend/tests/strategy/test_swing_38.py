@@ -242,3 +242,52 @@ class TestSwing38ScoreThreshold:
         assert out[0].params.min_score == 0.5, (
             "IntradaySimulator swing_38 분기에서 min_score=0.5 적용 실패"
         )
+
+
+class TestSwing38EntryTimeGate:
+    """BAR-OPS-09 Phase 8c — 진입 시간 게이트 (장 후반 진입 차단).
+
+    5/22 swing_38 손실 패턴 차단 목적:
+    - LG전자 13:48 -148k (장 마감 1.5h 전 진입, 청산 여유 부족)
+    - 삼성전기 14:40 -124k (장 마감 40분 전 진입)
+    """
+
+    def _candles_at(self, hour: int, minute: int, n: int = 70):
+        """첫 candle 이 (hour, minute) 부터 1분 간격 n개."""
+        out = []
+        t0 = datetime(2026, 5, 22, hour, minute)
+        for i in range(n):
+            out.append(OHLCV(
+                symbol="TEST",
+                timestamp=t0 + timedelta(minutes=i),
+                open=1000, high=1010, low=990, close=1000,
+                volume=10000, market_type=MarketType.STOCK,
+            ))
+        return out
+
+    def test_default_no_time_gate(self):
+        """default entry_time_cutoff=None — 기존 회귀 보존."""
+        s = Swing38Strategy()
+        assert s.params.entry_time_cutoff is None
+
+    def test_late_entry_blocked_with_cutoff_14_00(self):
+        """cutoff=14:00 시 마지막 candle 시각 >= 14:00 인 입력 차단.
+
+        합성 캔들 09:00 부터 시작 → 70봉 후 마지막 = 10:09 (cutoff 통과).
+        13:00 부터 시작 → 70봉 후 마지막 = 14:09 (cutoff 차단).
+        """
+        s = Swing38Strategy(Swing38Params(entry_time_cutoff=dtime(14, 0)))
+        late_candles = self._candles_at(13, 0, 70)
+        assert late_candles[-1].timestamp.time() >= dtime(14, 0), "fixture 시각 오류"
+        ctx = AnalysisContext(symbol="LATE", candles=late_candles, market_type=MarketType.STOCK)
+        result = s._analyze_v2(ctx)
+        assert result is None, "장 후반 진입 차단 실패"
+
+    def test_intraday_simulator_uses_cutoff_14_00(self):
+        """_build_strategies('swing_38') 가 entry_time_cutoff=dtime(14, 0) 적용."""
+        from datetime import time as dtime_check
+        from backend.core.backtester.intraday_simulator import _build_strategies
+        out = _build_strategies(['swing_38'])
+        assert out[0].params.entry_time_cutoff == dtime_check(14, 0), (
+            "IntradaySimulator swing_38 분기에서 entry_time_cutoff=14:00 적용 실패"
+        )

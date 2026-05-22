@@ -59,6 +59,12 @@ class Swing38Params:
     # 운영 차단은 별도 — scripts/intraday_buy_daemon.py 의 regime_weights() 임계 추가 필요 (별도 BAR).
     min_score: float = 0.3
 
+    # BAR-OPS-09 Phase 8c — 진입 시간 게이트: 마지막 candle.time() >= entry_time_cutoff 시 차단.
+    # default None (비활성) — 기존 회귀 보존. IntradaySimulator 시뮬 진입점에서 dtime(14, 0) override.
+    # 패턴: 5/22 swing_38 LG전자 13:48 -148k, 삼성전기 14:40 -124k (장 후반 진입 → 청산 여유 부족 손실).
+    # 운영 분봉 candle 기준 작동. 일봉 시뮬은 .time()=00:00 으로 항상 통과 (영향 미미).
+    entry_time_cutoff: Optional[dtime] = None
+
 
 class Swing38Strategy(Strategy):
     """38스윙 — 임펄스 + Fib 0.382 되돌림 + 반등."""
@@ -77,6 +83,12 @@ class Swing38Strategy(Strategy):
         if p.min_atr_pct > 0:
             atr_pct = self._atr_pct(ctx.candles, n=p.atr_n)
             if atr_pct < p.min_atr_pct:
+                return None
+
+        # BAR-OPS-09 Phase 8c: 진입 시간 게이트 — 장 후반 진입 차단 (청산 여유 부족 손실 방지).
+        if p.entry_time_cutoff is not None:
+            last_ts = ctx.candles[-1].timestamp
+            if last_ts.time() >= p.entry_time_cutoff:
                 return None
 
         df = self._to_dataframe(ctx.candles)
