@@ -85,7 +85,7 @@ class ExitEngine:
             if idx + 1 <= new_tp:
                 continue   # 이미 발동된 단계
             if current_price < tier.price:
-                break      # 가격 미달 — 더 높은 단계 평가 X
+                break      # 가격 미달 — 더 높은 단계 평가 X (take_profits 오름차순 정렬 보장: ExitPlan._qty_sum_le_one)
             # 발동: tier.qty_pct * initial_qty 만큼 청산
             qty = pos.initial_qty * tier.qty_pct
             qty = min(qty, new_qty)   # 잔여 초과 방지
