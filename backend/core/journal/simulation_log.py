@@ -80,7 +80,7 @@ class SimulationLogger:
                     pnl=float(row["pnl"]),
                     win_rate=float(row["win_rate"]),
                     score=float(row["score"]),
-                    flu_rate=float(row["flu_rate"]),
+                    flu_rate=float(row.get("flu_rate", 0.0)),
                 ))
         return out
 
