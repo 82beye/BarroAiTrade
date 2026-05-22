@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pydantic import SecretStr
 
 from backend.core.gateway.kiwoom_native_account import KiwoomNativeAccountFetcher
+from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
 from backend.core.gateway.kiwoom_native_orders import KiwoomNativeOrderExecutor
 
@@ -36,16 +37,15 @@ def _build_oauth() -> KiwoomNativeOAuth:
     )
 
 
-async def _get_flu_rate(oauth: KiwoomNativeOAuth, symbol: str) -> float:
-    """현재 등락률 조회."""
-    from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
+async def _fetch_daily_flu_rate(candle_fetcher: KiwoomNativeCandleFetcher, symbol: str) -> float:
+    """당일 등락률(전일 종가 대비 %)을 일봉 캔들로 산출."""
     try:
-        # 잔고에서 cur_price / avg_buy_price 로 근사
-        fetcher = KiwoomNativeAccountFetcher(oauth=oauth)
-        balance = await fetcher.fetch_balance()
-        for h in balance.holdings:
-            if h.symbol == symbol:
-                return float(h.pnl_rate)
+        candles = await candle_fetcher.fetch_daily(symbol=symbol)
+        if len(candles) >= 2:
+            prev_close = candles[-2].close
+            cur_close = candles[-1].close
+            if prev_close > 0:
+                return (cur_close - prev_close) / prev_close * 100
     except Exception:
         pass
     return 0.0
@@ -54,6 +54,7 @@ async def _get_flu_rate(oauth: KiwoomNativeOAuth, symbol: str) -> float:
 async def main(dry_run: bool, telegram: bool) -> None:
     oauth = _build_oauth()
     fetcher = KiwoomNativeAccountFetcher(oauth=oauth)
+    candle_fetcher = KiwoomNativeCandleFetcher(oauth=oauth)
     executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=dry_run)
 
     # 1. 미체결 매수 주문 조회
@@ -70,12 +71,11 @@ async def main(dry_run: bool, telegram: bool) -> None:
 
     print(f"  총 {len(open_orders)}건 미체결")
 
-    # 2. 잔고에서 등락률 맵 구성
-    try:
-        balance = await fetcher.fetch_balance()
-        flu_map = {h.symbol: float(h.pnl_rate) for h in balance.holdings}
-    except Exception:
-        flu_map = {}
+    # 2. 미체결 주문 종목별 당일 등락률 조회 (일봉 캔들 기준 전일 종가 대비)
+    flu_map: dict[str, float] = {}
+    for o in open_orders:
+        if o.symbol not in flu_map:
+            flu_map[o.symbol] = await _fetch_daily_flu_rate(candle_fetcher, o.symbol)
 
     # 3. 상한가 판정 및 취소
     cancel_targets = []
