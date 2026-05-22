@@ -132,9 +132,15 @@ class KiwoomNativeCandleFetcher:
                             continue
                         raise
                 data = resp.json()
-                if data.get("return_code") != 0:
+                rc = data.get("return_code")
+                if rc == 3:
+                    logger.warning("chart 인증 실패 — 토큰 재발급 후 재시도")
+                    self._oauth.invalidate_token()
+                    token = await self._oauth.get_token()
+                    continue
+                if rc != 0:
                     raise RuntimeError(
-                        f"kiwoom-native error: rc={data.get('return_code')} "
+                        f"kiwoom-native error: rc={rc} "
                         f"msg={data.get('return_msg')}"
                     )
                 rows = data.get("stk_min_pole_chart_qry") or []
@@ -190,6 +196,14 @@ class KiwoomNativeCandleFetcher:
                         await asyncio.sleep(wait)
                         continue
                     resp.raise_for_status()
+                    data = resp.json()
+                    # rc=3 인증 실패 → 토큰 재발급 후 1회 재시도
+                    rc = data.get("return_code")
+                    if rc == 3 and attempt < _retries - 1:
+                        logger.warning("chart 인증 실패 tr=%s — 토큰 재발급 후 재시도", tr_id)
+                        self._oauth.invalidate_token()
+                        token = await self._oauth.get_token()
+                        continue
                     break
                 except Exception as exc:
                     if attempt < _retries - 1:
@@ -198,7 +212,6 @@ class KiwoomNativeCandleFetcher:
                     logger.error("kiwoom-native chart fetch failed: tr=%s sym=%s err=%s",
                                  tr_id, symbol, type(exc).__name__)
                     raise
-            data = resp.json()
         finally:
             if owns:
                 await client.aclose()

@@ -158,23 +158,35 @@ class KiwoomNativeLeaderPicker:
         client = self._http or httpx.AsyncClient(timeout=15)
         owns = self._http is None
         url = f"{self._oauth.base_url}{_RANK_PATH}"
+        _auth_retried = False
         try:
-            resp = await client.post(
-                url,
-                headers={
-                    "authorization": f"Bearer {token.access_token.get_secret_value()}",
-                    "content-type": "application/json;charset=UTF-8",
-                    "cont-yn": "N",
-                    "next-key": "",
-                    "api-id": tr_id,
-                },
-                json=body,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as exc:
-            logger.error("kiwoom-native rank failed: tr=%s err=%s", tr_id, type(exc).__name__)
-            raise
+            while True:
+                try:
+                    resp = await client.post(
+                        url,
+                        headers={
+                            "authorization": f"Bearer {token.access_token.get_secret_value()}",
+                            "content-type": "application/json;charset=UTF-8",
+                            "cont-yn": "N",
+                            "next-key": "",
+                            "api-id": tr_id,
+                        },
+                        json=body,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception as exc:
+                    logger.error("kiwoom-native rank failed: tr=%s err=%s", tr_id, type(exc).__name__)
+                    raise
+                # rc=3 인증 실패 → 토큰 재발급 후 1회 재시도
+                rc = data.get("return_code")
+                if rc == 3 and not _auth_retried:
+                    _auth_retried = True
+                    logger.warning("rank 인증 실패 tr=%s — 토큰 재발급 후 재시도", tr_id)
+                    self._oauth.invalidate_token()
+                    token = await self._oauth.get_token()
+                    continue
+                break
         finally:
             if owns:
                 await client.aclose()
