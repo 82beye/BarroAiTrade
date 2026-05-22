@@ -36,9 +36,8 @@ def _check_admin_token(
     """간단 헤더 검증 (BAR-74b 에서 정식 FastAPI Depends + 통합)."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="missing bearer token")
-    # jwt_service 미주입 시 — runtime check skip (BAR-67b)
     if jwt_service is None:
-        return
+        raise HTTPException(status_code=503, detail="auth service unavailable")
     token = authorization[7:]
     try:
         payload = jwt_service.decode(token)
