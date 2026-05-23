@@ -169,8 +169,8 @@ class TestEntry:
             current_concurrent_positions=0,
             current_theme_exposure={},
         )
-        # executor 실패해도 APPROVED 반환 (라우팅까지는 통과)
-        assert attempt.outcome == TradeOutcome.APPROVED
+        # executor 실패 → EXECUTION_FAILED 반환 (L132-137 의도적 변경)
+        assert attempt.outcome == TradeOutcome.EXECUTION_FAILED
 
 
 class TestExit:
