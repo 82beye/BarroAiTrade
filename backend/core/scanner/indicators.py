@@ -108,7 +108,7 @@ class TechnicalIndicators:
         up = seed[seed >= 0].sum() / period
         down = -seed[seed < 0].sum() / period
 
-        rsi[period] = 100.0 - 100.0 / (1.0 + up / down if down != 0 else 1.0)
+        rsi[period] = 100.0 if down == 0 else 100.0 - 100.0 / (1.0 + up / down)
 
         # EMA 방식 계산
         for i in range(period + 1, len(values)):
@@ -120,7 +120,7 @@ class TechnicalIndicators:
                 up = (up * (period - 1)) / period
                 down = (down * (period - 1) - delta) / period
 
-            rsi[i] = 100.0 - 100.0 / (1.0 + up / down if down != 0 else 1.0)
+            rsi[i] = 100.0 if down == 0 else 100.0 - 100.0 / (1.0 + up / down)
 
         # 초기값 채우기 (중립권 50)
         rsi[:period] = 50.0
