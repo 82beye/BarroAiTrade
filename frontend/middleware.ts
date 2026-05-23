@@ -11,10 +11,11 @@ export function middleware(request: NextRequest) {
   // 쿠키에서 role 확인 (BAR-74b 이후 JWT 디코딩으로 교체)
   const role = request.cookies.get('user_role')?.value;
   if (!role) {
-    const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = '/login';
-    loginUrl.searchParams.set('next', pathname);
-    return NextResponse.redirect(loginUrl);
+    // /login 페이지는 BAR-74b 이후 구현 예정 — 그 전까지는 홈으로 이동
+    const homeUrl = request.nextUrl.clone();
+    homeUrl.pathname = '/';
+    homeUrl.searchParams.set('error', 'unauthorized');
+    return NextResponse.redirect(homeUrl);
   }
 
   if (role !== 'admin') {

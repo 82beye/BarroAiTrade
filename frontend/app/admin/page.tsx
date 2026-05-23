@@ -70,7 +70,7 @@ export default function AdminDashboard() {
   const serviceUnavailable = userStatus === 'unavailable' || auditStatus === 'unavailable';
 
   if (userStatus === 'unauthorized' || auditStatus === 'unauthorized') {
-    if (typeof window !== 'undefined') window.location.href = '/login?next=/admin';
+    if (typeof window !== 'undefined') window.location.href = '/?error=unauthorized';
     return null;
   }
 

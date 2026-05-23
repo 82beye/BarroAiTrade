@@ -54,7 +54,7 @@ export default function AdminAuditPage() {
   }, [limit]);
 
   if (status === 'unauthorized') {
-    if (typeof window !== 'undefined') window.location.href = '/login?next=/admin/audit';
+    if (typeof window !== 'undefined') window.location.href = '/?error=unauthorized';
     return null;
   }
 
