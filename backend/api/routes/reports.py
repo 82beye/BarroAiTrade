@@ -318,7 +318,9 @@ async def get_performance_report(
             start = today - timedelta(days=30)
         elif period == "3m":
             start = today - timedelta(days=90)
-        else:
+        elif period == "ytd":
+            start = date(today.year, 1, 1)
+        else:  # "all" 등
             start = today - timedelta(days=365)
 
         # 일별 리포트 집계
