@@ -80,14 +80,14 @@ class SFZoneStrategy(Strategy):
         )
 
     def position_size(self, signal: EntrySignal, account: Account) -> Decimal:
-        """SF존 강도(score) 기반 비중: ≥0.7 → 35%, 0.5~0.7 → 25%, <0.5 → 10%."""
+        """SF존 강도(score) 기반 비중: ≥7.0 → 35%, 5.0~7.0 → 25%, <5.0 → 10%."""
         if account.available <= 0:
             return Decimal(0)
 
         score = Decimal(str(signal.score))
-        if score >= Decimal("0.7"):
+        if score >= Decimal("7.0"):
             ratio = Decimal("0.35")
-        elif score >= Decimal("0.5"):
+        elif score >= Decimal("5.0"):
             ratio = Decimal("0.25")
         else:
             ratio = Decimal("0.10")

@@ -83,28 +83,28 @@ class TestSFZonePositionSize:
             position_count=0,
         )
 
-    def test_c5a_high_score_35pct(self, sample_signal_high_score):
+    def test_c5a_high_score_35pct(self, sample_signal_high_score_fz):
         s = SFZoneStrategy()
-        size = s.position_size(sample_signal_high_score, self._account())
-        # 10_000_000 * 0.35 / 72000 = 48.61 → quantize ROUND_HALF_EVEN → 49
+        size = s.position_size(sample_signal_high_score_fz, self._account())
+        # score=8.5 ≥ 7.0 → 35%; 10_000_000 * 0.35 / 72000 = 48.61 → 49
         assert size == Decimal("49")
 
-    def test_c5b_mid_score_25pct(self, sample_signal_mid_score):
+    def test_c5b_mid_score_25pct(self, sample_signal_mid_score_fz):
         s = SFZoneStrategy()
-        size = s.position_size(sample_signal_mid_score, self._account())
-        # 10_000_000 * 0.25 / 72000 = 34.72 → 35
+        size = s.position_size(sample_signal_mid_score_fz, self._account())
+        # score=6.0 ≥ 5.0 → 25%; 10_000_000 * 0.25 / 72000 = 34.72 → 35
         assert size == Decimal("35")
 
-    def test_c5c_low_score_10pct(self, sample_signal_low_score):
+    def test_c5c_low_score_10pct(self, sample_signal_low_score_fz):
         s = SFZoneStrategy()
-        size = s.position_size(sample_signal_low_score, self._account())
-        # 10_000_000 * 0.1 / 72000 = 13.89 → 14
+        size = s.position_size(sample_signal_low_score_fz, self._account())
+        # score=3.5 < 5.0 → 10%; 10_000_000 * 0.1 / 72000 = 13.89 → 14
         assert size == Decimal("14")
 
-    def test_position_size_zero_balance(self, sample_signal_high_score):
+    def test_position_size_zero_balance(self, sample_signal_high_score_fz):
         s = SFZoneStrategy()
         empty = Account(balance=Decimal(0), available=Decimal(0), position_count=0)
-        assert s.position_size(sample_signal_high_score, empty) == Decimal(0)
+        assert s.position_size(sample_signal_high_score_fz, empty) == Decimal(0)
 
 
 class TestSFZoneHealthCheck:

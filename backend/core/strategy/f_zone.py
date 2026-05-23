@@ -313,14 +313,14 @@ class FZoneStrategy(Strategy):
         )
 
     def position_size(self, signal: EntrySignal, account: Account) -> Decimal:
-        """F존 강도(score) 기반 비중: ≥0.7 → 30%, 0.5~0.7 → 20%, <0.5 → 10%."""
+        """F존 강도(score) 기반 비중: ≥7.0 → 30%, 5.0~7.0 → 20%, <5.0 → 10%."""
         if account.available <= 0:
             return Decimal(0)
 
         score = Decimal(str(signal.score))
-        if score >= Decimal("0.7"):
+        if score >= Decimal("7.0"):
             ratio = Decimal("0.30")
-        elif score >= Decimal("0.5"):
+        elif score >= Decimal("5.0"):
             ratio = Decimal("0.20")
         else:
             ratio = Decimal("0.10")
