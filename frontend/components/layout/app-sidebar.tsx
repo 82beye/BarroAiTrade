@@ -24,6 +24,10 @@ const navLinks: NavLink[] = [
   { href: '/monitor', label: '모니터', icon: '🖥️' },
 ];
 
+const adminLinks: NavLink[] = [
+  { href: '/admin', label: '어드민', icon: '🔐' },
+];
+
 export function AppSidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(true);
@@ -80,6 +84,30 @@ export function AppSidebar() {
           );
         })}
       </nav>
+
+      {/* 어드민 구분선 */}
+      <div className={`border-t border-slate-800 pb-3 pt-2 ${collapsed ? 'px-1.5' : 'px-4'}`}>
+        {adminLinks.map(({ href, label, icon }) => {
+          const isActive = pathname.startsWith('/admin');
+          return (
+            <Link
+              key={href}
+              href={href}
+              title={collapsed ? label : undefined}
+              className={`flex items-center rounded-lg text-sm font-medium transition-colors ${
+                collapsed ? 'justify-center px-0 py-2.5' : 'px-4 py-2'
+              } ${
+                isActive
+                  ? 'bg-amber-500 bg-opacity-20 text-amber-400'
+                  : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'
+              }`}
+            >
+              <span className={collapsed ? 'text-lg' : ''}>{icon}</span>
+              {!collapsed && <span className="ml-2">{label}</span>}
+            </Link>
+          );
+        })}
+      </div>
     </aside>
   );
 }
