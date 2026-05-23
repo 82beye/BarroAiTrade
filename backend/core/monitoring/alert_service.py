@@ -155,7 +155,7 @@ class AlertService:
         body = (
             f"총 매매: {total_trades}건\n"
             f"승률: {win_rate:.1f}%\n"
-            f"손익: {total_pnl:+,.0f}원 ({pnl_pct:+.2%})"
+            f"손익: {total_pnl:+,.0f}원 ({pnl_pct:+.2f}%)"
         )
         await self._send(level, f"일일 리포트 ({date_str})", body)
 
