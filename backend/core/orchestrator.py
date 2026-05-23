@@ -331,8 +331,8 @@ class TradingOrchestrator:
                 now = datetime.now()
                 today = now.date()
                 if (
-                    now.hour >= _REPORT_HOUR
-                    and now.minute >= _REPORT_MINUTE
+                    (now.hour > _REPORT_HOUR or now.minute >= _REPORT_MINUTE)
+                    and now.hour >= _REPORT_HOUR
                     and last_report_date != today
                     and self._report
                     and self._position_mgr
