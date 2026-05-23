@@ -635,7 +635,7 @@ async def _save_balance_snapshot(oauth) -> None:
         deposit = await account.fetch_deposit()
 
         cash = float(deposit.cash)
-        eval_total = sum(float(h.cur_price) * h.quantity for h in (balance.holdings or []))
+        eval_total = sum(float(h.cur_price) * h.qty for h in (balance.holdings or []))
         total = cash + eval_total
         pos_count = len(balance.holdings or [])
 
