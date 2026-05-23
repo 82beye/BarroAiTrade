@@ -111,12 +111,15 @@ def test_diff_pct_with_zero_sim_is_none():
 
 
 def test_compare_sorted_by_abs_diff_descending():
+    # BAR-138: diff_pct 절대값 기준 정렬. sim=0이면 diff_pct=None → 비결정적.
+    # non-zero sim 값으로 diff_pct 확정: A=20%, B=-250%, C=100%
+    # abs 순: B=250% > C=100% > A=20%
     diffs = compare(
-        sim_entries=[_sim("A", 0), _sim("B", 0), _sim("C", 0)],
-        real_entries=[_real("A", 100), _real("B", -500), _real("C", 50)],
+        sim_entries=[_sim("A", 100), _sim("B", 200), _sim("C", 50)],
+        real_entries=[_real("A", 120), _real("B", -300), _real("C", 100)],
     )
     syms = [d.symbol for d in diffs]
-    assert syms == ["B", "A", "C"]
+    assert syms == ["B", "C", "A"]
 
 
 def test_summarize_aggregates():

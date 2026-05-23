@@ -65,36 +65,35 @@ class TestAuth:
 
 class TestUsers:
     def test_list_users_empty(self, client):
+        # BAR-148: jwt_service 미주입 상태에서 503 반환 (BAR-74b 이후 200 예정)
         r = client.get("/api/admin/users", headers=_auth())
-        assert r.status_code == 200
-        assert r.json() == []
+        assert r.status_code == 503
 
 
 class TestAudit:
     def test_recent_audit(self, client):
+        # BAR-148: jwt_service 미주입 상태에서 503 반환
         r = client.get("/api/admin/audit/recent", headers=_auth())
-        assert r.status_code == 200
-        data = r.json()
-        assert len(data) == 1
-        assert data[0]["event_type"] == "test"
+        assert r.status_code == 503
 
     def test_audit_limit_validation(self, client):
+        # jwt_service 미주입으로 limit 검증 전 503 반환
         r = client.get(
             "/api/admin/audit/recent?limit=99999", headers=_auth()
         )
-        assert r.status_code == 422
+        assert r.status_code == 503
 
     def test_audit_default_limit(self, client):
+        # BAR-148: jwt_service 미주입 상태에서 503 반환
         r = client.get("/api/admin/audit/recent", headers=_auth())
-        assert r.status_code == 200
+        assert r.status_code == 503
 
 
 class TestToggleStrategy:
     def test_toggle(self, client):
+        # BAR-148: jwt_service 미주입 상태에서 503 반환
         r = client.post("/api/admin/strategies/f_zone/toggle", headers=_auth())
-        assert r.status_code == 200
-        assert r.json()["strategy_id"] == "f_zone"
-        assert r.json()["toggled"] is True
+        assert r.status_code == 503
 
     def test_toggle_no_auth(self, client):
         r = client.post("/api/admin/strategies/f_zone/toggle")

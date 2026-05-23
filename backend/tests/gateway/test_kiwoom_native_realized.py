@@ -24,6 +24,8 @@ def _http_response(payload: dict) -> MagicMock:
     r.status_code = 200
     r.json.return_value = payload
     r.raise_for_status = MagicMock()
+    # httpx.Response.headers는 인스턴스 속성이라 spec에 미포함 — 직접 설정 필요
+    r.headers = MagicMock()
     return r
 
 

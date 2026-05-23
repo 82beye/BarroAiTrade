@@ -175,7 +175,10 @@ def test_time_tightened_sl():
 
 def test_time_tightened_sl_not_triggered_within_days():
     """2일 보유 + 수익률 -2.5% → 기본 SL -4% 적용 → HOLD."""
-    ctx = PositionContext(peak_pnl_rate=0.5, entry_time="2026-05-12T00:00:00+00:00")
+    from datetime import datetime, timezone, timedelta
+    # 고정 날짜 사용 시 시간 경과로 hold_days가 늘어 테스트 실패 → 상대 시간 사용
+    entry = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    ctx = PositionContext(peak_pnl_rate=0.5, entry_time=entry)
     d = evaluate_holding(_h(pnl_rate="-2.5"), ExitPolicy(), ctx)
     assert d.signal == SellSignal.HOLD
 
