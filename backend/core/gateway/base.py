@@ -7,7 +7,7 @@ MarketGateway — 멀티마켓 추상 인터페이스
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from backend.models.market import OHLCV, Ticker, MarketType, OrderBook
 from backend.models.position import Order, OrderResult, Balance
@@ -70,11 +70,19 @@ class MarketGateway(ABC):
     async def get_universe(self) -> List[str]:
         """전종목 리스트 (주식: KOSPI+KOSDAQ, 크립토: 지정 페어)"""
 
+    @abstractmethod
+    async def get_prices(self, symbols: List[str]) -> Dict[str, float]:
+        """복수 종목 현재가 일괄 조회 — {symbol: price}"""
+
     # ── 시장 상태 ──────────────────────────────────────────────────────────────
 
     @abstractmethod
     def is_market_open(self) -> bool:
         """현재 거래 시간 여부"""
+
+    @abstractmethod
+    async def get_market_condition(self) -> dict:
+        """시장 상태 조회 — {'is_open': bool, 'condition': str, 'updated_at': str}"""
 
     @abstractmethod
     async def health_check(self) -> bool:

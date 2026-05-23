@@ -398,6 +398,26 @@ class KiwoomGateway(MarketGateway):
             logger.error(f"Failed to get universe: {e}")
             return []
 
+    async def get_prices(self, symbols: List[str]) -> Dict[str, float]:
+        """복수 종목 현재가 일괄 조회 — {symbol: price}"""
+        tasks = [self.get_ticker(s) for s in symbols]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        prices: Dict[str, float] = {}
+        for sym, result in zip(symbols, results):
+            if isinstance(result, Exception):
+                logger.warning("get_prices %s 실패: %s", sym, result)
+            else:
+                prices[sym] = result.price
+        return prices
+
+    async def get_market_condition(self) -> dict:
+        """시장 상태 조회"""
+        return {
+            "is_open": self.is_market_open(),
+            "condition": "normal",
+            "updated_at": datetime.now().isoformat(),
+        }
+
     # ── 시장 상태 ─────────────────────────────────────────────────────────
 
     def is_market_open(self) -> bool:
