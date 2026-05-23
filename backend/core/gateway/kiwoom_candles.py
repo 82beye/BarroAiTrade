@@ -152,9 +152,11 @@ class KiwoomCandleFetcher:
             )
 
         rows = data.get("output2") or data.get("output") or []
-        if parse_kind == "daily":
-            return [_parse_daily_row(symbol, r) for r in rows if r.get("stck_bsop_date")]
-        return [_parse_minute_row(symbol, r) for r in rows if r.get("stck_bsop_date")]
+        parser = _parse_daily_row if parse_kind == "daily" else _parse_minute_row
+        # KIS API output2는 최신→과거 순. oldest-first(오름차순) 정렬 후 반환 (BAR-155).
+        out = [parser(symbol, r) for r in rows if r.get("stck_bsop_date")]
+        out.sort(key=lambda c: c.timestamp)
+        return out
 
 
 def _parse_daily_row(symbol: str, r: dict) -> OHLCV:

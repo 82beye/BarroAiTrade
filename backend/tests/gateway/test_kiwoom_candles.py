@@ -104,8 +104,10 @@ class TestFetchDaily:
         )
         assert len(candles) == 2
         assert candles[0].symbol == "005930"
-        assert candles[0].close == 70300
-        assert candles[0].timestamp == datetime(2026, 5, 7)
+        # oldest-first: 20260506 at index 0 (BAR-155)
+        assert candles[0].close == 69900
+        assert candles[0].timestamp == datetime(2026, 5, 6)
+        assert candles[1].timestamp == datetime(2026, 5, 7)
 
     @pytest.mark.asyncio
     async def test_daily_uses_correct_tr_id(self, oauth_mock):
