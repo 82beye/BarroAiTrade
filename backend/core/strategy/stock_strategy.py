@@ -138,14 +138,14 @@ class StockStrategy(Strategy):
 
         watermelon = vol_surge and strong_candle and near_bottom
 
-        # ── 신호 점수 계산 ────────────────────────────────────────────────────
-        score = 70.0  # 파란점선 돌파 기본 점수
+        # ── 신호 점수 계산 (0-10 스케일, BlueLineStrategy 등 v2 전략과 일치) ──
+        score = 7.0  # 파란점선 돌파 기본 점수
         if vol_surge:
-            score += 10.0
+            score += 1.0
         if strong_candle:
-            score += 10.0
+            score += 1.0
         if near_bottom:
-            score += 10.0
+            score += 1.0
 
         breakout_pct = (curr_close - curr_blue) / curr_blue * 100 if curr_blue > 0 else 0
 
