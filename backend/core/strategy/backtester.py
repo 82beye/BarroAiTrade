@@ -328,8 +328,8 @@ class StrategyBacktester:
 
             # ── 진입 신호 체크 ────────────────────────────────────────
             if open_trade is None or cfg.allow_concurrent_positions:
-                # 전략은 최신 순 캔들을 기대하므로 역순 슬라이스
-                window = list(reversed(candles[max(0, i - 299): i + 1]))
+                # BAR-149 이후 전략은 oldest-first(오름차순) 캔들 기대
+                window = candles[max(0, i - 299): i + 1]
 
                 signal = self.strategy.analyze(symbol, name, window, market_type)
 
