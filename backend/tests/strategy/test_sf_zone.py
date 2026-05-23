@@ -84,23 +84,23 @@ class TestSFZonePositionSize:
             position_count=0,
         )
 
-    def test_c5a_high_score_35pct(self, sample_signal_high_score):
+    def test_c5a_high_score_even(self, sample_signal_high_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — 10M * 0.08 / 72000 = 11."""
         s = SFZoneStrategy()
         size = s.position_size(sample_signal_high_score, self._account())
-        # 10_000_000 * 0.35 / 72000 = 48.61 → quantize ROUND_HALF_EVEN → 49
-        assert size == Decimal("49")
+        assert size == Decimal("11")
 
-    def test_c5b_mid_score_25pct(self, sample_signal_mid_score):
+    def test_c5b_mid_score_even(self, sample_signal_mid_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 무관."""
         s = SFZoneStrategy()
         size = s.position_size(sample_signal_mid_score, self._account())
-        # 10_000_000 * 0.25 / 72000 = 34.72 → 35
-        assert size == Decimal("35")
+        assert size == Decimal("11")
 
-    def test_c5c_low_score_10pct(self, sample_signal_low_score):
+    def test_c5c_low_score_even(self, sample_signal_low_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 무관."""
         s = SFZoneStrategy()
         size = s.position_size(sample_signal_low_score, self._account())
-        # 10_000_000 * 0.1 / 72000 = 13.89 → 14
-        assert size == Decimal("14")
+        assert size == Decimal("11")
 
     def test_position_size_zero_balance(self, sample_signal_high_score):
         s = SFZoneStrategy()

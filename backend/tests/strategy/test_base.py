@@ -80,7 +80,7 @@ class TestStrategyV2Defaults:
         assert plan.take_profits == []
 
     def test_c4_position_size_default(self, sample_signal):
-        """C4: position_size = available × 0.3 / price (Decimal, KRX 1주 quantize)."""
+        """C4: BAR-OPS-09 Phase 9 균등 진입 — available × 0.08 / price."""
         s = _DummyStrategy()
         account = Account(
             balance=Decimal("10000000"),
@@ -89,8 +89,8 @@ class TestStrategyV2Defaults:
         )
         size = s.position_size(sample_signal, account)
         assert isinstance(size, Decimal)
-        # 10_000_000 * 0.3 / 72000 = 41.67 → quantize("1") ROUND_HALF_EVEN → 42
-        assert size == Decimal("42")
+        # 10_000_000 * 0.08 / 72000 = 11.11 → 11 (균등 진입)
+        assert size == Decimal("11")
 
     def test_c5_health_check_default(self):
         """C5: health_check default — strategy_id ready=True."""

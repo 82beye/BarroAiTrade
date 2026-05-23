@@ -259,23 +259,13 @@ class FZoneStrategy(Strategy):
         )
 
     def position_size(self, signal: EntrySignal, account: Account) -> Decimal:
-        """F존 강도(score) 기반 비중: ≥0.7 → 30%, 0.5~0.7 → 20%, <0.5 → 10%."""
-        if account.available <= 0:
-            return Decimal(0)
+        """BAR-OPS-09 Phase 9: 균등 진입 (base.position_size 위임).
 
-        score = Decimal(str(signal.score))
-        if score >= Decimal("0.7"):
-            ratio = Decimal("0.30")
-        elif score >= Decimal("0.5"):
-            ratio = Decimal("0.20")
-        else:
-            ratio = Decimal("0.10")
-
-        max_invest = account.available * ratio
-        price = Decimal(str(signal.price))
-        if price <= 0:
-            return Decimal(0)
-        return (max_invest / price).quantize(Decimal("1"))
+        기존 score 차등(30/20/10%) 제거 — 5/22 비중 편차 6배 원인. score 는
+        진입 게이트(_analyze_v2)에서만 사용.
+        """
+        from backend.core.strategy.position_sizing import even_position_size
+        return even_position_size(signal, account)
 
     def health_check(self) -> dict[str, Any]:
         """F존 health_check — params sanity + 데이터 충분성 임계값."""

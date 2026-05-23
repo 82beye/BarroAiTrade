@@ -66,23 +66,24 @@ class TestFZonePositionSize:
             position_count=0,
         )
 
-    def test_c4_high_score_30pct(self, sample_signal_high_score):
+    def test_c4_high_score_even(self, sample_signal_high_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 무관, 0.08 비율."""
         s = FZoneStrategy()
         size = s.position_size(sample_signal_high_score, self._account_10m())
-        # 10_000_000 * 0.3 / 72000 = 41.67 → quantize ROUND_HALF_EVEN → 42
-        assert size == Decimal("42")
+        # 10_000_000 * 0.08 / 72000 = 11.11 → 11
+        assert size == Decimal("11")
 
-    def test_c5_mid_score_20pct(self, sample_signal_mid_score):
+    def test_c5_mid_score_even(self, sample_signal_mid_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — high/mid/low 모두 동일."""
         s = FZoneStrategy()
         size = s.position_size(sample_signal_mid_score, self._account_10m())
-        # 10_000_000 * 0.2 / 72000 = 27.78 → 28
-        assert size == Decimal("28")
+        assert size == Decimal("11")
 
-    def test_c6_low_score_10pct(self, sample_signal_low_score):
+    def test_c6_low_score_even(self, sample_signal_low_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 무관."""
         s = FZoneStrategy()
         size = s.position_size(sample_signal_low_score, self._account_10m())
-        # 10_000_000 * 0.1 / 72000 = 13.89 → 14
-        assert size == Decimal("14")
+        assert size == Decimal("11")
 
     def test_position_size_zero_balance(self, sample_signal_high_score):
         s = FZoneStrategy()
