@@ -144,13 +144,13 @@ class AlertService:
         """일일 P&L 리포트 Telegram 전송"""
         summary = report.get("summary", {})
         date_str = report.get("date", "")
-        total_trades = summary.get("total_trades", 0)
+        total_trades = summary.get("trades_count", 0)
         if total_trades == 0:
             await self._send(AlertLevel.INFO, f"일일 리포트 ({date_str})", "오늘 매매 없음")
             return
-        win_rate = summary.get("win_rate_pct", 0.0)
-        total_pnl = summary.get("total_pnl", 0.0)
-        pnl_pct = summary.get("total_pnl_pct", 0.0)
+        win_rate = summary.get("win_rate", 0.0)
+        total_pnl = summary.get("pnl", 0.0)
+        pnl_pct = summary.get("pnl_pct", 0.0)
         level = AlertLevel.SUCCESS if total_pnl >= 0 else AlertLevel.WARNING
         body = (
             f"총 매매: {total_trades}건\n"
