@@ -456,7 +456,7 @@ class KiwoomGateway(MarketGateway):
         return mapping.get(timeframe, "D")
 
     def _parse_ohlcv(self, data: Dict, symbol: str) -> List[OHLCV]:
-        """응답 데이터를 OHLCV로 변환"""
+        """응답 데이터를 OHLCV로 변환 — oldest-first(오름차순) 정렬 후 반환 (BAR-154)."""
         try:
             candles = data.get("output2", [])
             result = []
@@ -473,6 +473,7 @@ class KiwoomGateway(MarketGateway):
                         market_type=MarketType.STOCK,
                     )
                 )
+            result.sort(key=lambda c: c.timestamp)
             return result
         except Exception as e:
             logger.error(f"Failed to parse OHLCV: {e}")
