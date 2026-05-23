@@ -370,7 +370,7 @@ class IntradaySimulator:
                     plan = current_plan or _scaled_exit_plan(position.entry_price)
                     if self._exit_intrabar:
                         # high → TP 평가 / low → SL 평가
-                        # 두 평가를 동일 캔들에서 — TP 우선 (보수적 가정: 위로 먼저 갔다고 봄)
+                        # 두 평가를 동일 캔들에서 — SL 우선 (보수적 worst-case: 하락 먼저 가정)
                         new_pos, exit_orders = self._evaluate_intrabar(
                             position, plan, current,
                         )
@@ -487,7 +487,7 @@ class IntradaySimulator:
             if low <= sl_eff:
                 new_pos, exit_orders = self._exit.evaluate(pos, plan, sl_eff, ts)
                 for eo in exit_orders:
-                    if eo.reason in (ExitReason.STOP_LOSS, ExitReason.TRAIL_STOP):
+                    if eo.reason in (ExitReason.STOP_LOSS, ExitReason.TRAIL_STOP, ExitReason.TIME_EXIT):
                         orders.append(eo)
                 pos = new_pos
                 return pos, orders
@@ -500,7 +500,7 @@ class IntradaySimulator:
             # ExitEngine.evaluate 호출 — current_price=tp_price 강제 사용
             new_pos, exit_orders = self._exit.evaluate(pos, plan, tp_price, ts)
             for eo in exit_orders:
-                if eo.reason in (ExitReason.TP1, ExitReason.TP2, ExitReason.TP3):
+                if eo.reason in (ExitReason.TP1, ExitReason.TP2, ExitReason.TP3, ExitReason.TIME_EXIT):
                     orders.append(eo)
             pos = new_pos
             if pos.qty <= 0:
