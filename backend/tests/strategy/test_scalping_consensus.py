@@ -113,7 +113,7 @@ class TestScalpingConsensusExitPlan:
 
 
 class TestScalpingConsensusPositionSize:
-    """C6 — 25%/15%/8% 분기."""
+    """C6 — BAR-OPS-09 Phase 9 균등 진입."""
 
     def _account(self) -> Account:
         return Account(
@@ -122,19 +122,19 @@ class TestScalpingConsensusPositionSize:
             position_count=0,
         )
 
-    def test_c6_high_25pct(self, sample_signal_high_score):
-        # 10M * 0.25 / 72000 = 34.72 → 35
+    def test_c6_high_score_even(self, sample_signal_high_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — 10M * 0.08 / 72000 = 11."""
         size = ScalpingConsensusStrategy().position_size(
             sample_signal_high_score, self._account()
         )
-        assert size == Decimal("35")
+        assert size == Decimal("11")
 
-    def test_mid_15pct(self, sample_signal_mid_score):
-        # 10M * 0.15 / 72000 = 20.83 → 21
+    def test_mid_score_even(self, sample_signal_mid_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 무관."""
         size = ScalpingConsensusStrategy().position_size(
             sample_signal_mid_score, self._account()
         )
-        assert size == Decimal("21")
+        assert size == Decimal("11")
 
     def test_zero_balance(self, sample_signal_high_score):
         s = ScalpingConsensusStrategy()

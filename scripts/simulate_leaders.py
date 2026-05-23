@@ -72,10 +72,12 @@ async def _run(args) -> int:
     cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
     if args.min_score == 0.0:
         args.min_score = cfg.min_score
-    if args.max_per_position == 0.30:
+    if args.max_per_position == 0.10:
         args.max_per_position = cfg.max_per_position
-    if args.max_total_position == 0.90:
+    if args.max_total_position == 0.80:
         args.max_total_position = cfg.max_total_position
+    if args.max_concurrent_positions == 10:
+        args.max_concurrent_positions = cfg.max_concurrent_positions
     if args.daily_loss_limit == -3.0:
         args.daily_loss_limit = cfg.daily_loss_limit
     if args.daily_max_orders == 50:
@@ -228,6 +230,7 @@ async def _run(args) -> int:
             candidates=candidates_for_gate,
             max_per_position_ratio=Decimal(str(args.max_per_position)),
             max_total_position_ratio=Decimal(str(args.max_total_position)),
+            max_concurrent_positions=args.max_concurrent_positions,
         )
         print(f"  예수금         : {gate_result.cash:>15,.0f}")
         print(f"  현재 평가금액   : {gate_result.current_eval:>15,.0f}")
@@ -343,12 +346,16 @@ def main() -> None:
         help="잔고 조회 + 자금 한도 정책 + 추천 매수 qty 표시 (BAR-OPS-16)",
     )
     ap.add_argument(
-        "--max-per-position", type=float, default=0.30,
-        help="종목당 최대 비중 (기본 0.30 = 30%%)",
+        "--max-per-position", type=float, default=0.10,
+        help="종목당 최대 비중 캡 (기본 0.10 = 10%%, BAR-OPS-09 Phase 9)",
     )
     ap.add_argument(
-        "--max-total-position", type=float, default=0.90,
-        help="총 보유 최대 비중 (기본 0.90 = 90%%)",
+        "--max-total-position", type=float, default=0.80,
+        help="총 보유 최대 비중 (기본 0.80 = 80%%, BAR-OPS-09 Phase 9)",
+    )
+    ap.add_argument(
+        "--max-concurrent-positions", type=int, default=10,
+        help="최대 동시 보유 종목 수 (기본 10, 균등 슬롯 = total/concurrent)",
     )
     ap.add_argument(
         "--execute", action="store_true",

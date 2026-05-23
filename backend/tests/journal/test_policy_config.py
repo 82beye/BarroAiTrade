@@ -16,7 +16,10 @@ def test_load_missing_returns_defaults(tmp_path):
     assert cfg.min_score == 0.5
     # main 9c4ed24 fix(strategy): SL -2 → -4 정책 변경
     assert cfg.stop_loss_pct == -4.0
-    assert cfg.max_per_position == 0.30
+    # BAR-OPS-09 Phase 9: 균등 진입 default (30% → 10%, 90% → 80%, +concurrent 10)
+    assert cfg.max_per_position == 0.10
+    assert cfg.max_total_position == 0.80
+    assert cfg.max_concurrent_positions == 10
 
 
 def test_save_load_round_trip(tmp_path):

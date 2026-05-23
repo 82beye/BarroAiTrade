@@ -76,18 +76,14 @@ class Strategy(ABC):
         )
 
     def position_size(self, signal: EntrySignal, account: Account) -> Decimal:
-        """포지션 사이징 — 기본은 available × 0.3 / price (KRX 1주 quantize).
+        """포지션 사이징 — BAR-OPS-09 Phase 9 (2026-05-23) 균등 진입.
 
-        BAR-66 (RiskEngine 비중 관리) 가 동시 보유 한도·동일 테마 합산 등 정책으로 override.
+        모든 strategy 종목별 동일 금액 진입 (default 8% = 1/10 슬롯).
+        score 정보는 진입 게이트(strategy._analyze_v2)에서만 사용. 운영 매수 qty
+        는 balance_gate.evaluate_risk_gate() 가 최종 결정.
         """
-        if account.available <= 0:
-            return Decimal(0)
-        max_invest = account.available * Decimal("0.3")
-        price = Decimal(str(signal.price))
-        if price <= 0:
-            return Decimal(0)
-        # KRX 1주 단위 quantize (코인은 후속 BAR 에서 0.000001 단위 override)
-        return (max_invest / price).quantize(Decimal("1"))
+        from backend.core.strategy.position_sizing import even_position_size
+        return even_position_size(signal, account)
 
     def health_check(self) -> dict[str, Any]:
         """전략 상태 점검 — 데이터 충분성·파라미터 sanity. 후속 BAR override 가능."""
