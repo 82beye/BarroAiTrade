@@ -13,6 +13,7 @@ from typing import Dict, List, Optional
 
 from backend.core.gateway.base import MarketGateway
 from backend.core.strategy.f_zone import FZoneStrategy, FZoneParams
+from backend.core.strategy.sf_zone import SFZoneStrategy
 from backend.core.strategy.blue_line import BlueLineStrategy, BlueLineParams
 from backend.core.strategy.crypto_breakout import CryptoBreakoutStrategy, CryptoBreakoutParams
 from backend.models.market import MarketType
@@ -43,6 +44,7 @@ class SignalScanner:
         self.timeframe = timeframe
         self.candle_limit = candle_limit
 
+        self.sf_zone = SFZoneStrategy(f_zone_params)
         self.f_zone = FZoneStrategy(f_zone_params)
         self.blue_line = BlueLineStrategy(blue_line_params)
         self.crypto_breakout = CryptoBreakoutStrategy(crypto_params)
@@ -83,6 +85,7 @@ class SignalScanner:
 
             # 전략 실행 (SF존 > F존 > 블루라인 > 돌파)
             for strategy_fn in [
+                lambda: self.sf_zone.analyze(symbol, ticker.name, candles, market_type),
                 lambda: self.f_zone.analyze(symbol, ticker.name, candles, market_type),
                 lambda: self.blue_line.analyze(symbol, ticker.name, candles, market_type),
                 lambda: self.crypto_breakout.analyze(symbol, ticker.name, candles, market_type),
