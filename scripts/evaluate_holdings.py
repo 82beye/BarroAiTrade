@@ -117,9 +117,11 @@ async def _run(args) -> int:
 
     executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
     notifier = TelegramNotifier.from_env() if args.telegram else None
+    # BAR-167: DCA는 방어적 매수 — 일일 손실 한도 적용 불필요.
     gate = LiveOrderGate(
         executor=executor, audit_path=args.audit_log,
-        policy=GatePolicy(daily_max_orders=args.daily_max_orders),
+        policy=GatePolicy(daily_loss_limit_pct=Decimal("-100.0"),
+                          daily_max_orders=args.daily_max_orders),
         notifier=notifier,
     )
 

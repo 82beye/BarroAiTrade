@@ -51,6 +51,32 @@ from backend.core.risk.balance_gate import evaluate_risk_gate
 from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
 
 
+def _compute_daily_pnl_pct(current_total: float) -> Decimal:
+    """전일 잔고 대비 당일 손익률(%) 계산. 데이터 없으면 Decimal("0.0") 반환."""
+    import json as _json
+    from datetime import timedelta
+    KST = timezone(timedelta(hours=9))
+    path = _DATA_DIR / "balance_history.json"
+    if not path.exists():
+        return Decimal("0.0")
+    try:
+        history = _json.loads(path.read_text(encoding="utf-8"))
+        today_str = datetime.now(KST).strftime("%Y-%m-%d")
+        yesterday_entry = next(
+            (e for e in reversed(history) if e.get("date") != today_str and e.get("total", 0) > 0),
+            None,
+        )
+        if yesterday_entry is None:
+            return Decimal("0.0")
+        prev_total = float(yesterday_entry["total"])
+        if prev_total <= 0:
+            return Decimal("0.0")
+        pnl_pct = (current_total - prev_total) / prev_total * 100.0
+        return Decimal(str(round(pnl_pct, 4)))
+    except Exception:
+        return Decimal("0.0")
+
+
 def _build_oauth() -> KiwoomNativeOAuth:
     app_key = os.environ.get("KIWOOM_APP_KEY", "")
     app_secret = os.environ.get("KIWOOM_APP_SECRET", "")
@@ -247,6 +273,10 @@ async def _run(args) -> int:
     if args.execute and gate_result:
         pos_store = ActivePositionStore(args.pos_log)
 
+        # BAR-167: daily_pnl_pct 계산 — 전일 대비 당일 손익률(%).
+        current_total = float(deposit.cash) + float(balance.total_eval)
+        daily_pnl_pct = _compute_daily_pnl_pct(current_total)
+
         print(f"\n== 주문 실행 (BAR-OPS-17 LiveOrderGate, dry_run={args.dry_run}, 1분할 50%) ==")
         executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
         gate = LiveOrderGate(
@@ -267,7 +297,8 @@ async def _run(args) -> int:
             tranche1_qty = max(1, round(r.recommended_qty * 0.5))
 
             try:
-                result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty)
+                result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty,
+                                              daily_pnl_pct=daily_pnl_pct)
                 executed += 1
                 tag = "DRY_RUN" if result.dry_run else "ORDERED"
                 print(
