@@ -4,10 +4,11 @@
 """
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 from sqlalchemy import text
 
 from backend.db.database import get_db
@@ -15,6 +16,18 @@ from backend.security.auth import JWTService, RBACPolicy, Role
 
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+_jwt_service: Optional[JWTService] = None
+
+
+def _get_jwt_service() -> JWTService:
+    global _jwt_service
+    if _jwt_service is None:
+        secret = os.environ.get("JWT_SECRET", "")
+        if not secret:
+            raise HTTPException(status_code=503, detail="JWT_SECRET 미설정")
+        _jwt_service = JWTService(SecretStr(secret))
+    return _jwt_service
 
 
 class UserSummary(BaseModel):
@@ -30,14 +43,11 @@ class AuditEntry(BaseModel):
     created_at: str
 
 
-def _check_admin_token(
-    authorization: Optional[str], jwt_service: Optional[JWTService] = None
-) -> None:
+def _check_admin_token(authorization: Optional[str]) -> None:
     """간단 헤더 검증 (BAR-74b 에서 정식 FastAPI Depends + 통합)."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="missing bearer token")
-    if jwt_service is None:
-        raise HTTPException(status_code=503, detail="auth service unavailable")
+    jwt_service = _get_jwt_service()
     token = authorization[7:]
     try:
         payload = jwt_service.decode(token)
