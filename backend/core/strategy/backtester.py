@@ -352,16 +352,20 @@ class StrategyBacktester:
         # 기간 종료 시 미청산 포지션 강제 청산
         if open_trade is not None:
             last_price = candles[-1].close
-            pnl = self._calc_weighted_pnl(
+            # trade.pnl_pct는 보고용 가중 평균 손익 (메트릭 계산에 사용)
+            open_trade.pnl_pct = self._calc_weighted_pnl(
                 open_trade, last_price, remaining_ratio, ep
             )
             open_trade.exit_time = candles[-1].timestamp
             open_trade.exit_price = last_price
             open_trade.exit_reason = "end_of_data"
-            open_trade.pnl_pct = pnl
-            open_trade.is_winner = pnl > 0
+            open_trade.is_winner = open_trade.pnl_pct > 0
             open_trade.hold_candles = n - min_window
-            capital *= (1 + pnl * cfg.position_size_pct)
+            # 자본 갱신: remaining_ratio 의 현재가 손익만 적용
+            # (TP1 손익은 발동 시점에 이미 capital에 반영됐으므로 재산입 금지)
+            entry = open_trade.entry_price
+            current_pnl = (last_price - entry) / entry if entry > 0 else 0.0
+            capital = capital + capital * cfg.position_size_pct * remaining_ratio * current_pnl
             trades.append(open_trade)
             equity_curve.append(capital)
 
