@@ -147,17 +147,21 @@ async def _run(args) -> int:
             if not pending:
                 continue
             cur_price = float(h.cur_price)
+            cur_pnl_rate = float(h.pnl_rate)
+            # BAR-168: P2 fix — trough_pnl_rate 기반 트리거 평가.
+            # cur_price 기반(구형)은 가격 회복 후 DCA 미발동. trough 를 반영해야
+            # 데몬(P2 fix)과 동일한 트리거 조건 보장.
+            eff_drop_pct = min(cur_pnl_rate, pos.trough_pnl_rate)
             for tranche in pending:
                 # qty=0 방어 (원래 수량이 작을 때 25% → 0주)
                 if tranche.qty <= 0:
                     continue
-                trigger_price = pos.entry_price * (1 + tranche.trigger_drop_pct / 100)
-                if cur_price > trigger_price:
+                if eff_drop_pct > tranche.trigger_drop_pct:
                     continue  # 아직 트리거 조건 미달
                 print(
                     f"  [DCA-T{tranche.tranche}] {h.symbol} {h.name:<14} "
-                    f"qty={tranche.qty} 현재가={cur_price:,.0f} ≤ 트리거{trigger_price:,.0f}"
-                    f"({tranche.trigger_drop_pct:+.0f}%)"
+                    f"qty={tranche.qty} 현재가={cur_price:,.0f} eff_drop={eff_drop_pct:.2f}%"
+                    f"(trigger={tranche.trigger_drop_pct:+.0f}%)"
                 )
                 try:
                     r = await gate.place_buy(symbol=h.symbol, qty=tranche.qty)
