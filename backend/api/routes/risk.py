@@ -46,7 +46,6 @@ class RiskLimitsUpdate(BaseModel):
 @router.get("/risk/status")
 async def get_risk_status() -> dict:
     """현재 리스크 상태 조회 — 브로커 잔고 + audit 기반."""
-    import csv
     import os
     import time
     from datetime import datetime, timezone, timedelta
@@ -82,33 +81,9 @@ async def get_risk_status() -> dict:
         total_deposit = float(deposit.cash) if deposit.cash else 1
         exposure = total_eval / total_deposit if total_deposit > 0 else 0.0
 
-        # 일일 손익: audit log에서 당일 매도 손익 합산
-        daily_pnl = 0.0
-        daily_pnl_pct = 0.0
-        audit_path = Path(__file__).resolve().parents[3] / "data" / "order_audit.csv"
-        if audit_path.exists():
-            KST = timezone(timedelta(hours=9))
-            today = datetime.now(KST).strftime("%Y-%m-%d")
-            try:
-                from backend.core.journal.active_positions import ActivePositionStore
-                active = ActivePositionStore(_DATA_DIR / "active_positions.json").load_all()
-                with audit_path.open(newline="", encoding="utf-8") as f:
-                    for row in csv.DictReader(f):
-                        if not row.get("ts", "").startswith(today):
-                            continue
-                        if row.get("side") == "sell" and row.get("blocked") != "1":
-                            # 보유종목 미실현 손익도 합산
-                            pass
-            except Exception:
-                pass
-
-        # 보유종목 미실현 손익
-        unrealized_pnl = sum(
-            float(h.pnl_rate) * float(h.cur_price) * int(h.qty) / 100
-            for h in holdings
-        )
-        if total_deposit > 0:
-            daily_pnl_pct = unrealized_pnl / total_deposit * 100
+        # 보유종목 미실현 손익 (HoldingPosition.pnl = (cur_price - avg_buy_price) * qty)
+        unrealized_pnl = sum(float(h.pnl) for h in holdings)
+        daily_pnl_pct = unrealized_pnl / total_deposit * 100 if total_deposit > 0 else 0.0
 
         daily_loss_limit = cfg.daily_loss_limit
         breached = daily_pnl_pct <= -abs(daily_loss_limit)
