@@ -72,8 +72,10 @@ class GoldZoneStrategy(Strategy):
         if conditions_met < p.min_conditions:
             return None
 
-        score = bb_score * 0.4 + fib_score * 0.3 + rsi_score * 0.3
-        if score < 0.25:
+        raw = bb_score * 0.4 + fib_score * 0.3 + rsi_score * 0.3
+        # 0-10 스케일 정규화 (다른 v2 전략과 통일 — BacktestConfig.min_signal_score=4.0 기준)
+        score = raw * 10.0
+        if score < 2.5:
             return None
 
         return EntrySignal(
@@ -197,14 +199,14 @@ class GoldZoneStrategy(Strategy):
         )
 
     def position_size(self, signal: EntrySignal, account: Account) -> Decimal:
-        """골드존 보수적: ≥0.7 → 25%, 0.5~0.7 → 15%, <0.5 → 8%."""
+        """골드존 보수적: ≥7.0 → 25%, 5.0~7.0 → 15%, <5.0 → 8% (0-10 스케일 기준)."""
         if account.available <= 0:
             return Decimal(0)
 
         score = Decimal(str(signal.score))
-        if score >= Decimal("0.7"):
+        if score >= Decimal("7.0"):
             ratio = Decimal("0.25")
-        elif score >= Decimal("0.5"):
+        elif score >= Decimal("5.0"):
             ratio = Decimal("0.15")
         else:
             ratio = Decimal("0.08")

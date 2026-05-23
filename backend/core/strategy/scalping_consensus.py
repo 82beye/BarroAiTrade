@@ -37,7 +37,7 @@ from backend.models.strategy import (
 class ScalpingConsensusParams:
     """ScalpingConsensus 파라미터."""
 
-    threshold: float = 0.65   # score 정규화(0~1) ≥ threshold 만 통과
+    threshold: float = 6.5   # score(0~10) ≥ threshold 만 통과 (구 0.65 × 10)
 
 
 # 분석 결과 provider 시그니처 (외부 주입용)
@@ -75,11 +75,16 @@ class ScalpingConsensusStrategy(Strategy):
         except (TypeError, ValueError):
             return None  # adapter 실패 시 silent None
 
-        if signal.score < self.params.threshold:
+        # 어댑터는 0-1 스케일 반환 → 0-10 스케일로 정규화
+        normalized_score = signal.score * 10.0
+        if normalized_score < self.params.threshold:
             return None  # threshold 미달
 
-        # ScalpingConsensus strategy_id 로 재라벨
-        return signal.model_copy(update={"strategy_id": self.STRATEGY_ID})
+        # ScalpingConsensus strategy_id + 정규화 점수로 재라벨
+        return signal.model_copy(update={
+            "strategy_id": self.STRATEGY_ID,
+            "score": round(normalized_score, 2),
+        })
 
     def exit_plan(self, position: Position, ctx: AnalysisContext) -> ExitPlan:
         """단타 정책: TP1=+1.5% (50%), TP2=+3% (50%), SL=-1%, breakeven=+0.5%."""
@@ -103,17 +108,17 @@ class ScalpingConsensusStrategy(Strategy):
         )
 
     def position_size(self, signal: EntrySignal, account: Account) -> Decimal:
-        """단타 보수적: ≥0.7 → 25%, 0.5~0.7 → 15%, <0.5 → 8%.
+        """단타 보수적: ≥7.0 → 25%, 5.0~7.0 → 15%, <5.0 → 8% (0-10 스케일 기준).
 
-        threshold 0.65 가 진입 자체 차단하므로 실질 진입은 ≥0.65 (대부분 25% 분기).
+        threshold 6.5 가 진입 자체 차단하므로 실질 진입은 ≥6.5 (대부분 25% 분기).
         """
         if account.available <= 0:
             return Decimal(0)
 
         score = Decimal(str(signal.score))
-        if score >= Decimal("0.7"):
+        if score >= Decimal("7.0"):
             ratio = Decimal("0.25")
-        elif score >= Decimal("0.5"):
+        elif score >= Decimal("5.0"):
             ratio = Decimal("0.15")
         else:
             ratio = Decimal("0.08")
