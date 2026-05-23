@@ -136,6 +136,8 @@ async def _run(args) -> int:
     total_pnl = 0.0
     total_trades = 0
     per_strategy_pnl: dict[str, float] = {s: 0.0 for s in strategies}
+    # BAR-169: 종목별 최적 전략 저장 — 실행 루프에서 합산 PnL 대신 사용
+    best_strategy_by_symbol: dict[str, str] = {}
     log_entries: list[SimulationLogEntry] = []
     run_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -158,6 +160,9 @@ async def _run(args) -> int:
         sym_pnl = float(sum(result.pnl_by_strategy.values()))
         total_pnl += sym_pnl
         total_trades += len(result.trades)
+        # BAR-169: 종목별 최적 전략 저장 (positive PnL 우선, 없으면 최고 PnL)
+        sym_best = max(result.pnl_by_strategy, key=lambda s: float(result.pnl_by_strategy[s]))
+        best_strategy_by_symbol[c.symbol] = sym_best
         for sid, pnl in result.pnl_by_strategy.items():
             pnl_f = float(pnl)
             per_strategy_pnl[sid] = per_strategy_pnl.get(sid, 0.0) + pnl_f
@@ -307,10 +312,8 @@ async def _run(args) -> int:
                 )
 
                 # active_positions 저장 (전략 정보 + 분할 계획)
-                best_strategy = max(
-                    per_strategy_pnl,
-                    key=lambda s: per_strategy_pnl.get(s, 0.0),
-                ) if per_strategy_pnl else "swing_38"
+                # BAR-169: 종목별 최적 전략 사용 (전체 합산 PnL 오용 버그 수정)
+                best_strategy = best_strategy_by_symbol.get(r.symbol, "swing_38")
                 leader = next((c for c in filtered_leaders if c.symbol == r.symbol), None)
                 # 전략별 SL 자동 적용
                 from backend.core.risk.holding_evaluator import STRATEGY_EXIT_PROFILES
