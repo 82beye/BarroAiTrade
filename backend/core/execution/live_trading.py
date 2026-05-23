@@ -32,6 +32,7 @@ class TradeOutcome(str, Enum):
     BLOCKED_KILL_SWITCH = "blocked_kill_switch"
     BLOCKED_RISK_GUARD = "blocked_risk_guard"
     BLOCKED_ROUTING = "blocked_routing"
+    EXECUTION_FAILED = "execution_failed"
 
 
 class TradeAttempt(BaseModel):
@@ -129,6 +130,11 @@ class LiveTradingOrchestrator:
                 await self._executor.submit(decision)
             except Exception as exc:
                 logger.error("executor submit failed: %s", exc)
+                return TradeAttempt(
+                    outcome=TradeOutcome.EXECUTION_FAILED,
+                    routing=decision,
+                    reason=str(exc),
+                )
 
         return TradeAttempt(outcome=TradeOutcome.APPROVED, routing=decision)
 
