@@ -119,22 +119,22 @@ class TestGoldZonePositionSize:
             position_count=0,
         )
 
-    def test_c5a_high_score_25pct(self, sample_signal_high_score_fz):
+    def test_c5a_high_score_even(self, sample_signal_high_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 차등(BAR-176) 무력화. 10M * 0.08 / 72000 = 11."""
         s = GoldZoneStrategy()
-        size = s.position_size(sample_signal_high_score_fz, self._account())
-        # score=8.5 ≥7.0 → 25%: 10M * 0.25 / 72000 = 34.72 → 35
-        assert size == Decimal("35")
+        size = s.position_size(sample_signal_high_score, self._account())
+        assert size == Decimal("11")
 
-    def test_c5b_mid_score_15pct(self, sample_signal_mid_score_fz):
+    def test_c5b_mid_score_even(self, sample_signal_mid_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 무관."""
         s = GoldZoneStrategy()
-        size = s.position_size(sample_signal_mid_score_fz, self._account())
-        # score=6.0 ≥5.0 → 15%: 10M * 0.15 / 72000 = 20.83 → 21
-        assert size == Decimal("21")
+        size = s.position_size(sample_signal_mid_score, self._account())
+        assert size == Decimal("11")
 
-    def test_c5c_low_score_8pct(self, sample_signal_low_score_fz):
+    def test_c5c_low_score_even(self, sample_signal_low_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 무관."""
         s = GoldZoneStrategy()
-        size = s.position_size(sample_signal_low_score_fz, self._account())
-        # score=3.5 <5.0 → 8%: 10M * 0.08 / 72000 = 11.11 → 11
+        size = s.position_size(sample_signal_low_score, self._account())
         assert size == Decimal("11")
 
     def test_zero_balance(self, sample_signal_high_score_fz):

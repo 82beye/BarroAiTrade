@@ -108,26 +108,9 @@ class ScalpingConsensusStrategy(Strategy):
         )
 
     def position_size(self, signal: EntrySignal, account: Account) -> Decimal:
-        """단타 보수적: ≥7.0 → 25%, 5.0~7.0 → 15%, <5.0 → 8% (0-10 스케일 기준).
-
-        threshold 6.5 가 진입 자체 차단하므로 실질 진입은 ≥6.5 (대부분 25% 분기).
-        """
-        if account.available <= 0:
-            return Decimal(0)
-
-        score = Decimal(str(signal.score))
-        if score >= Decimal("7.0"):
-            ratio = Decimal("0.25")
-        elif score >= Decimal("5.0"):
-            ratio = Decimal("0.15")
-        else:
-            ratio = Decimal("0.08")
-
-        max_invest = account.available * ratio
-        price = Decimal(str(signal.price))
-        if price <= 0:
-            return Decimal(0)
-        return (max_invest / price).quantize(Decimal("1"))
+        """BAR-OPS-09 Phase 9: 균등 진입 (score 차등 BAR-176 무력화)."""
+        from backend.core.strategy.position_sizing import even_position_size
+        return even_position_size(signal, account)
 
     def health_check(self) -> dict[str, Any]:
         return {

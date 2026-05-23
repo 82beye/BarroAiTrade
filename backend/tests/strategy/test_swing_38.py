@@ -129,22 +129,22 @@ class TestSwing38PositionSize:
             position_count=0,
         )
 
-    def test_c5a_high_28pct(self, sample_signal_high_score_fz):
+    def test_c5a_high_score_even(self, sample_signal_high_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 차등(BAR-175) 무력화. 10M * 0.08 / 72000 = 11."""
         s = Swing38Strategy()
-        size = s.position_size(sample_signal_high_score_fz, self._account())
-        # score=8.5 ≥7.0 → 28%: 10M * 0.28 / 72000 = 38.89 → 39
-        assert size == Decimal("39")
+        size = s.position_size(sample_signal_high_score, self._account())
+        assert size == Decimal("11")
 
-    def test_c5b_mid_18pct(self, sample_signal_mid_score_fz):
+    def test_c5b_mid_score_even(self, sample_signal_mid_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 무관."""
         s = Swing38Strategy()
-        size = s.position_size(sample_signal_mid_score_fz, self._account())
-        # score=6.0 ≥5.0 → 18%: 10M * 0.18 / 72000 = 25.0 → 25
-        assert size == Decimal("25")
+        size = s.position_size(sample_signal_mid_score, self._account())
+        assert size == Decimal("11")
 
-    def test_c5c_low_8pct(self, sample_signal_low_score_fz):
+    def test_c5c_low_score_even(self, sample_signal_low_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 무관."""
         s = Swing38Strategy()
-        size = s.position_size(sample_signal_low_score_fz, self._account())
-        # score=3.5 <5.0 → 8%: 10M * 0.08 / 72000 = 11.11 → 11
+        size = s.position_size(sample_signal_low_score, self._account())
         assert size == Decimal("11")
 
 
@@ -222,25 +222,25 @@ class TestSwing38ScoreThreshold:
     - 5/22 삼성전기 -124k
     """
 
-    def test_default_min_score_preserves_0_3(self):
-        """default min_score=0.3 — 기존 하드코딩 임계 보존 (baseline 회귀)."""
+    def test_default_min_score_preserves_3_0(self):
+        """default min_score=3.0 (BAR-175 0-10 스케일 정규화 = 기존 0.3 × 10) — baseline 회귀."""
         s = Swing38Strategy()
-        assert s.params.min_score == 0.3, (
+        assert s.params.min_score == 3.0, (
             "default min_score 변경 — baseline 회귀 깨질 위험"
         )
 
     def test_explicit_override_higher_threshold(self):
-        """IntradaySimulator 시뮬 진입점이 min_score=0.5 명시 override."""
-        s = Swing38Strategy(Swing38Params(min_score=0.5))
-        assert s.params.min_score == 0.5
+        """IntradaySimulator 시뮬 진입점이 min_score=5.0 명시 override (0-10 스케일)."""
+        s = Swing38Strategy(Swing38Params(min_score=5.0))
+        assert s.params.min_score == 5.0
 
-    def test_intraday_simulator_uses_min_score_0_5(self):
-        """_build_strategies('swing_38') 가 min_score=0.5 적용 검증."""
+    def test_intraday_simulator_uses_min_score_5_0(self):
+        """_build_strategies('swing_38') 가 min_score=5.0 적용 검증 (0-10 스케일)."""
         from backend.core.backtester.intraday_simulator import _build_strategies
         out = _build_strategies(['swing_38'])
         assert len(out) == 1
-        assert out[0].params.min_score == 0.5, (
-            "IntradaySimulator swing_38 분기에서 min_score=0.5 적용 실패"
+        assert out[0].params.min_score == 5.0, (
+            "IntradaySimulator swing_38 분기에서 min_score=5.0 적용 실패"
         )
 
 

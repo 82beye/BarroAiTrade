@@ -84,23 +84,23 @@ class TestSFZonePositionSize:
             position_count=0,
         )
 
-    def test_c5a_high_score_35pct(self, sample_signal_high_score_fz):
+    def test_c5a_high_score_even(self, sample_signal_high_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 차등 무력화. 10M * 0.08 / 72000 = 11."""
         s = SFZoneStrategy()
-        size = s.position_size(sample_signal_high_score_fz, self._account())
-        # score=8.5 ≥ 7.0 → 35%; 10_000_000 * 0.35 / 72000 = 48.61 → 49
-        assert size == Decimal("49")
+        size = s.position_size(sample_signal_high_score, self._account())
+        assert size == Decimal("11")
 
-    def test_c5b_mid_score_25pct(self, sample_signal_mid_score_fz):
+    def test_c5b_mid_score_even(self, sample_signal_mid_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 무관."""
         s = SFZoneStrategy()
-        size = s.position_size(sample_signal_mid_score_fz, self._account())
-        # score=6.0 ≥ 5.0 → 25%; 10_000_000 * 0.25 / 72000 = 34.72 → 35
-        assert size == Decimal("35")
+        size = s.position_size(sample_signal_mid_score, self._account())
+        assert size == Decimal("11")
 
-    def test_c5c_low_score_10pct(self, sample_signal_low_score_fz):
+    def test_c5c_low_score_even(self, sample_signal_low_score):
+        """BAR-OPS-09 Phase 9: 균등 진입 — score 무관."""
         s = SFZoneStrategy()
-        size = s.position_size(sample_signal_low_score_fz, self._account())
-        # score=3.5 < 5.0 → 10%; 10_000_000 * 0.1 / 72000 = 13.89 → 14
-        assert size == Decimal("14")
+        size = s.position_size(sample_signal_low_score, self._account())
+        assert size == Decimal("11")
 
     def test_position_size_zero_balance(self, sample_signal_high_score_fz):
         s = SFZoneStrategy()

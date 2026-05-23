@@ -80,23 +80,9 @@ class SFZoneStrategy(Strategy):
         )
 
     def position_size(self, signal: EntrySignal, account: Account) -> Decimal:
-        """SF존 강도(score) 기반 비중: ≥7.0 → 35%, 5.0~7.0 → 25%, <5.0 → 10%."""
-        if account.available <= 0:
-            return Decimal(0)
-
-        score = Decimal(str(signal.score))
-        if score >= Decimal("7.0"):
-            ratio = Decimal("0.35")
-        elif score >= Decimal("5.0"):
-            ratio = Decimal("0.25")
-        else:
-            ratio = Decimal("0.10")
-
-        max_invest = account.available * ratio
-        price = Decimal(str(signal.price))
-        if price <= 0:
-            return Decimal(0)
-        return (max_invest / price).quantize(Decimal("1"))
+        """BAR-OPS-09 Phase 9: 균등 진입 (score 차등 무력화)."""
+        from backend.core.strategy.position_sizing import even_position_size
+        return even_position_size(signal, account)
 
     def health_check(self) -> dict[str, Any]:
         """SF존 health_check — F존 inner ready + sf_impulse_min_gain_pct ≥ 0.05."""

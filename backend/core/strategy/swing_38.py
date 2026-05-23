@@ -223,23 +223,11 @@ class Swing38Strategy(Strategy):
         )
 
     def position_size(self, signal: EntrySignal, account: Account) -> Decimal:
-        """38스윙: ≥7.0 → 28%, 5.0~7.0 → 18%, <5.0 → 8% (0-10 스케일 기준)."""
-        if account.available <= 0:
-            return Decimal(0)
-
-        score = Decimal(str(signal.score))
-        if score >= Decimal("7.0"):
-            ratio = Decimal("0.28")
-        elif score >= Decimal("5.0"):
-            ratio = Decimal("0.18")
-        else:
-            ratio = Decimal("0.08")
-
-        max_invest = account.available * ratio
-        price = Decimal(str(signal.price))
-        if price <= 0:
-            return Decimal(0)
-        return (max_invest / price).quantize(Decimal("1"))
+        """BAR-OPS-09 Phase 9: 균등 진입 (5/22 비중 편차 제거).
+        score 차등(BAR-175 0-10 스케일) 무력화 — 모든 진입 동일 비율 0.08.
+        """
+        from backend.core.strategy.position_sizing import even_position_size
+        return even_position_size(signal, account)
 
     def health_check(self) -> dict[str, Any]:
         p = self.params

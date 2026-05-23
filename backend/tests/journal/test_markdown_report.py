@@ -48,6 +48,7 @@ def _gate() -> RiskGateResult:
         available=Decimal("44037062"),
         max_per_position=Decimal("14679021"),
         max_total_position=Decimal("44037062"),
+        max_concurrent_positions=10,
         recommendations=[
             PositionRecommendation(
                 symbol="319400", name="현대무벡스",

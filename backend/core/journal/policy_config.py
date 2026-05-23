@@ -16,8 +16,11 @@ class PolicyConfig:
     min_score: float = 0.5
     stop_loss_pct: float = -4.0
     take_profit_pct: float = 5.0
-    max_per_position: float = 0.30
-    max_total_position: float = 0.90
+    # BAR-OPS-09 Phase 9 (2026-05-23): 균등 진입 default — max_total / max_concurrent = 0.80 / 10 = 0.08.
+    # max_per_position 은 균등 슬롯의 안전 상한 캡. 30% → 10% (5/22 비중 편차 6배 차단).
+    max_per_position: float = 0.10
+    max_total_position: float = 0.80
+    max_concurrent_positions: int = 10
     daily_loss_limit: float = -3.0
     daily_max_orders: int = 50
     # 적응형 매도 정책
