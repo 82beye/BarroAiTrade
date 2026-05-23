@@ -173,6 +173,7 @@ class KiwoomGateway(MarketGateway):
         params: Optional[Dict] = None,
         json_data: Optional[Dict] = None,
         retry: int = 0,
+        tr_id: Optional[str] = None,
     ) -> Dict:
         """API 요청 (레이트리밋 + 재시도 포함)"""
         await self.authenticate()
@@ -186,6 +187,8 @@ class KiwoomGateway(MarketGateway):
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json",
         }
+        if tr_id:
+            headers["tr_id"] = tr_id
 
         try:
             data = None
@@ -208,12 +211,12 @@ class KiwoomGateway(MarketGateway):
                     self.access_token = None
                     self.token_expiry = None
                 await asyncio.sleep(self.retry_delay)
-                return await self._request(method, endpoint, params, json_data, retry + 1)
+                return await self._request(method, endpoint, params, json_data, retry + 1, tr_id)
 
             if retry < self.max_retries:
                 logger.warning(f"Request failed: {e}, retrying ({retry + 1}/{self.max_retries})...")
                 await asyncio.sleep(self.retry_delay)
-                return await self._request(method, endpoint, params, json_data, retry + 1)
+                return await self._request(method, endpoint, params, json_data, retry + 1, tr_id)
             raise
 
     # ── 시장 데이터 ────────────────────────────────────────────────────────
@@ -300,13 +303,18 @@ class KiwoomGateway(MarketGateway):
             return self._mock_place_order(order)
 
         endpoint = f"/uapi/domestic-stock/v1/trading/order-cash"
+        # BAR-170: 매수 TTTC0802U, 매도 TTTC0801U (KIS API TR_ID 구분)
+        tr_id = "TTTC0802U" if order.side == OrderSide.BUY else "TTTC0801U"
+        # BAR-170: ORD_DVSN 00=지정가, 01=시장가 (역전 버그 수정)
+        ord_dvsn = "01" if order.order_type.value == "market" else "00"
+
         payload = {
             "CANO": self.account_no[:8],
             "ACNT_PRDT_CD": self.account_no[8:],
             "PDNO": order.symbol,
             "ORD_QTY": str(int(order.quantity)),
             "ORD_UNPR": str(int(order.price)) if order.price else "0",
-            "ORD_DVSN": "00" if order.order_type.value == "market" else "01",
+            "ORD_DVSN": ord_dvsn,
             "CMA_EVALU_AMT_ICLD_YN": "Y",
             "ORD_SVR_DVSN_CD": "0",
             "ORD_MGNO": "",
@@ -317,13 +325,7 @@ class KiwoomGateway(MarketGateway):
             "BF_ORD_ORGNO": "",
         }
 
-        # 주문 방향 결정
-        if order.side == OrderSide.BUY:
-            payload["ORD_DVSN"] = "00" if order.order_type.value == "market" else "01"
-        else:
-            payload["ORD_DVSN"] = "02" if order.order_type.value == "market" else "03"
-
-        data = await self._request("POST", endpoint, json_data=payload)
+        data = await self._request("POST", endpoint, json_data=payload, tr_id=tr_id)
         return self._parse_order_result(data, order)
 
     async def cancel_order(self, order_id: str) -> bool:
