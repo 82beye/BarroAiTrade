@@ -78,8 +78,10 @@ class Swing38Strategy(Strategy):
             return None
 
         impulse_score = min(1.0, impulse["gain_pct"] / 0.10)  # 5%~10% 정규화
-        score = impulse_score * 0.4 + fib_score * 0.4 + bounce_score * 0.2
-        if score < 0.3:
+        # 0-10 스케일 정규화 (다른 v2 전략과 통일 — BacktestConfig.min_signal_score=4.0 기준)
+        raw = impulse_score * 0.4 + fib_score * 0.4 + bounce_score * 0.2
+        score = raw * 10.0
+        if score < 3.0:
             return None
 
         return EntrySignal(
@@ -189,14 +191,14 @@ class Swing38Strategy(Strategy):
         )
 
     def position_size(self, signal: EntrySignal, account: Account) -> Decimal:
-        """38스윙: ≥0.7 → 28%, 0.5~0.7 → 18%, <0.5 → 8%."""
+        """38스윙: ≥7.0 → 28%, 5.0~7.0 → 18%, <5.0 → 8% (0-10 스케일 기준)."""
         if account.available <= 0:
             return Decimal(0)
 
         score = Decimal(str(signal.score))
-        if score >= Decimal("0.7"):
+        if score >= Decimal("7.0"):
             ratio = Decimal("0.28")
-        elif score >= Decimal("0.5"):
+        elif score >= Decimal("5.0"):
             ratio = Decimal("0.18")
         else:
             ratio = Decimal("0.08")
