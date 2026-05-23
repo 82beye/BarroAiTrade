@@ -62,6 +62,34 @@ def _now_kst() -> datetime:
     return datetime.now(KST)
 
 
+def _compute_daily_pnl_pct(current_total: float) -> Decimal:
+    """전일 잔고 대비 당일 손익률(%) 계산.
+
+    balance_history.json 에서 어제 날짜의 total 을 읽어 비교.
+    데이터 없거나 파싱 실패 시 Decimal("0.0") 반환 (fail-open).
+    """
+    import json as _json
+    path = _DATA_DIR / "balance_history.json"
+    if not path.exists():
+        return Decimal("0.0")
+    try:
+        history = _json.loads(path.read_text(encoding="utf-8"))
+        today_str = _now_kst().strftime("%Y-%m-%d")
+        yesterday_entry = next(
+            (e for e in reversed(history) if e.get("date") != today_str and e.get("total", 0) > 0),
+            None,
+        )
+        if yesterday_entry is None:
+            return Decimal("0.0")
+        prev_total = float(yesterday_entry["total"])
+        if prev_total <= 0:
+            return Decimal("0.0")
+        pnl_pct = (current_total - prev_total) / prev_total * 100.0
+        return Decimal(str(round(pnl_pct, 4)))
+    except Exception:
+        return Decimal("0.0")
+
+
 def _in_market_hours() -> bool:
     now = _now_kst().time()
     return MARKET_OPEN <= now <= MARKET_CLOSE
@@ -186,7 +214,9 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
     gate = LiveOrderGate(
         executor=executor, audit_path=args.audit_log,
-        policy=GatePolicy(daily_max_orders=cfg.daily_max_orders),
+        # BAR-166: DCA는 방어적 매수 — 일일 손실 한도 적용 불필요.
+        policy=GatePolicy(daily_loss_limit_pct=Decimal("-100.0"),
+                          daily_max_orders=cfg.daily_max_orders),
         notifier=notifier,
     )
 
@@ -563,6 +593,10 @@ async def _scan_and_buy(
     if not buyable:
         return 0
 
+    # BAR-166: daily_pnl_pct 계산 — 전일 대비 당일 손익률(%).
+    current_total = float(deposit.cash) + float(balance.total_eval)
+    daily_pnl_pct = _compute_daily_pnl_pct(current_total)
+
     # 주문 실행
     notifier = TelegramNotifier.from_env() if args.telegram else None
     executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
@@ -579,7 +613,8 @@ async def _scan_and_buy(
     for r, strategy in buyable[:regime_max_buy]:
         tranche1_qty = max(1, round(r.recommended_qty * 0.5))
         try:
-            result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty)
+            result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty,
+                                          daily_pnl_pct=daily_pnl_pct)
             tag = "DRY_RUN" if result.dry_run else "ORDERED"
             ts = _now_kst().strftime("%H:%M:%S")
             print(
