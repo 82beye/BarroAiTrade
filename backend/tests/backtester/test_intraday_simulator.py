@@ -314,6 +314,40 @@ class TestAtrDynamicSL:
         plan = _scaled_exit_plan(Decimal("100"), sl_pct=Decimal("-0.04"))
         assert plan.stop_loss.fixed_pct == Decimal("-0.04")
 
+    def test_scaled_exit_plan_early_tp(self):
+        """BAR-OPS-09 Phase B: early_tp=True → TP +1.5/+3/+5%, qty 0.30/0.35/0.35, BE 0.5%."""
+        plan = _scaled_exit_plan(Decimal("100"), early_tp=True)
+        tps = plan.take_profits
+        assert tps[0].price == Decimal("100") * Decimal("1.015")
+        assert tps[1].price == Decimal("100") * Decimal("1.03")
+        assert tps[2].price == Decimal("100") * Decimal("1.05")
+        assert tps[0].qty_pct == Decimal("0.30")
+        assert tps[1].qty_pct == Decimal("0.35")
+        assert tps[2].qty_pct == Decimal("0.35")
+        assert plan.breakeven_trigger == Decimal("0.005")
+
+    def test_scaled_exit_plan_default_baseline_preserved(self):
+        """BAR-OPS-09 Phase B: early_tp=False (default) → baseline TP +3/+5/+7%."""
+        plan = _scaled_exit_plan(Decimal("100"), early_tp=False)
+        tps = plan.take_profits
+        assert tps[0].price == Decimal("103")
+        assert tps[1].price == Decimal("105")
+        assert tps[2].price == Decimal("107")
+        assert plan.breakeven_trigger == Decimal("0.01")
+
+    def test_exit_plan_for_strategy_early_tp_propagates(self):
+        """BAR-OPS-09 Phase B: _exit_plan_for_strategy 의 early_tp 인자가 _scaled / _sfzone 양쪽에 전달."""
+        candles = self._flat_then_volatile(30)
+        for sid in ("f_zone", "gold_zone", "swing_38", "scalping_consensus"):
+            plan = _exit_plan_for_strategy(sid, Decimal("100"), candles, early_tp=True)
+            assert plan.take_profits[0].price == Decimal("100") * Decimal("1.015"), f"{sid} early TP1 drift"
+            assert plan.breakeven_trigger == Decimal("0.005"), f"{sid} early BE drift"
+
+        sf_plan = _exit_plan_for_strategy("sf_zone", Decimal("100"), candles, early_tp=True)
+        assert sf_plan.breakeven_trigger == Decimal("0.005")
+        # sf early: qty 0.30
+        assert sf_plan.take_profits[0].qty_pct == Decimal("0.30")
+
     def test_exit_plan_fzone_uses_fixed(self):
         """f_zone → 고정 _scaled_exit_plan (BEFORE 동작 보존)."""
         plan = _exit_plan_for_strategy(

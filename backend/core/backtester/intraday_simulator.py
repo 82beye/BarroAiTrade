@@ -256,6 +256,7 @@ class IntradaySimulator:
         position_value: Optional[Decimal] = None,
         high_price_threshold: Decimal = Decimal("1000000"),
         high_price_budget: Decimal = Decimal("2000000"),
+        early_exit_tp: bool = False,
     ) -> None:
         self._exit = exit_engine or ExitEngine()
         self._warmup = warmup_candles
@@ -266,6 +267,9 @@ class IntradaySimulator:
         self._tax = Decimal(str(tax_pct_on_sell)) / Decimal("100")
         self._slippage = Decimal(str(slippage_pct)) / Decimal("100")
         self._scalping_provider = scalping_provider
+        # BAR-OPS-09 Phase B (2026-05-23): 청산 정교화 — TP1 임계 1.5% + qty 0.30 +
+        # breakeven 0.5% 잠금. default False (baseline 보존).
+        self._early_exit_tp = early_exit_tp
         # S1: 종목당 명목 가치 기준 진입 — 지정 시 qty = floor(value / entry_price).
         # None 시 position_qty 고정 (기존 동작 보존).
         # 고가주 (price > high_price_threshold) 는 high_price_budget 한도 사용 —
@@ -318,7 +322,7 @@ class IntradaySimulator:
                         qty=qty, initial_qty=qty,
                         entry_time=current.timestamp,
                     )
-                    current_plan = _exit_plan_for_strategy(sid, entry_price, window)
+                    current_plan = _exit_plan_for_strategy(sid, entry_price, window, early_tp=self._early_exit_tp)
                     trades.append(TradeRecord(
                         strategy_id=sid, symbol=symbol, side="buy",
                         qty=qty, price=entry_price,
@@ -354,7 +358,7 @@ class IntradaySimulator:
                                 qty=qty, initial_qty=qty,
                                 entry_time=current.timestamp,
                             )
-                            current_plan = _exit_plan_for_strategy(sid, entry_price, window)
+                            current_plan = _exit_plan_for_strategy(sid, entry_price, window, early_tp=self._early_exit_tp)
                             trades.append(TradeRecord(
                                 strategy_id=sid, symbol=symbol, side="buy",
                                 qty=qty, price=entry_price,
@@ -489,8 +493,24 @@ class IntradaySimulator:
 def _scaled_exit_plan(
     entry_price: Decimal,
     sl_pct: Decimal = Decimal("-0.015"),
+    early_tp: bool = False,
 ) -> ExitPlan:
-    """entry_price 기준 +3/+5/+7% TP, SL(default -1.5%). 고정 정책 — 대부분 전략 default."""
+    """entry_price 기준 TP 분할 + SL + breakeven.
+
+    default (early_tp=False): TP +3/+5/+7%, qty 0.33/0.33/0.34 — baseline 보존.
+    early_tp=True (BAR-OPS-09 Phase B, 2026-05-23): TP +1.5/+3/+5%, qty 0.3/0.35/0.35.
+    작은 익절 잠금으로 승률 향상 (5/22 LG전자 +4.02% 같은 케이스 잡힘).
+    """
+    if early_tp:
+        return ExitPlan(
+            take_profits=[
+                TakeProfitTier(price=entry_price * Decimal("1.015"), qty_pct=Decimal("0.30")),
+                TakeProfitTier(price=entry_price * Decimal("1.03"),  qty_pct=Decimal("0.35")),
+                TakeProfitTier(price=entry_price * Decimal("1.05"),  qty_pct=Decimal("0.35")),
+            ],
+            stop_loss=StopLoss(fixed_pct=sl_pct),
+            breakeven_trigger=Decimal("0.005"),  # TP1 (+1.5%) 후 SL 을 entry+0.5% 로 잠금
+        )
     return ExitPlan(
         take_profits=[
             TakeProfitTier(price=entry_price * Decimal("1.03"), qty_pct=Decimal("0.33")),
@@ -512,6 +532,7 @@ def _sfzone_atr_exit_plan(
     ),
     sl_floor_pct: Decimal = Decimal("0.015"),
     sl_cap_pct: Decimal = Decimal("0.08"),
+    early_tp: bool = False,
 ) -> ExitPlan:
     """SF존 전용 ExitPlan — TP·SL 모두 ATR 기반 (R:R 균형).
 
@@ -526,6 +547,24 @@ def _sfzone_atr_exit_plan(
     # 클램프: SL 도 [-floor×mult, -cap×mult] 안에. sf-zone 정상 SL 범위 −3~−16%.
     if sl_pct < -sl_cap_pct * Decimal("2"):
         sl_pct = -sl_cap_pct * Decimal("2")
+
+    # BAR-OPS-09 Phase B (2026-05-23): early_tp=True 시 TP multipliers 축소 +
+    # qty 첫 tier 0.30 → 작은 익절 잠금.
+    if early_tp:
+        early_multipliers = (Decimal("0.75"), Decimal("1.5"), Decimal("2.5"))
+        tp1_pct, tp2_pct, tp3_pct = (atr_clamped * m for m in early_multipliers)
+        return ExitPlan(
+            take_profits=[
+                TakeProfitTier(price=entry_price * (Decimal("1") + tp1_pct),
+                               qty_pct=Decimal("0.30"), condition="SF early TP1"),
+                TakeProfitTier(price=entry_price * (Decimal("1") + tp2_pct),
+                               qty_pct=Decimal("0.35"), condition="SF early TP2"),
+                TakeProfitTier(price=entry_price * (Decimal("1") + tp3_pct),
+                               qty_pct=Decimal("0.35"), condition="SF early TP3"),
+            ],
+            stop_loss=StopLoss(fixed_pct=sl_pct),
+            breakeven_trigger=Decimal("0.005"),
+        )
 
     tp1_pct, tp2_pct, tp3_pct = (atr_clamped * m for m in tp_multipliers)
     return ExitPlan(
@@ -546,15 +585,19 @@ def _exit_plan_for_strategy(
     strategy_id: str,
     entry_price: Decimal,
     candles_window: list[OHLCV],
+    early_tp: bool = False,
 ) -> ExitPlan:
     """전략별 ExitPlan 분기 — '100% 중복은 공유, 나머지는 별도' 원칙.
 
     - sf_zone: ATR 기반 동적 TP·SL (변동성 적응)
     - 그 외 (f_zone, gold_zone, swing_38, scalping_consensus): 고정 +3/+5/+7%, −1.5%
+
+    early_tp=True (BAR-OPS-09 Phase B): TP 첫 tier 임계 절반 + qty 0.30 → 작은
+    익절 잠금으로 승률 향상. baseline 보존을 위해 default False.
     """
     if strategy_id == "sf_zone":
-        return _sfzone_atr_exit_plan(entry_price, candles_window)
-    return _scaled_exit_plan(entry_price)
+        return _sfzone_atr_exit_plan(entry_price, candles_window, early_tp=early_tp)
+    return _scaled_exit_plan(entry_price, early_tp=early_tp)
 
 
 def _atr_pct(candles_window: list[OHLCV], n: int = 14) -> Decimal:
