@@ -119,28 +119,28 @@ class TestGoldZonePositionSize:
             position_count=0,
         )
 
-    def test_c5a_high_score_25pct(self, sample_signal_high_score):
+    def test_c5a_high_score_25pct(self, sample_signal_high_score_fz):
         s = GoldZoneStrategy()
-        size = s.position_size(sample_signal_high_score, self._account())
-        # 10_000_000 * 0.25 / 72000 = 34.72 → quantize ROUND_HALF_EVEN → 35
+        size = s.position_size(sample_signal_high_score_fz, self._account())
+        # score=8.5 ≥7.0 → 25%: 10M * 0.25 / 72000 = 34.72 → 35
         assert size == Decimal("35")
 
-    def test_c5b_mid_score_15pct(self, sample_signal_mid_score):
+    def test_c5b_mid_score_15pct(self, sample_signal_mid_score_fz):
         s = GoldZoneStrategy()
-        size = s.position_size(sample_signal_mid_score, self._account())
-        # 10_000_000 * 0.15 / 72000 = 20.83 → 21
+        size = s.position_size(sample_signal_mid_score_fz, self._account())
+        # score=6.0 ≥5.0 → 15%: 10M * 0.15 / 72000 = 20.83 → 21
         assert size == Decimal("21")
 
-    def test_c5c_low_score_8pct(self, sample_signal_low_score):
+    def test_c5c_low_score_8pct(self, sample_signal_low_score_fz):
         s = GoldZoneStrategy()
-        size = s.position_size(sample_signal_low_score, self._account())
-        # 10_000_000 * 0.08 / 72000 = 11.11 → 11
+        size = s.position_size(sample_signal_low_score_fz, self._account())
+        # score=3.5 <5.0 → 8%: 10M * 0.08 / 72000 = 11.11 → 11
         assert size == Decimal("11")
 
-    def test_zero_balance(self, sample_signal_high_score):
+    def test_zero_balance(self, sample_signal_high_score_fz):
         s = GoldZoneStrategy()
         empty = Account(balance=Decimal(0), available=Decimal(0), position_count=0)
-        assert s.position_size(sample_signal_high_score, empty) == Decimal(0)
+        assert s.position_size(sample_signal_high_score_fz, empty) == Decimal(0)
 
 
 class TestGoldZoneHealthCheck:

@@ -129,22 +129,22 @@ class TestSwing38PositionSize:
             position_count=0,
         )
 
-    def test_c5a_high_28pct(self, sample_signal_high_score):
+    def test_c5a_high_28pct(self, sample_signal_high_score_fz):
         s = Swing38Strategy()
-        size = s.position_size(sample_signal_high_score, self._account())
-        # 10M * 0.28 / 72000 = 38.89 → 39
+        size = s.position_size(sample_signal_high_score_fz, self._account())
+        # score=8.5 ≥7.0 → 28%: 10M * 0.28 / 72000 = 38.89 → 39
         assert size == Decimal("39")
 
-    def test_c5b_mid_18pct(self, sample_signal_mid_score):
+    def test_c5b_mid_18pct(self, sample_signal_mid_score_fz):
         s = Swing38Strategy()
-        size = s.position_size(sample_signal_mid_score, self._account())
-        # 10M * 0.18 / 72000 = 25.0 → 25
+        size = s.position_size(sample_signal_mid_score_fz, self._account())
+        # score=6.0 ≥5.0 → 18%: 10M * 0.18 / 72000 = 25.0 → 25
         assert size == Decimal("25")
 
-    def test_c5c_low_8pct(self, sample_signal_low_score):
+    def test_c5c_low_8pct(self, sample_signal_low_score_fz):
         s = Swing38Strategy()
-        size = s.position_size(sample_signal_low_score, self._account())
-        # 10M * 0.08 / 72000 = 11.11 → 11
+        size = s.position_size(sample_signal_low_score_fz, self._account())
+        # score=3.5 <5.0 → 8%: 10M * 0.08 / 72000 = 11.11 → 11
         assert size == Decimal("11")
 
 

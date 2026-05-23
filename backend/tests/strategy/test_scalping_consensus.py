@@ -23,7 +23,7 @@ from backend.models.strategy import Account
 
 @pytest.fixture
 def sample_legacy_high_dict() -> dict:
-    """total_score=85 → score=0.85 → threshold 0.65 통과."""
+    """total_score=85 → score=0.85 (adapter) → normalized 8.5 → threshold 6.5 통과."""
     return {
         "code": "005930",
         "name": "삼성전자",
@@ -66,12 +66,12 @@ class TestScalpingConsensusStrategy:
         result = s._analyze_v2(sample_ctx)
         assert result is not None
         assert result.strategy_id == "scalping_consensus_v1"
-        assert result.score >= 0.65
+        assert result.score >= 6.5  # 0-10 스케일: 8.5 ≥ threshold 6.5
 
     def test_c4_low_score_blocked(self, sample_ctx, sample_legacy_low_dict):
         s = ScalpingConsensusStrategy()
         s.set_analysis_provider(lambda ctx: sample_legacy_low_dict)
-        # total_score=50 → score=0.5 < threshold 0.65 → None
+        # total_score=50 → score=0.5 (adapter) → normalized 5.0 < threshold 6.5 → None
         assert s._analyze_v2(sample_ctx) is None
 
     def test_provider_returns_none(self, sample_ctx):
@@ -86,8 +86,8 @@ class TestScalpingConsensusStrategy:
         assert s._analyze_v2(sample_ctx) is None
 
     def test_threshold_custom(self, sample_ctx, sample_legacy_high_dict):
-        """threshold 0.9 로 올리면 score 0.85 도 차단."""
-        s = ScalpingConsensusStrategy(params=ScalpingConsensusParams(threshold=0.9))
+        """threshold 9.0(0-10 스케일)으로 올리면 normalized score 8.5 도 차단."""
+        s = ScalpingConsensusStrategy(params=ScalpingConsensusParams(threshold=9.0))
         s.set_analysis_provider(lambda ctx: sample_legacy_high_dict)
         assert s._analyze_v2(sample_ctx) is None
 
@@ -122,24 +122,24 @@ class TestScalpingConsensusPositionSize:
             position_count=0,
         )
 
-    def test_c6_high_25pct(self, sample_signal_high_score):
-        # 10M * 0.25 / 72000 = 34.72 → 35
+    def test_c6_high_25pct(self, sample_signal_high_score_fz):
+        # score=8.5 ≥7.0 → 25%: 10M * 0.25 / 72000 = 34.72 → 35
         size = ScalpingConsensusStrategy().position_size(
-            sample_signal_high_score, self._account()
+            sample_signal_high_score_fz, self._account()
         )
         assert size == Decimal("35")
 
-    def test_mid_15pct(self, sample_signal_mid_score):
-        # 10M * 0.15 / 72000 = 20.83 → 21
+    def test_mid_15pct(self, sample_signal_mid_score_fz):
+        # score=6.0 ≥5.0 → 15%: 10M * 0.15 / 72000 = 20.83 → 21
         size = ScalpingConsensusStrategy().position_size(
-            sample_signal_mid_score, self._account()
+            sample_signal_mid_score_fz, self._account()
         )
         assert size == Decimal("21")
 
-    def test_zero_balance(self, sample_signal_high_score):
+    def test_zero_balance(self, sample_signal_high_score_fz):
         s = ScalpingConsensusStrategy()
         empty = Account(balance=Decimal(0), available=Decimal(0), position_count=0)
-        assert s.position_size(sample_signal_high_score, empty) == Decimal(0)
+        assert s.position_size(sample_signal_high_score_fz, empty) == Decimal(0)
 
 
 class TestScalpingConsensusHealthCheck:
@@ -150,7 +150,7 @@ class TestScalpingConsensusHealthCheck:
         h_before = s.health_check()
         assert h_before["ready"] is False
         assert h_before["provider_registered"] is False
-        assert h_before["threshold"] == 0.65
+        assert h_before["threshold"] == 6.5  # 0-10 스케일
 
         s.set_analysis_provider(lambda ctx: None)
         h_after = s.health_check()
