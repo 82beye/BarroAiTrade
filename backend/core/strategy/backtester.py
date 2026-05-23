@@ -354,17 +354,19 @@ class StrategyBacktester:
             last_price = candles[-1].close
             # trade.pnl_pct는 보고용 가중 평균 손익 (메트릭 계산에 사용)
             open_trade.pnl_pct = self._calc_weighted_pnl(
-                open_trade, last_price, remaining_ratio, ep
+                open_trade, last_price, remaining_ratio, ep,
+                cfg.commission_pct, cfg.slippage_pct,
             )
             open_trade.exit_time = candles[-1].timestamp
             open_trade.exit_price = last_price
             open_trade.exit_reason = "end_of_data"
             open_trade.is_winner = open_trade.pnl_pct > 0
-            open_trade.hold_candles = n - min_window
+            # hold_candles는 _check_exit에서 이미 누적됨 — 덮어쓰지 않는다
             # 자본 갱신: remaining_ratio 의 현재가 손익만 적용
             # (TP1 손익은 발동 시점에 이미 capital에 반영됐으므로 재산입 금지)
             entry = open_trade.entry_price
-            current_pnl = (last_price - entry) / entry if entry > 0 else 0.0
+            raw_pnl = (last_price - entry) / entry if entry > 0 else 0.0
+            current_pnl = raw_pnl - cfg.commission_pct - cfg.slippage_pct
             capital = capital + capital * cfg.position_size_pct * remaining_ratio * current_pnl
             trades.append(open_trade)
             equity_curve.append(capital)
@@ -592,12 +594,15 @@ class StrategyBacktester:
     def _calc_weighted_pnl(
         trade: BacktestTrade, close_price: float, remaining_ratio: float,
         ep: "ExitParams",
+        commission_pct: float = 0.0,
+        slippage_pct: float = 0.0,
     ) -> float:
-        """미청산 포지션의 가중 평균 pnl 계산"""
+        """미청산 포지션의 가중 평균 net pnl 계산 (수수료·슬리피지 차감)"""
+        fee = commission_pct + slippage_pct
         entry = trade.entry_price
-        current_pnl = (close_price - entry) / entry if entry > 0 else 0.0
+        current_pnl = ((close_price - entry) / entry - fee) if entry > 0 else 0.0
         if trade.tp1_filled and trade.tp1_exit_price:
-            tp1_pnl = (trade.tp1_exit_price - entry) / entry
+            tp1_pnl = (trade.tp1_exit_price - entry) / entry - fee
             return tp1_pnl * ep.take_profit_1_ratio + current_pnl * remaining_ratio
         return current_pnl
 
