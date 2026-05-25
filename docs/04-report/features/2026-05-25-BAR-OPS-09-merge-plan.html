@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BAR-OPS-09 ↔ main 머지 계획 (2026-05-25)</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    line-height: 1.65;
+    color: #1f2328;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 32px 24px;
+    background: #ffffff;
+  }
+  h1 { font-size: 2.0em; border-bottom: 2px solid #d0d7de; padding-bottom: 10px; margin-top: 0; }
+  h2 { font-size: 1.5em; border-bottom: 1px solid #d0d7de; padding-bottom: 6px; margin-top: 32px; }
+  h3 { font-size: 1.2em; margin-top: 24px; color: #24292f; }
+  h4 { font-size: 1.05em; margin-top: 20px; color: #57606a; }
+  blockquote {
+    border-left: 4px solid #0969da;
+    background: #ddf4ff;
+    padding: 12px 16px;
+    margin: 16px 0;
+    color: #0a3069;
+    border-radius: 0 6px 6px 0;
+  }
+  blockquote p { margin: 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0 20px;
+    font-size: 0.92em;
+  }
+  th, td { border: 1px solid #d0d7de; padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; font-weight: 600; }
+  tr:nth-child(even) { background: #fafbfc; }
+  code {
+    background: #eaeef2;
+    color: #cf222e;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: "SF Mono", Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    line-height: 1.5;
+  }
+  pre code { background: transparent; color: #1f2328; padding: 0; font-size: 0.88em; }
+  ul, ol { padding-left: 24px; }
+  li { margin-bottom: 4px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; font-weight: 600; }
+  .badge-high { background: #ffebe9; color: #82071e; border: 1px solid #ffcfca; }
+  .badge-mid { background: #fff8c5; color: #7d4e00; border: 1px solid #f2db75; }
+  .badge-low { background: #dafbe1; color: #116329; border: 1px solid #aceebb; }
+  .badge-info { background: #ddf4ff; color: #0a3069; border: 1px solid #b6e3ff; }
+  .toc {
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin: 20px 0 32px;
+  }
+  .toc h3 { margin-top: 0; }
+  .toc ol { margin: 0; padding-left: 20px; }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .summary-card {
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 14px 16px;
+  }
+  .summary-card .label { font-size: 0.85em; color: #57606a; }
+  .summary-card .value { font-size: 1.4em; font-weight: 600; color: #1f2328; }
+  hr { border: none; border-top: 1px solid #d0d7de; margin: 32px 0; }
+  .footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #d0d7de; color: #57606a; font-size: 0.9em; }
+  .danger { background: #ffebe9; border-left: 4px solid #cf222e; padding: 10px 14px; border-radius: 0 6px 6px 0; color: #82071e; }
+  .warning { background: #fff8c5; border-left: 4px solid #bf8700; padding: 10px 14px; border-radius: 0 6px 6px 0; color: #7d4e00; }
+  .success { background: #dafbe1; border-left: 4px solid #1a7f37; padding: 10px 14px; border-radius: 0 6px 6px 0; color: #116329; }
+</style>
+</head>
+<body>
+
+<h1>BAR-OPS-09 ↔ main 머지 계획</h1>
+<p><strong>작성일</strong>: 2026-05-25 · <strong>대상</strong>: <code>4c7313ae</code> (main) ↔ <code>871b475</code> (BAR-OPS-09)</p>
+
+<blockquote><p>두 커밋의 11일 분기를 안전하게 통합하기 위한 상세 머지 계획. 시맨틱 충돌 영역(score 스케일 0-1 → 0-10) + 파일별 해결 가이드 + 검증·롤백 절차 포함.</p></blockquote>
+
+<div class="toc">
+<h3>목차</h3>
+<ol>
+  <li><a href="#sec-1">분기 현황</a></li>
+  <li><a href="#sec-2">시맨틱 충돌 핵심 — score 스케일 0-1 → 0-10</a></li>
+  <li><a href="#sec-3">비충돌 영역 — 명확히 호환</a></li>
+  <li><a href="#sec-4">머지 전략 — 3 옵션 비교</a></li>
+  <li><a href="#sec-5">파일별 충돌 해결 가이드</a></li>
+  <li><a href="#sec-6">검증 절차</a></li>
+  <li><a href="#sec-7">롤백 안전장치</a></li>
+  <li><a href="#sec-8">운영 머신 사후 작업</a></li>
+  <li><a href="#sec-9">권장 실행 순서</a></li>
+  <li><a href="#sec-10">위험·완화</a></li>
+  <li><a href="#sec-11">한 줄 요약</a></li>
+</ol>
+</div>
+
+<h2 id="sec-1">1. 분기 현황</h2>
+
+<div class="summary-grid">
+  <div class="summary-card">
+    <div class="label">공통 분기점 (merge-base)</div>
+    <div class="value"><code>9e9eb67</code></div>
+    <div style="font-size:0.85em;color:#57606a;margin-top:4px;">2026-05-14 02:39</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">분기 경과</div>
+    <div class="value">11일</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">main HEAD</div>
+    <div class="value"><code>4c7313ae</code></div>
+    <div style="font-size:0.85em;color:#57606a;margin-top:4px;">BAR-183 · 2026-05-23 21:04</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">BAR-OPS-09 HEAD</div>
+    <div class="value"><code>871b475</code></div>
+    <div style="font-size:0.85em;color:#57606a;margin-top:4px;">Phase B · 2026-05-23 23:45</div>
+  </div>
+</div>
+
+<h3>1.1 양쪽 변경 통계</h3>
+<table>
+  <thead><tr><th>측</th><th>커밋 수</th><th>파일 수</th><th>+ 라인</th><th>− 라인</th></tr></thead>
+  <tbody>
+    <tr><td><strong>main</strong> (BAR-155 ~ BAR-183)</td><td><strong>148</strong></td><td><strong>182</strong></td><td>+18,698</td><td>−1,941</td></tr>
+    <tr><td>BAR-OPS-09 (Phase 1 ~ Phase B)</td><td>18</td><td>40</td><td>+7,955</td><td>−264</td></tr>
+  </tbody>
+</table>
+
+<h3>1.2 동시 수정 파일 (20개) — 머지 충돌 1차 후보</h3>
+<table>
+  <thead><tr><th>파일</th><th>main (+/−)</th><th>worktree (+/−)</th><th>충돌 등급</th></tr></thead>
+  <tbody>
+    <tr><td><code>backend/core/strategy/f_zone.py</code></td><td>91 / 6</td><td>25 / 38</td><td><span class="badge badge-high">HIGH</span></td></tr>
+    <tr><td><code>backend/core/strategy/blue_line.py</code></td><td>1 / 1</td><td>37 / 1</td><td><span class="badge badge-low">LOW</span></td></tr>
+    <tr><td><code>backend/core/strategy/gold_zone.py</code></td><td>8 / 6</td><td>34 / 17</td><td><span class="badge badge-mid">MID</span></td></tr>
+    <tr><td><code>backend/core/strategy/scalping_consensus.py</code></td><td>13 / 8</td><td>3 / 20</td><td><span class="badge badge-mid">MID</span></td></tr>
+    <tr><td><code>backend/core/strategy/sf_zone.py</code></td><td>3 / 3</td><td>3 / 17</td><td><span class="badge badge-low">LOW</span></td></tr>
+    <tr><td><code>backend/core/strategy/swing_38.py</code></td><td>8 / 6</td><td>42 / 18</td><td><span class="badge badge-high">HIGH</span></td></tr>
+    <tr><td><code>backend/core/backtester/intraday_simulator.py</code></td><td>169 / 30</td><td>82 / 34</td><td><span class="badge badge-high">HIGH</span></td></tr>
+    <tr><td><code>backend/core/risk/balance_gate.py</code></td><td>11 / 4</td><td>44 / 14</td><td><span class="badge badge-mid">MID</span></td></tr>
+    <tr><td><code>backend/core/journal/policy_config.py</code></td><td>8 / 0</td><td>5 / 2</td><td><span class="badge badge-low">LOW</span></td></tr>
+    <tr><td><code>backend/api/routes/signals.py</code></td><td>33 / 53</td><td>11 / 1</td><td><span class="badge badge-mid">MID</span></td></tr>
+    <tr><td><code>backend/core/orchestrator.py</code></td><td>54 / 3</td><td>10 / 1</td><td><span class="badge badge-mid">MID</span></td></tr>
+    <tr><td><code>scripts/simulate_leaders.py</code></td><td>53 / 11</td><td>13 / 6</td><td><span class="badge badge-mid">MID</span></td></tr>
+    <tr><td><code>backend/tests/backtester/test_intraday_simulator.py</code></td><td>126 / 1</td><td>34 / 0</td><td><span class="badge badge-low">LOW</span></td></tr>
+    <tr><td><code>backend/tests/risk/test_balance_gate.py</code></td><td>6 / 5</td><td>111 / 21</td><td><span class="badge badge-mid">MID</span></td></tr>
+    <tr><td><code>backend/tests/strategy/test_f_zone.py</code></td><td>11 / 11</td><td>54 / 9</td><td><span class="badge badge-mid">MID</span></td></tr>
+    <tr><td><code>backend/tests/strategy/test_gold_zone.py</code></td><td>12 / 12</td><td>107 / 9</td><td><span class="badge badge-mid">MID</span></td></tr>
+    <tr><td><code>backend/tests/strategy/test_scalping_consensus.py</code></td><td>14 / 14</td><td>7 / 7</td><td><span class="badge badge-low">LOW</span></td></tr>
+    <tr><td><code>backend/tests/strategy/test_sf_zone.py</code></td><td>11 / 11</td><td>36 / 9</td><td><span class="badge badge-mid">MID</span></td></tr>
+    <tr><td><code>backend/tests/strategy/test_swing_38.py</code></td><td>10 / 10</td><td>132 / 9</td><td><span class="badge badge-mid">MID</span></td></tr>
+    <tr><td><code>.gitignore</code></td><td>미세</td><td>미세</td><td><span class="badge badge-low">LOW</span></td></tr>
+  </tbody>
+</table>
+<p style="font-size:0.9em; color:#57606a;">
+<span class="badge badge-high">HIGH</span> 양쪽 50라인 이상 + 시맨틱 충돌 ·
+<span class="badge badge-mid">MID</span> 양쪽 5라인 이상 + 영역 일부 겹침 ·
+<span class="badge badge-low">LOW</span> 한쪽만 의미있는 변경 또는 인접 라인 분리
+</p>
+
+<h2 id="sec-2">2. 시맨틱 충돌 핵심 — score 스케일 0-1 → 0-10</h2>
+
+<h3>2.1 main 측 변경 (worktree 분기 후 진행됨)</h3>
+<table>
+  <thead><tr><th>커밋</th><th>내용</th></tr></thead>
+  <tbody>
+    <tr><td><strong>BAR-173</strong> <code>3ae64d6</code></td><td>StockStrategy score 0-10 정규화</td></tr>
+    <tr><td><strong>BAR-175</strong> <code>6e60512</code></td><td>Swing38Strategy <code>raw * 10.0</code>, 임계 <code>0.3 → 3.0</code>, position_size 임계 <code>0.7/0.5 → 7.0/5.0</code></td></tr>
+    <tr><td><strong>BAR-176</strong> <code>1d1d359</code></td><td>GoldZone + ScalpingConsensus 동일 패턴</td></tr>
+    <tr><td><strong>BAR-177</strong> <code>449c27f</code></td><td>테스트 fixture <code>sample_signal_*_score_fz</code> (8.5/6.0/3.5)</td></tr>
+    <tr><td><strong>BAR-165</strong> <code>9abaeec</code></td><td>F존/SF존 position_size 스케일 임계값 추가</td></tr>
+  </tbody>
+</table>
+
+<h3>2.2 BAR-OPS-09 측 score 사용처</h3>
+<table>
+  <thead><tr><th>위치</th><th>값</th><th>main 머지 후 의미</th></tr></thead>
+  <tbody>
+    <tr><td><code>swing_38.py</code> Phase 8a <code>Swing38Params.min_score</code></td><td>0.3 (0-1 가정)</td><td><strong>0-10 스케일에서 거의 모든 시그널 통과</strong> — 의도는 3.0</td></tr>
+    <tr><td><code>intraday_simulator.py</code> Phase 8a override</td><td>0.5 (0-1 가정)</td><td><strong>5.0 의도</strong> — 그대로 두면 0.5 임계로 100% 통과</td></tr>
+    <tr><td>Phase 9 <code>position_size()</code> 균등 0.08 통일 (5 strategy)</td><td>score 무관</td><td>main 의 score 차등 (BAR-175/176) <strong>자동 무력화</strong> ✓</td></tr>
+    <tr><td>5 strategy 테스트 <code>assert size == Decimal("11")</code></td><td>score 무관</td><td>main 의 fixture <code>*_score_fz</code> 무관해짐 ✓</td></tr>
+  </tbody>
+</table>
+
+<div class="success">
+<strong>결론</strong>: worktree 의 Phase 9 균등 진입이 main BAR-175/176/177 의 score 차등 정책을 자연 무력화 → 머지 정합성 자동 확보.
+단 <strong><code>min_score</code> 임계 값 2곳만 수동 변환 필요</strong>: <code>0.3 → 3.0</code>, <code>0.5 → 5.0</code>.
+</div>
+
+<h2 id="sec-3">3. 비충돌 영역 — 명확히 호환</h2>
+<table>
+  <thead><tr><th>main 변경</th><th>worktree 영향</th><th>호환성</th></tr></thead>
+  <tbody>
+    <tr><td><strong>BAR-159</strong> <code>2a6c442</code> SignalScanner SFZoneStrategy 등록</td><td><code>signals.py</code> / <code>orchestrator.py</code> 와 별도 영역</td><td>✓ 자동 머지</td></tr>
+    <tr><td><strong>BAR-178</strong> <code>af5157a</code> <code>_evaluate_intrabar</code> TIME_EXIT 필터 누락 fix (3 라인)</td><td><code>_scaled_exit_plan(early_tp)</code> 추가와 별도 영역</td><td>✓ 자동 머지</td></tr>
+    <tr><td><strong>BAR-167</strong> <code>adb61fc</code> simulate_leaders <code>daily_pnl_pct</code> 전달</td><td><code>--max-concurrent-positions</code> 추가와 별도 영역</td><td>✓ 자동 머지</td></tr>
+    <tr><td><strong>BAR-174/183</strong> backtester end_of_data fix</td><td>다른 클래스 (<code>backtester.py</code> vs <code>backtester/intraday_simulator.py</code>)</td><td>✓</td></tr>
+    <tr><td><strong>BAR-169</strong> simulate_leaders <code>--execute</code> 전략 선택 fix</td><td>CLI 인자 추가와 별도 라인</td><td>✓</td></tr>
+  </tbody>
+</table>
+
+<h2 id="sec-4">4. 머지 전략 — 3 옵션 비교</h2>
+
+<h3>옵션 A: rebase (BAR-OPS-09 → main 위) <span class="badge badge-info">권장</span></h3>
+<pre><code>git checkout BAR-OPS-09
+git checkout -b BAR-OPS-09-rebase-backup    # 안전 백업
+git rebase 4c7313ae                          # main 위에 18 commit 재적용
+# 충돌 발생 시 §5 가이드 따라 해결
+# 각 commit 별 해결 → git rebase --continue</code></pre>
+<p><strong>장점</strong>: 선형 history → PR 리뷰 명확 · worktree 의 18 commit 각각이 main 위에 재적용 → 변경 의도 보존 · 충돌 해결 후 force-with-lease 안전 push 가능.</p>
+<p><strong>단점</strong>: 18 commit 각각 충돌 가능 → 노동 강도 큼 · 이미 push 된 브랜치 force push 필요.</p>
+
+<h3>옵션 B: merge (main → BAR-OPS-09)</h3>
+<pre><code>git checkout BAR-OPS-09
+git checkout -b BAR-OPS-09-merge-backup
+git merge 4c7313ae                           # main 을 worktree 로 가져옴
+# 충돌 한 번에 해결 → git commit</code></pre>
+<p><strong>장점</strong>: 충돌 해결 1회 (rebase 대비 부담 적음) · force push 불필요.</p>
+<p><strong>단점</strong>: merge commit 생성 → history 복잡 · 머지 commit 안에 충돌 해결 변경 섞임 → 추적 어려움.</p>
+
+<h3>옵션 C: cherry-pick (분할 머지)</h3>
+<pre><code>git checkout main
+git cherry-pick c776fbc                       # Phase 9 균등 진입만
+git cherry-pick 871b475                       # Phase B 청산 정교화만
+# Phase 1~8 은 별도 PR 로 분리</code></pre>
+<p><strong>장점</strong>: 핵심 fix 만 main 에 즉시 반영 · 충돌 영역 최소화.</p>
+<p><strong>단점</strong>: BAR-OPS-09 worktree 의 의도(Phase 1~B 단일 흐름) 분리 · 18 commit 일관성 파편화 · audit 보고서·docs 빠짐.</p>
+
+<h3>선택 가이드</h3>
+<table>
+  <thead><tr><th>우선순위</th><th>옵션</th></tr></thead>
+  <tbody>
+    <tr><td>안전·명확성 (PR 리뷰 기준)</td><td><strong>A (rebase)</strong></td></tr>
+    <tr><td>시간 절약 + 충돌 한 번에</td><td>B (merge)</td></tr>
+    <tr><td>5/27 영업일 전 핵심만 빠르게</td><td>C (cherry-pick Phase 9 + B)</td></tr>
+  </tbody>
+</table>
+
+<h2 id="sec-5">5. 파일별 충돌 해결 가이드 (옵션 A 기준)</h2>
+
+<h3>5.1 <span class="badge badge-high">HIGH</span> <code>backend/core/strategy/swing_38.py</code></h3>
+<p><strong>main BAR-175 변경</strong>:</p>
+<pre><code>raw = impulse_score * 0.4 + fib_score * 0.4 + bounce_score * 0.2
+score = raw * 10.0
+if score &lt; 3.0:
+    return None</code></pre>
+
+<p><strong>worktree Phase 8a 변경</strong>:</p>
+<pre><code>score = impulse_score * 0.4 + fib_score * 0.4 + bounce_score * 0.2
+if score &lt; p.min_score:   # default 0.3, override 0.5
+    return None</code></pre>
+
+<p><strong>해결 (통합 — main 스케일 보존 + worktree 파라미터화)</strong>:</p>
+<pre><code>raw = impulse_score * 0.4 + fib_score * 0.4 + bounce_score * 0.2
+score = raw * 10.0
+if score &lt; p.min_score:   # default 3.0, override 5.0 (0-10 스케일)
+    return None</code></pre>
+
+<p><strong>파일 갱신</strong>:</p>
+<ul>
+  <li><code>Swing38Params.min_score: float = 0.3</code> → <strong><code>3.0</code></strong></li>
+  <li><code>intraday_simulator._build_strategies</code> swing_38 분기: <code>min_score=0.5</code> → <strong><code>5.0</code></strong></li>
+</ul>
+
+<h3>5.2 <span class="badge badge-high">HIGH</span> <code>backend/core/strategy/f_zone.py</code></h3>
+<p>main 측 91 라인 변경 (BAR-165 + BAR-46 후속). worktree 측 25/38 (Phase 2/8e/Phase 9).</p>
+<p><strong>충돌 hunk 예상</strong>:</p>
+<ol>
+  <li>score 차등 분기 (worktree Phase 9 가 균등화 → main BAR-165 의 임계 변경 무력화) → <strong>worktree 우선</strong></li>
+  <li><code>min_atr_pct</code> / <code>entry_time_cutoff</code> 파라미터 (worktree 신규) → 그대로 유지</li>
+  <li><code>_atr_pct</code> helper wrapper (worktree Phase 7) → 그대로 유지</li>
+</ol>
+
+<h3>5.3 <span class="badge badge-high">HIGH</span> <code>backend/core/backtester/intraday_simulator.py</code></h3>
+<p>main 측 169 라인 (BAR-174/178/183 등). worktree 측 82 라인 (Phase 2~B, 특히 Phase B early_tp 옵션).</p>
+<p><strong>충돌 hunk 예상</strong>:</p>
+<ol>
+  <li><code>_build_strategies</code> 분기 (worktree 의 strategy params override) → <strong>worktree 우선</strong></li>
+  <li><code>_evaluate_intrabar</code> TIME_EXIT fix (main BAR-178, 3 라인) → <strong>main 변경 채택</strong></li>
+  <li><code>_scaled_exit_plan(early_tp)</code>, <code>_sfzone_atr_exit_plan(early_tp)</code>, <code>_exit_plan_for_strategy(early_tp)</code> (worktree Phase B) → 그대로 유지</li>
+  <li><code>IntradaySimulator(early_exit_tp=False)</code> 인자 추가 → 유지</li>
+</ol>
+
+<h3>5.4 <span class="badge badge-mid">MID</span> <code>backend/core/strategy/{gold_zone, scalping_consensus, sf_zone}.py</code></h3>
+<p>main BAR-176 score 0-10 스케일 + worktree Phase 9 균등 진입 충돌.</p>
+<p><strong>해결</strong>: worktree 의 <code>position_size()</code> 균등 helper 위임 우선. main 의 score 차등 코드는 worktree 가 제거.</p>
+
+<h3>5.5 <span class="badge badge-mid">MID</span> <code>backend/api/routes/signals.py</code> + <code>backend/core/orchestrator.py</code></h3>
+<p>main: BAR-159 SignalScanner SFZoneStrategy 등록 호출 + BAR-167 daily_pnl_pct 전달.
+worktree: Phase 2/3/8e/8f FZoneParams/BlueLineParams override.</p>
+<p><strong>해결</strong>: 둘 다 채택.</p>
+<pre><code># 통합 결과 (signals.py)
+scanner = SignalScanner(
+    gateway,
+    f_zone_params=FZoneParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
+    blue_line_params=BlueLineParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
+)
+# + main BAR-159 의 SFZoneStrategy 등록은 SignalScanner 내부에서 이미 처리됨</code></pre>
+
+<h3>5.6 <span class="badge badge-mid">MID</span> <code>scripts/simulate_leaders.py</code></h3>
+<p>main: <code>daily_pnl_pct</code> 전달 + <code>--execute</code> 전략 선택 fix.
+worktree: <code>--max-concurrent-positions</code> CLI 인자 + 호출 시 전달.</p>
+<p><strong>해결</strong>: 두 변경 다 채택. 인자 추가는 별도 라인, 호출부는 통합.</p>
+
+<h3>5.7 <span class="badge badge-mid">MID</span> 5 strategy 테스트 파일</h3>
+<p>main: fixture 이름 <code>sample_signal_*_score_fz</code> + score 임계 0.65 → 6.5.
+worktree: Phase 9 균등 비율 (<code>assert size == Decimal("11")</code>).</p>
+<p><strong>해결</strong>: worktree 의 균등 비율 테스트 우선. main 의 fixture 이름 변경은 score 차등 가정 → 균등 진입에서는 무관. 단 main 의 score 임계 테스트는 별도로 보존 가능 (진입 게이트 검증용).</p>
+
+<h3>5.8 <span class="badge badge-mid">MID</span> <code>backend/core/risk/balance_gate.py</code></h3>
+<p>main: 11/4 (소규모 패치). worktree: 44/14 (Phase 9 균등 분배 + <code>max_concurrent_positions</code> 신규).</p>
+<p><strong>해결</strong>: worktree 의 전면 재작성 우선 (main 변경은 모두 흡수됨).</p>
+
+<h2 id="sec-6">6. 검증 절차</h2>
+
+<h3>6.1 사전 dry-run</h3>
+<pre><code>git worktree add ../merge-dryrun BAR-OPS-09
+cd ../merge-dryrun
+git checkout -b dryrun-merge
+git rebase 4c7313ae   # 또는 git merge 4c7313ae
+# 충돌 영역 확인 후 abort
+git rebase --abort
+cd -
+git worktree remove ../merge-dryrun</code></pre>
+
+<h3>6.2 머지 후 회귀 테스트</h3>
+<pre><code>.venv/bin/python -m pytest backend/tests/ -q
+# 목표: 902 passed 이상, 0 regression</code></pre>
+
+<h3>6.3 score 임계 동작 검증</h3>
+<pre><code>.venv/bin/python -c "
+from backend.core.strategy.swing_38 import Swing38Params, Swing38Strategy
+p = Swing38Params(min_score=3.0)
+assert p.min_score == 3.0, 'min_score 임계 변환 누락'
+print('OK swing_38 min_score = 3.0 (0-10 스케일)')
+"</code></pre>
+
+<h3>6.4 운영 핵심 경로 통합 확인</h3>
+<table>
+  <thead><tr><th>검증 항목</th><th>명령</th></tr></thead>
+  <tbody>
+    <tr><td>SignalScanner SFZone 등록 (BAR-159)</td><td><code>grep SFZoneStrategy backend/core/scanner/signal_scanner.py</code></td></tr>
+    <tr><td>TIME_EXIT 필터 (BAR-178)</td><td><code>grep TIME_EXIT backend/core/backtester/intraday_simulator.py</code></td></tr>
+    <tr><td>Phase 9 균등 진입</td><td><code>grep DEFAULT_EVEN_RATIO backend/core/strategy/position_sizing.py</code></td></tr>
+    <tr><td>Phase B early_tp</td><td><code>grep early_exit_tp backend/core/backtester/intraday_simulator.py</code></td></tr>
+    <tr><td>Phase 2/3 운영 변동성 필터</td><td><code>grep "min_atr_pct=0.035" backend/api/routes/signals.py backend/core/orchestrator.py</code></td></tr>
+    <tr><td>Phase 8e/8f 운영 시간 게이트</td><td><code>grep "entry_time_cutoff=_dtime(14, 0)" backend/api/routes/signals.py backend/core/orchestrator.py</code></td></tr>
+  </tbody>
+</table>
+
+<h3>6.5 백테스트 효과 재측정</h3>
+<p>Phase B 효과 재현 — 10 종목 일봉 시뮬에서 <strong>승률 71.7% 유지(또는 향상)</strong> 목표.</p>
+
+<h2 id="sec-7">7. 롤백 안전장치</h2>
+
+<h3>7.1 백업 브랜치 (필수)</h3>
+<pre><code>git branch BAR-OPS-09-pre-merge-2026-05-25
+git push origin BAR-OPS-09-pre-merge-2026-05-25</code></pre>
+
+<h3>7.2 단계별 push</h3>
+<pre><code># 18 commit rebase 완료 후
+git push origin BAR-OPS-09 --force-with-lease
+# --force-with-lease 는 원격이 예상 sha 와 다르면 거부 → 동시 작업 안전</code></pre>
+
+<h3>7.3 실패 시 복구</h3>
+<pre><code># rebase 중 막힘
+git rebase --abort
+
+# 푸시 후 문제 발견
+git reset --hard BAR-OPS-09-pre-merge-2026-05-25
+git push origin BAR-OPS-09 --force-with-lease</code></pre>
+
+<h2 id="sec-8">8. 운영 머신 사후 작업</h2>
+<pre><code># 1. 코드 동기화
+git pull --rebase origin main
+
+# 2. data/policy.json 갱신 (gitignored — Phase 9 정책)
+# 다음 값으로 수동 갱신:
+{
+  "min_score": 0.6,
+  "max_per_position": 0.1,
+  "max_total_position": 0.8,
+  "max_concurrent_positions": 10
+}
+
+# 3. 데몬 재기동
+./scripts/stop.sh && ./scripts/start.sh</code></pre>
+
+<h2 id="sec-9">9. 권장 실행 순서</h2>
+<ol>
+  <li>백업 생성 (§7.1)</li>
+  <li>dry-run (§6.1) → 충돌 영역 사전 확인</li>
+  <li>rebase 시작 (옵션 A, §4)</li>
+  <li>충돌 해결 (§5 가이드, 18 commit 순회)</li>
+  <li>회귀 테스트 (§6.2)</li>
+  <li>score 임계 동작 검증 (§6.3)</li>
+  <li>운영 핵심 경로 통합 확인 (§6.4)</li>
+  <li>백테스트 효과 재측정 (§6.5)</li>
+  <li>force-with-lease push (§7.2)</li>
+  <li>운영 머신 동기화 (§8) — <strong>5/27 영업일 전</strong></li>
+</ol>
+
+<h2 id="sec-10">10. 위험·완화</h2>
+<table>
+  <thead><tr><th>위험</th><th>가능성</th><th>완화</th></tr></thead>
+  <tbody>
+    <tr><td>score 임계 변환 누락 → 시그널 폭주</td><td>중</td><td>§6.3 검증 + sample input 테스트</td></tr>
+    <tr><td>main BAR-178 TIME_EXIT fix 누락 → 시뮬 PnL 오류</td><td>중</td><td>§6.4 grep 확인</td></tr>
+    <tr><td>Phase B <code>early_exit_tp</code> 옵션이 main 의 새 인자와 충돌</td><td>낮</td><td>dry-run 에서 사전 확인</td></tr>
+    <tr><td>force push 로 원격 BAR-OPS-09 손상</td><td>낮</td><td><code>--force-with-lease</code> + 백업 브랜치</td></tr>
+    <tr><td>운영 머신 pull 후 데몬 깨짐</td><td>중</td><td>data/policy.json 갱신 (§8) + 단계별 재기동</td></tr>
+  </tbody>
+</table>
+
+<h2 id="sec-11">11. 한 줄 요약</h2>
+<blockquote>
+<p><strong>옵션 A (rebase) 권장</strong> — worktree Phase 9 가 main BAR-175/176/177 의 score 차등을 자연 무력화하므로 정합성 자동 확보. <code>min_score</code> 임계 2곳만 0-10 스케일 변환(<code>0.3 → 3.0</code>, <code>0.5 → 5.0</code>) 후 §5 가이드대로 18 commit 충돌 해결 → §6 검증 → force-with-lease push.</p>
+</blockquote>
+
+<div class="footer">
+2026-05-25 작성 · BAR-OPS-09 <code>871b475</code> ↔ main <code>4c7313ae</code> 분기 분석 기반 · paired with <code>2026-05-25-BAR-OPS-09-merge-plan.md</code>
+</div>
+
+</body>
+</html>
