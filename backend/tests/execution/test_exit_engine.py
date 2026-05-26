@@ -179,3 +179,69 @@ class TestEdge:
         )
         _, orders = e.evaluate(pos, plan, Decimal("110"), datetime(2026, 5, 7, 10, 0))
         assert orders == []
+
+
+class TestExitEnginePhaseC:
+    """BAR-OPS-09 Phase C (2026-05-27) — min/max_hold_days 보유 기간 게이트."""
+
+    def _pos(self, entry_offset_days: int):
+        from datetime import datetime, timezone, timedelta
+        from decimal import Decimal
+        from backend.models.exit_order import PositionState
+        entry = datetime(2026, 5, 1, 9, 0, tzinfo=timezone.utc) - timedelta(days=0)
+        return PositionState(
+            symbol="TEST", entry_price=Decimal("100"),
+            qty=Decimal("10"), initial_qty=Decimal("10"),
+            entry_time=entry,
+        ), entry + timedelta(days=entry_offset_days)
+
+    def _plan(self, min_hold=3, max_hold=8, sl_pct="-0.03"):
+        from decimal import Decimal
+        from backend.models.strategy import ExitPlan, StopLoss
+        return ExitPlan(
+            take_profits=[],
+            stop_loss=StopLoss(fixed_pct=Decimal(sl_pct)),
+            min_hold_days=min_hold,
+            max_hold_days=max_hold,
+        )
+
+    def test_min_hold_blocks_sl(self):
+        """보유 2일 차 (min=3 미달) — SL 가격 도달해도 청산 평가 차단."""
+        from decimal import Decimal
+        from backend.core.execution.exit_engine import ExitEngine
+        pos, now = self._pos(entry_offset_days=2)
+        plan = self._plan()
+        new, orders = ExitEngine().evaluate(pos, plan, Decimal("95"), now)
+        assert orders == [], f"min_hold 미달 SL 차단 실패: {orders}"
+        assert new.qty == Decimal("10"), "포지션 보존 실패"
+
+    def test_min_hold_allows_evaluation_at_min(self):
+        """보유 3일 차 (min=3 도달) — SL 정상 발동."""
+        from decimal import Decimal
+        from backend.core.execution.exit_engine import ExitEngine
+        from backend.models.exit_order import ExitReason
+        pos, now = self._pos(entry_offset_days=3)
+        plan = self._plan()
+        new, orders = ExitEngine().evaluate(pos, plan, Decimal("95"), now)
+        assert len(orders) == 1 and orders[0].reason == ExitReason.STOP_LOSS
+
+    def test_max_hold_forces_time_exit(self):
+        """보유 8일 차 (max=8 도달) — TIME_EXIT 강제 (손익 무관)."""
+        from decimal import Decimal
+        from backend.core.execution.exit_engine import ExitEngine
+        from backend.models.exit_order import ExitReason
+        pos, now = self._pos(entry_offset_days=8)
+        plan = self._plan()
+        new, orders = ExitEngine().evaluate(pos, plan, Decimal("100"), now)
+        assert len(orders) == 1 and orders[0].reason == ExitReason.TIME_EXIT
+        assert new.qty == Decimal("0")
+
+    def test_no_hold_days_preserves_baseline(self):
+        """min/max_hold None — 기존 동작 (즉시 SL 발동)."""
+        from decimal import Decimal
+        from backend.core.execution.exit_engine import ExitEngine
+        from backend.models.exit_order import ExitReason
+        pos, now = self._pos(entry_offset_days=0)
+        plan = self._plan(min_hold=None, max_hold=None)
+        new, orders = ExitEngine().evaluate(pos, plan, Decimal("95"), now)
+        assert len(orders) == 1 and orders[0].reason == ExitReason.STOP_LOSS

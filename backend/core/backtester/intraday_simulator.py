@@ -203,12 +203,16 @@ def _build_strategies(
             # BAR-OPS-09 Phase 6: 변동성 필터 (min_atr_pct=0.035) — 저변동주 차단.
             # BAR-OPS-09 Phase 8a: 진입 점수 임계 (min_score=5.0, 0-10 스케일 with BAR-175) — 약한 시그널 차단.
             # BAR-OPS-09 Phase 8c: 진입 시간 게이트 (entry_time_cutoff=14:00) — 장 후반 진입 차단.
-            # default 회귀 보존 (모두 비활성, min_score=3.0=기존 0.3×10). 일봉 시뮬은 시간 게이트 영향 미미.
-            # 5/22 손실 패턴: LG전자 13:48 -148k, 삼성전기 14:40 -124k.
+            # BAR-OPS-09 Phase C (2026-05-27): swing 전략 = multi-day (3~8일 보유, 일봉 강제).
+            # exit_plan 에서 min/max_hold_days 가 ExitEngine 에 전달되어 보유 기간 게이트 작동.
+            # 5/22 손실 패턴: LG전자 13:48 -148k, 삼성전기 14:40 -124k (당일 청산 패턴 폐기).
             out.append(Swing38Strategy(Swing38Params(
                 min_atr_pct=0.035,
                 min_score=5.0,
                 entry_time_cutoff=dtime(14, 0),
+                require_daily_candles=True,
+                min_hold_days=3,
+                max_hold_days=8,
             )))
         elif sid == "scalping_consensus":
             from backend.core.strategy.scalping_consensus import (

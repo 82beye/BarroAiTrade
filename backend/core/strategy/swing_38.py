@@ -66,6 +66,16 @@ class Swing38Params:
     # 운영 분봉 candle 기준 작동. 일봉 시뮬은 .time()=00:00 으로 항상 통과 (영향 미미).
     entry_time_cutoff: Optional[dtime] = None
 
+    # BAR-OPS-09 Phase C (2026-05-27) — 일봉 스캔 강제 + 보유 기간 게이트:
+    # - require_daily_candles: True 시 candles timestamp 간격이 24h(일봉) 가 아니면 진입 거부.
+    #   swing_38 은 multi-day 스윙 전략 → 분봉/5분봉 노이즈 제거.
+    # - min_hold_days: 진입 후 N일 미만 시 청산 평가 차단 (단기 노이즈 SL/TP 발동 방지).
+    # - max_hold_days: N일 도달 시 강제 TIME_EXIT (장기 보유 위험 차단).
+    # 기존 운영 swing_38 패턴 (당일 청산) 와 다른 새 정책. exit_plan() 에서 ExitPlan 으로 전달.
+    require_daily_candles: bool = True
+    min_hold_days: int = 3
+    max_hold_days: int = 8
+
 
 class Swing38Strategy(Strategy):
     """38스윙 — 임펄스 + Fib 0.382 되돌림 + 반등."""
@@ -80,6 +90,14 @@ class Swing38Strategy(Strategy):
         if len(ctx.candles) < p.min_candles:
             return None
 
+        # BAR-OPS-09 Phase C: 일봉 스캔 강제 (분봉/5분봉 노이즈 제거)
+        if p.require_daily_candles and len(ctx.candles) >= 2:
+            ts1 = ctx.candles[-2].timestamp
+            ts2 = ctx.candles[-1].timestamp
+            interval_hours = (ts2 - ts1).total_seconds() / 3600
+            if interval_hours < 12:  # 12h 미만 = 분봉/5분봉/시간봉 → 거부
+                return None
+
         # BAR-OPS-09 Phase 6: 변동성 필터 — ATR% < min_atr_pct 시 진입 거부 (저변동·고가주 가짜 시그널 방지)
         if p.min_atr_pct > 0:
             atr_pct = self._atr_pct(ctx.candles, n=p.atr_n)
@@ -87,6 +105,7 @@ class Swing38Strategy(Strategy):
                 return None
 
         # BAR-OPS-09 Phase 8c: 진입 시간 게이트 — 장 후반 진입 차단 (청산 여유 부족 손실 방지).
+        # 일봉 시뮬은 .time()=00:00 으로 항상 통과 (영향 미미).
         if p.entry_time_cutoff is not None:
             last_ts = ctx.candles[-1].timestamp
             if last_ts.time() >= p.entry_time_cutoff:
@@ -202,24 +221,34 @@ class Swing38Strategy(Strategy):
     # === Strategy v2 override ===
 
     def exit_plan(self, position: Position, ctx: AnalysisContext) -> ExitPlan:
-        """38스윙: TP1=+2.5% (50%), TP2=+5% (50%), SL=-1.5%, breakeven=+1.2%."""
+        """BAR-OPS-09 Phase C (2026-05-27): 38스윙 = multi-day 스윙 전략.
+
+        새 정책:
+        - TP1=+5% (50%), TP2=+10% (50%) — 스윙 폭 큼
+        - SL=-3% (스윙 변동성 수용)
+        - breakeven_trigger=+2.5% (TP1 발동 후 SL 을 +0.5% 로 잠금)
+        - min_hold_days=3, max_hold_days=8 (params 기반)
+        - time_exit 제거 (당일 청산 패턴 폐기 — 일봉 스윙 전략)
+        """
+        p = self.params
         avg = Decimal(str(position.avg_price))
         return ExitPlan(
             take_profits=[
                 TakeProfitTier(
-                    price=avg * Decimal("1.025"),
-                    qty_pct=Decimal("0.5"),
-                    condition="38스윙 TP1 +2.5%",
-                ),
-                TakeProfitTier(
                     price=avg * Decimal("1.05"),
                     qty_pct=Decimal("0.5"),
-                    condition="38스윙 TP2 +5%",
+                    condition="38스윙 TP1 +5%",
+                ),
+                TakeProfitTier(
+                    price=avg * Decimal("1.10"),
+                    qty_pct=Decimal("0.5"),
+                    condition="38스윙 TP2 +10%",
                 ),
             ],
-            stop_loss=StopLoss(fixed_pct=Decimal("-0.015")),
-            time_exit=dtime(14, 50) if ctx.market_type == MarketType.STOCK else None,
-            breakeven_trigger=Decimal("0.012"),
+            stop_loss=StopLoss(fixed_pct=Decimal("-0.03")),
+            breakeven_trigger=Decimal("0.025"),
+            min_hold_days=p.min_hold_days,
+            max_hold_days=p.max_hold_days,
         )
 
     def position_size(self, signal: EntrySignal, account: Account) -> Decimal:

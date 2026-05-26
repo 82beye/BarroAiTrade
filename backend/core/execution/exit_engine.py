@@ -43,6 +43,27 @@ class ExitEngine:
         if new_hwm is None or current_price > new_hwm:
             new_hwm = current_price
 
+        # 0. BAR-OPS-09 Phase C — 보유 기간 게이트 (swing 전략용, 2026-05-27)
+        # max_hold_days 도달 시 강제 TIME_EXIT (손익 무관, 우선순위 최고)
+        # min_hold_days 미달 시 모든 청산 평가 차단 (단 max_hold 트리거는 예외)
+        if (plan.max_hold_days is not None or plan.min_hold_days is not None) \
+                and pos.entry_time is not None:
+            days_held = (now - pos.entry_time).days
+            # max 도달 강제 청산 (우선)
+            if plan.max_hold_days is not None and days_held >= plan.max_hold_days:
+                orders.append(ExitOrder(
+                    symbol=pos.symbol, qty=new_qty,
+                    target_price=current_price, reason=ExitReason.TIME_EXIT,
+                ))
+                return self._with_state(
+                    pos, qty=Decimal(0), tp_filled=new_tp, sl_at=new_sl, hwm=new_hwm,
+                ), orders
+            # min 미달 시 청산 평가 차단 (hwm 갱신만 유지)
+            if plan.min_hold_days is not None and days_held < plan.min_hold_days:
+                return self._with_state(
+                    pos, qty=new_qty, tp_filled=new_tp, sl_at=new_sl, hwm=new_hwm,
+                ), orders
+
         # 1. time_exit
         if plan.time_exit is not None and now.time() >= plan.time_exit:
             orders.append(

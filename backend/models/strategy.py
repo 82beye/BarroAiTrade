@@ -133,7 +133,7 @@ class StopLoss(BaseModel):
 
 
 class ExitPlan(BaseModel):
-    """청산 계획 — 분할 익절 + 손절 + 시간 청산 + 브레이크이븐 + 트레일링."""
+    """청산 계획 — 분할 익절 + 손절 + 시간 청산 + 브레이크이븐 + 트레일링 + 보유 기간."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
@@ -147,6 +147,15 @@ class ExitPlan(BaseModel):
     #   high_pnl_pct DESC 정렬 (가장 큰 단계 우선). trail_sl = peak × (1 + trail_pct).
     #   None 이면 미적용 (기존 회귀 보존).
     trail_stages: Optional[list[tuple[Decimal, Decimal]]] = None
+
+    # BAR-OPS-09 Phase C (2026-05-27) — 보유 기간 게이트 (swing 전략용):
+    # - min_hold_days: 진입 후 N일 미만 시 TP/SL/breakeven 평가 차단 (강제 보유).
+    #   단기 노이즈 청산 차단. None 이면 즉시 평가 가능 (기존 회귀 보존).
+    # - max_hold_days: 진입 후 N일 도달 시 TIME_EXIT 강제 청산 (손익 무관).
+    #   장기 보유 위험 차단. None 이면 무제한 보유.
+    # 사용 사례: swing_38 (min=3, max=8) — 일봉 스윙 전략 보유 기간 강제.
+    min_hold_days: Optional[int] = None
+    max_hold_days: Optional[int] = None
 
     @field_validator("breakeven_trigger", mode="before")
     @classmethod

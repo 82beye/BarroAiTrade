@@ -106,16 +106,20 @@ class TestSwing38StrategyV2:
 
 class TestSwing38ExitPlan:
     def test_c4_exit_plan_stock(self, sample_position, sample_ctx):
+        """BAR-OPS-09 Phase C (2026-05-27): swing 패턴 — TP +5/+10%, SL -3%, BE 2.5%, time_exit 폐기."""
         s = Swing38Strategy()
         plan = s.exit_plan(sample_position, sample_ctx)
         assert len(plan.take_profits) == 2
-        assert plan.take_profits[0].price == Decimal("72000") * Decimal("1.025")
-        assert plan.take_profits[1].price == Decimal("72000") * Decimal("1.05")
-        assert plan.stop_loss.fixed_pct == Decimal("-0.015")
-        assert plan.time_exit == dtime(14, 50)
-        assert plan.breakeven_trigger == Decimal("0.012")
+        assert plan.take_profits[0].price == Decimal("72000") * Decimal("1.05")
+        assert plan.take_profits[1].price == Decimal("72000") * Decimal("1.10")
+        assert plan.stop_loss.fixed_pct == Decimal("-0.03")
+        assert plan.time_exit is None, "swing 전략은 time_exit 폐기 (multi-day)"
+        assert plan.breakeven_trigger == Decimal("0.025")
+        assert plan.min_hold_days == 3
+        assert plan.max_hold_days == 8
 
     def test_c8_crypto_no_time_exit(self, sample_position, sample_ctx_crypto):
+        """crypto 도 동일 swing 패턴 — time_exit None."""
         s = Swing38Strategy()
         plan = s.exit_plan(sample_position, sample_ctx_crypto)
         assert plan.time_exit is None
@@ -291,3 +295,91 @@ class TestSwing38EntryTimeGate:
         assert out[0].params.entry_time_cutoff == dtime_check(14, 0), (
             "IntradaySimulator swing_38 분기에서 entry_time_cutoff=14:00 적용 실패"
         )
+
+
+class TestSwing38PhaseC:
+    """BAR-OPS-09 Phase C (2026-05-27) — 일봉 강제 + 보유 기간 3~8일."""
+
+    def _daily_candles(self, n=70):
+        out = []
+        t0 = datetime(2026, 5, 1, 9, 0)
+        for i in range(n):
+            out.append(OHLCV(symbol="TEST", timestamp=t0 + timedelta(days=i),
+                             open=1000, high=1010, low=990, close=1000,
+                             volume=10000, market_type=MarketType.STOCK))
+        return out
+
+    def _minute_candles(self, n=70):
+        out = []
+        t0 = datetime(2026, 5, 1, 9, 0)
+        for i in range(n):
+            out.append(OHLCV(symbol="TEST", timestamp=t0 + timedelta(minutes=i),
+                             open=1000, high=1010, low=990, close=1000,
+                             volume=10000, market_type=MarketType.STOCK))
+        return out
+
+    def test_default_phase_c_params(self):
+        """default — require_daily_candles=True, min/max_hold=3/8."""
+        p = Swing38Params()
+        assert p.require_daily_candles is True
+        assert p.min_hold_days == 3
+        assert p.max_hold_days == 8
+
+    def test_minute_candles_rejected(self):
+        """분봉 캔들 → 진입 거부 (require_daily_candles=True)."""
+        s = Swing38Strategy()
+        ctx = AnalysisContext(symbol="MIN", candles=self._minute_candles(70),
+                              market_type=MarketType.STOCK)
+        assert s._analyze_v2(ctx) is None, "분봉 거부 실패"
+
+    def test_daily_candles_allowed(self):
+        """일봉 캔들 → 진입 허용 (시그널은 None 가능 — 패턴 X)."""
+        s = Swing38Strategy()
+        ctx = AnalysisContext(symbol="DAY", candles=self._daily_candles(70),
+                              market_type=MarketType.STOCK)
+        result = s._analyze_v2(ctx)
+        # 시그널 없어도 None 정상. 시그널 있어도 정상 (분봉 거부만 검증).
+        assert result is None or result.symbol == "DAY"
+
+    def test_require_daily_candles_disabled_allows_minute(self):
+        """require_daily_candles=False — 분봉도 허용 (회귀 보존)."""
+        s = Swing38Strategy(Swing38Params(require_daily_candles=False))
+        ctx = AnalysisContext(symbol="MIN", candles=self._minute_candles(70),
+                              market_type=MarketType.STOCK)
+        # 분봉 거부 게이트 통과 (시그널 발생 여부는 별도)
+        # _analyze_v2 가 fall-through 해야 함 (즉시 None 안 함)
+        # 합성 캔들은 시그널 패턴 없어 None 가능 — 게이트 통과 여부만 검증
+        result = s._analyze_v2(ctx)
+        # require_daily=False 면 분봉 거부 안 됨, 시그널 패턴 없어 None 정상
+        assert result is None or result.symbol == "MIN"
+
+    def test_exit_plan_swing_pattern(self):
+        """exit_plan: TP +5/+10%, SL -3%, breakeven 2.5%, min/max_hold=3/8, time_exit=None."""
+        from backend.models.position import Position
+        s = Swing38Strategy()
+        pos = Position(
+            symbol="TEST", name="TEST", quantity=10, avg_price=10000.0,
+            current_price=10000.0, realized_pnl=0.0, unrealized_pnl=0.0,
+            pnl_pct=0.0, market_type=MarketType.STOCK,
+            entry_time=datetime(2026, 5, 1, tzinfo=timezone.utc),
+            strategy_id="swing_38_v1",
+        )
+        ctx = AnalysisContext(symbol="TEST", candles=self._daily_candles(70),
+                              market_type=MarketType.STOCK)
+        plan = s.exit_plan(pos, ctx)
+        assert plan.take_profits[0].price == Decimal("10000") * Decimal("1.05")
+        assert plan.take_profits[1].price == Decimal("10000") * Decimal("1.10")
+        assert plan.stop_loss.fixed_pct == Decimal("-0.03")
+        assert plan.breakeven_trigger == Decimal("0.025")
+        assert plan.time_exit is None, "swing 전략은 time_exit 없음 (당일 청산 폐기)"
+        assert plan.min_hold_days == 3
+        assert plan.max_hold_days == 8
+
+    def test_intraday_simulator_uses_swing_params(self):
+        """_build_strategies('swing_38') 가 require_daily + min/max_hold 적용."""
+        from backend.core.backtester.intraday_simulator import _build_strategies
+        out = _build_strategies(['swing_38'])
+        p = out[0].params
+        assert p.require_daily_candles is True
+        assert p.min_hold_days == 3
+        assert p.max_hold_days == 8

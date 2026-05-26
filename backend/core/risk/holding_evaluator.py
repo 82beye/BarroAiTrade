@@ -65,6 +65,12 @@ class ExitPolicy:
     # 권장 stages (활성화 시): ((600, Decimal("-5.0")), (1800, Decimal("-4.0")),
     #                          (99999, Decimal("-3.0")))
     sl_time_stages: Optional[tuple] = None
+    # BAR-OPS-09 Phase C (2026-05-27) — 보유 기간 게이트 (swing 전략용):
+    # - min_hold_days: 진입 후 N일 미만 시 청산 평가 차단 (단기 노이즈 SL/TP 발동 방지).
+    # - max_hold_days: N일 도달 시 강제 매도 (장기 보유 위험 차단).
+    # None 이면 미적용 (intraday 전략 default 회귀 보존). swing_38 만 (3, 8) override.
+    min_hold_days: Optional[int] = None
+    max_hold_days: Optional[int] = None
 
 
 # ── 전략별 매도 프로파일 ─────────────────────────────────────────
@@ -101,14 +107,19 @@ STRATEGY_EXIT_PROFILES: dict[str, dict] = {
         "tightened_sl_pct": Decimal("-3.0"),
     },
     "swing_38": {
+        # BAR-OPS-09 Phase C (2026-05-27): swing 전략 = multi-day 보유 (3~8일).
+        # TP/SL/breakeven 모두 폭 확대 (당일 노이즈 X 일봉 변동 수용).
         "stop_loss_pct": Decimal("-5.0"),
-        "take_profit_pct": Decimal("5.0"),
-        "partial_tp_pct": Decimal("3.0"),
+        "take_profit_pct": Decimal("10.0"),       # 5.0 → 10.0 (스윙 폭)
+        "partial_tp_pct": Decimal("5.0"),         # 3.0 → 5.0
         "partial_tp_ratio": Decimal("0.5"),
-        "trailing_start_pct": Decimal("4.0"),
-        "trailing_offset_pct": Decimal("1.5"),
-        "breakeven_trigger_pct": Decimal("3.0"),
+        "trailing_start_pct": Decimal("5.0"),     # 4.0 → 5.0
+        "trailing_offset_pct": Decimal("2.0"),    # 1.5 → 2.0
+        "breakeven_trigger_pct": Decimal("2.5"),  # 3.0 → 2.5 (조기 break-even)
         "tightened_sl_pct": Decimal("-3.0"),
+        # Phase C 보유 기간 게이트
+        "min_hold_days": 3,
+        "max_hold_days": 8,
     },
 }
 
@@ -132,6 +143,9 @@ def resolve_policy(base: ExitPolicy, strategy: str) -> ExitPolicy:
         partial_tp_ratio=overrides.get("partial_tp_ratio", base.partial_tp_ratio),
         hold_days_tighten=base.hold_days_tighten,
         tightened_sl_pct=overrides.get("tightened_sl_pct", base.tightened_sl_pct),
+        # BAR-OPS-09 Phase C (2026-05-27) — 보유 기간 게이트 (swing_38 만 정의)
+        min_hold_days=overrides.get("min_hold_days", base.min_hold_days),
+        max_hold_days=overrides.get("max_hold_days", base.max_hold_days),
     )
 
 
@@ -204,6 +218,26 @@ def evaluate_holding(
 
     peak = Decimal(str(ctx.peak_pnl_rate))
     days = _hold_days(ctx.entry_time)
+
+    # ── 0-α. BAR-OPS-09 Phase C (2026-05-27) — 보유 기간 게이트 (swing 전략) ──
+    # max_hold_days 도달 시 강제 매도 (손익 무관, 우선순위 최고)
+    # min_hold_days 미달 시 모든 청산 평가 차단 (HOLD 반환)
+    if policy.max_hold_days is not None and days >= policy.max_hold_days:
+        return HoldingDecision(
+            symbol=h.symbol, name=h.name, qty=qty, sell_qty=qty,
+            avg_buy_price=h.avg_buy_price, cur_price=h.cur_price,
+            pnl=h.pnl, pnl_rate=rate,
+            signal=SellSignal.TIME_TIGHTENED_SL,
+            reason=f"swing 최대 보유 {days}일 ≥ max {policy.max_hold_days}일 → 강제 매도",
+        )
+    if policy.min_hold_days is not None and days < policy.min_hold_days:
+        return HoldingDecision(
+            symbol=h.symbol, name=h.name, qty=qty, sell_qty=0,
+            avg_buy_price=h.avg_buy_price, cur_price=h.cur_price,
+            pnl=h.pnl, pnl_rate=rate,
+            signal=SellSignal.HOLD,
+            reason=f"swing 최소 보유 {days}일 < min {policy.min_hold_days}일 → 청산 평가 차단",
+        )
 
     # ── 0. 단기 고점 캔들 패턴 매도 (P10, 2026-05-21) ──────────────
     # 1분봉 시퀀스가 있고 일정 익절 구간(≥ partial_tp_pct)에 진입 후 단기 고점 형성 시

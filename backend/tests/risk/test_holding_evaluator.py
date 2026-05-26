@@ -227,3 +227,69 @@ def test_render_includes_new_signals():
     md = render_decisions_table(decisions)
     assert "P-TP" in md
     assert "TRAIL" in md
+
+
+class TestHoldingEvaluatorPhaseC:
+    """BAR-OPS-09 Phase C (2026-05-27) — swing_38 운영 청산 보유 기간 게이트."""
+
+    def _holding(self, pnl_rate="-5.0"):
+        from decimal import Decimal
+        from backend.core.gateway.kiwoom_native_account import HoldingPosition
+        return HoldingPosition(
+            symbol="TEST", name="TEST", qty=10,
+            avg_buy_price=Decimal("100"), cur_price=Decimal("95"),
+            eval_amount=Decimal("950"),
+            pnl=Decimal("-50"), pnl_rate=Decimal(pnl_rate),
+        )
+
+    def _ctx(self, strategy="swing_38_v1", days_ago=1):
+        from datetime import datetime, timezone, timedelta
+        from backend.core.risk.holding_evaluator import PositionContext
+        return PositionContext(
+            strategy=strategy,
+            entry_time=(datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(),
+        )
+
+    def test_swing_38_profile_has_hold_days(self):
+        """STRATEGY_EXIT_PROFILES['swing_38'] 에 min/max_hold_days=3/8."""
+        from backend.core.risk.holding_evaluator import STRATEGY_EXIT_PROFILES
+        sw = STRATEGY_EXIT_PROFILES["swing_38"]
+        assert sw["min_hold_days"] == 3
+        assert sw["max_hold_days"] == 8
+
+    def test_swing_38_resolve_policy(self):
+        """resolve_policy('swing_38_v1') → min/max_hold_days 통합 + TP 10% 강화."""
+        from decimal import Decimal
+        from backend.core.risk.holding_evaluator import ExitPolicy, resolve_policy
+        p = resolve_policy(ExitPolicy(), "swing_38_v1")
+        assert p.min_hold_days == 3 and p.max_hold_days == 8
+        assert p.take_profit_pct == Decimal("10.0")
+        assert p.partial_tp_pct == Decimal("5.0")
+
+    def test_swing_38_min_hold_returns_hold(self):
+        """보유 1일 차 (min=3 미달) — HOLD + sell_qty=0."""
+        from backend.core.risk.holding_evaluator import (
+            ExitPolicy, SellSignal, evaluate_holding,
+        )
+        d = evaluate_holding(self._holding(), ExitPolicy(), self._ctx(days_ago=1))
+        assert d.signal == SellSignal.HOLD
+        assert d.sell_qty == 0
+        assert "min" in d.reason or "최소" in d.reason
+
+    def test_swing_38_max_hold_forces_sell(self):
+        """보유 8일 차 (max=8 도달) — TIME_TIGHTENED_SL 강제 매도."""
+        from backend.core.risk.holding_evaluator import (
+            ExitPolicy, SellSignal, evaluate_holding,
+        )
+        d = evaluate_holding(self._holding(), ExitPolicy(), self._ctx(days_ago=8))
+        assert d.signal == SellSignal.TIME_TIGHTENED_SL
+        assert d.sell_qty == 10
+        assert "max" in d.reason or "최대" in d.reason
+
+    def test_gold_zone_no_hold_days(self):
+        """gold_zone 은 보유 기간 게이트 X (intraday default 회귀 보존)."""
+        from backend.core.risk.holding_evaluator import (
+            ExitPolicy, resolve_policy,
+        )
+        p = resolve_policy(ExitPolicy(), "gold_zone_v1")
+        assert p.min_hold_days is None and p.max_hold_days is None
