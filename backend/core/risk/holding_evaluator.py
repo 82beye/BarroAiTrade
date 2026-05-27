@@ -107,17 +107,18 @@ STRATEGY_EXIT_PROFILES: dict[str, dict] = {
         "tightened_sl_pct": Decimal("-3.0"),
     },
     "swing_38": {
-        # BAR-OPS-09 Phase C (2026-05-27): swing 전략 = multi-day 보유 (3~8일).
-        # TP/SL/breakeven 모두 폭 확대 (당일 노이즈 X 일봉 변동 수용).
-        "stop_loss_pct": Decimal("-5.0"),
-        "take_profit_pct": Decimal("10.0"),       # 5.0 → 10.0 (스윙 폭)
-        "partial_tp_pct": Decimal("5.0"),         # 3.0 → 5.0
+        # BAR-OPS-09 Phase D (2026-05-27): swing 전략 TP/SL 대폭 확대 (사용자 요구).
+        # Phase C 5/10/-3 → Phase D 20/50/-10 (스윙 폭 + 변동성 수용 폭 모두 ↑).
+        # 운영 적응형 매도 (HoldingEvaluator) 도 exit_plan 과 동일 임계.
+        "stop_loss_pct": Decimal("-10.0"),         # -3.0 → -10.0
+        "take_profit_pct": Decimal("50.0"),        # 10.0 → 50.0 (TP2 = 전량)
+        "partial_tp_pct": Decimal("20.0"),         # 5.0 → 20.0 (TP1 = 50% 매도)
         "partial_tp_ratio": Decimal("0.5"),
-        "trailing_start_pct": Decimal("5.0"),     # 4.0 → 5.0
-        "trailing_offset_pct": Decimal("2.0"),    # 1.5 → 2.0
-        "breakeven_trigger_pct": Decimal("2.5"),  # 3.0 → 2.5 (조기 break-even)
-        "tightened_sl_pct": Decimal("-3.0"),
-        # Phase C 보유 기간 게이트
+        "trailing_start_pct": Decimal("20.0"),     # 5.0 → 20.0 (TP1 발동 후 trail 가동)
+        "trailing_offset_pct": Decimal("5.0"),     # 2.0 → 5.0 (peak -5% 시 청산)
+        "breakeven_trigger_pct": Decimal("10.0"),  # 2.5 → 10.0 (+10% 도달 시 본전 잠금)
+        "tightened_sl_pct": Decimal("-5.0"),       # 5일 보유 후 SL 강화 -5%
+        # Phase C 보유 기간 게이트 유지
         "min_hold_days": 3,
         "max_hold_days": 8,
     },

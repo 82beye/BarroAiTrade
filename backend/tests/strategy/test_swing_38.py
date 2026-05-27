@@ -106,15 +106,15 @@ class TestSwing38StrategyV2:
 
 class TestSwing38ExitPlan:
     def test_c4_exit_plan_stock(self, sample_position, sample_ctx):
-        """BAR-OPS-09 Phase C (2026-05-27): swing 패턴 — TP +5/+10%, SL -3%, BE 2.5%, time_exit 폐기."""
+        """BAR-OPS-09 Phase D (2026-05-27): swing 패턴 — TP +20/+50%, SL -10%, BE +10%, time_exit 폐기."""
         s = Swing38Strategy()
         plan = s.exit_plan(sample_position, sample_ctx)
         assert len(plan.take_profits) == 2
-        assert plan.take_profits[0].price == Decimal("72000") * Decimal("1.05")
-        assert plan.take_profits[1].price == Decimal("72000") * Decimal("1.10")
-        assert plan.stop_loss.fixed_pct == Decimal("-0.03")
+        assert plan.take_profits[0].price == Decimal("72000") * Decimal("1.20")
+        assert plan.take_profits[1].price == Decimal("72000") * Decimal("1.50")
+        assert plan.stop_loss.fixed_pct == Decimal("-0.10")
         assert plan.time_exit is None, "swing 전략은 time_exit 폐기 (multi-day)"
-        assert plan.breakeven_trigger == Decimal("0.025")
+        assert plan.breakeven_trigger == Decimal("0.10")
         assert plan.min_hold_days == 3
         assert plan.max_hold_days == 8
 
@@ -354,7 +354,7 @@ class TestSwing38PhaseC:
         assert result is None or result.symbol == "MIN"
 
     def test_exit_plan_swing_pattern(self):
-        """exit_plan: TP +5/+10%, SL -3%, breakeven 2.5%, min/max_hold=3/8, time_exit=None."""
+        """Phase D: TP +20/+50%, SL -10%, breakeven +10%, min/max_hold=3/8, time_exit=None."""
         from backend.models.position import Position
         s = Swing38Strategy()
         pos = Position(
@@ -367,10 +367,10 @@ class TestSwing38PhaseC:
         ctx = AnalysisContext(symbol="TEST", candles=self._daily_candles(70),
                               market_type=MarketType.STOCK)
         plan = s.exit_plan(pos, ctx)
-        assert plan.take_profits[0].price == Decimal("10000") * Decimal("1.05")
-        assert plan.take_profits[1].price == Decimal("10000") * Decimal("1.10")
-        assert plan.stop_loss.fixed_pct == Decimal("-0.03")
-        assert plan.breakeven_trigger == Decimal("0.025")
+        assert plan.take_profits[0].price == Decimal("10000") * Decimal("1.20")
+        assert plan.take_profits[1].price == Decimal("10000") * Decimal("1.50")
+        assert plan.stop_loss.fixed_pct == Decimal("-0.10")
+        assert plan.breakeven_trigger == Decimal("0.10")
         assert plan.time_exit is None, "swing 전략은 time_exit 없음 (당일 청산 폐기)"
         assert plan.min_hold_days == 3
         assert plan.max_hold_days == 8
@@ -383,3 +383,163 @@ class TestSwing38PhaseC:
         assert p.require_daily_candles is True
         assert p.min_hold_days == 3
         assert p.max_hold_days == 8
+
+
+class TestSwing38PhaseD:
+    """BAR-OPS-09 Phase D (2026-05-27) — TP +20/+50%·SL -10% + 1차/2차 분할 진입.
+
+    사용자 요구:
+    - swing_38 청산 TP1=+20% / TP2=+50%, SL=-10%
+    - 1차/2차 진입: 일별 매수 1번, 다음날 추적 후 기준봉 지지하면 2차 매수
+    """
+
+    def _daily_candles(self, n=70, base=10000):
+        out = []
+        t0 = datetime(2026, 5, 1, 9, 0)
+        for i in range(n):
+            out.append(OHLCV(
+                symbol="TEST", timestamp=t0 + timedelta(days=i),
+                open=base, high=base * 1.01, low=base * 0.99,
+                close=base, volume=10000, market_type=MarketType.STOCK,
+            ))
+        return out
+
+    def _minute_candles(self, n=70, base=10000):
+        out = []
+        t0 = datetime(2026, 5, 1, 9, 0)
+        for i in range(n):
+            out.append(OHLCV(
+                symbol="TEST", timestamp=t0 + timedelta(minutes=i),
+                open=base, high=base + 100, low=base - 100,
+                close=base, volume=10000, market_type=MarketType.STOCK,
+            ))
+        return out
+
+    def _position(self, entry_days_ago: int, avg_price: float = 10000.0):
+        from backend.models.position import Position
+        return Position(
+            symbol="TEST", name="TEST", quantity=10, avg_price=avg_price,
+            current_price=avg_price, realized_pnl=0.0, unrealized_pnl=0.0,
+            pnl_pct=0.0, market_type=MarketType.STOCK,
+            entry_time=datetime.now(timezone.utc) - timedelta(days=entry_days_ago),
+            strategy_id="swing_38_v1",
+        )
+
+    def test_default_phase_d_params(self):
+        """default — second_entry_enabled=True, min/max_days=1/5, ratio=0.5, tol=0.005."""
+        p = Swing38Params()
+        assert p.second_entry_enabled is True
+        assert p.second_entry_min_days == 1
+        assert p.second_entry_max_days == 5
+        assert p.second_entry_size_ratio == 0.5
+        assert p.second_entry_support_tolerance == 0.005
+
+    def test_exit_plan_phase_d_values(self):
+        """exit_plan — TP1=+20%(50%) / TP2=+50%(50%) / SL=-10% / BE=+10%."""
+        s = Swing38Strategy()
+        pos = self._position(entry_days_ago=2)
+        ctx = AnalysisContext(
+            symbol="TEST", candles=self._daily_candles(70),
+            market_type=MarketType.STOCK,
+        )
+        plan = s.exit_plan(pos, ctx)
+        assert plan.take_profits[0].price == Decimal("10000") * Decimal("1.20")
+        assert plan.take_profits[0].qty_pct == Decimal("0.5")
+        assert plan.take_profits[1].price == Decimal("10000") * Decimal("1.50")
+        assert plan.take_profits[1].qty_pct == Decimal("0.5")
+        assert plan.stop_loss.fixed_pct == Decimal("-0.10")
+        assert plan.breakeven_trigger == Decimal("0.10")
+
+    def test_add_on_signal_same_day_blocked(self):
+        """D = 진입일 → 당일 2차 진입 차단 (days=0 < min_days=1)."""
+        s = Swing38Strategy()
+        pos = self._position(entry_days_ago=0)
+        ctx = AnalysisContext(
+            symbol="TEST", candles=self._daily_candles(70, base=10000),
+            market_type=MarketType.STOCK,
+        )
+        result = s.add_on_signal(pos, ctx, base_candle_low=Decimal("9800"))
+        assert result is None, "당일(D) 2차 진입 차단 실패 — 일별 매수 1번 규칙 위반"
+
+    def test_add_on_signal_next_day_support_held(self):
+        """D+1, 현재가 9850 ≥ 기준봉 low 9800 × 0.995 = 9751 → 시그널 발행."""
+        s = Swing38Strategy()
+        pos = self._position(entry_days_ago=1)
+        candles = self._daily_candles(70, base=9850)
+        ctx = AnalysisContext(symbol="TEST", candles=candles, market_type=MarketType.STOCK)
+        result = s.add_on_signal(pos, ctx, base_candle_low=Decimal("9800"))
+        assert result is not None
+        assert result.signal_type == "swing_38"
+        assert result.metadata["swing_38_subtype"] == "swing_38_add"
+        assert result.metadata["entry_round"] == 2
+        assert result.metadata["elapsed_days"] == 1
+        assert result.metadata["size_ratio"] == 0.5
+        assert result.metadata["base_candle_low"] == 9800.0
+        assert result.metadata["base_low_source"] == "provided"
+        assert result.strategy_id == Swing38Strategy.STRATEGY_ID
+
+    def test_add_on_signal_support_broken(self):
+        """D+1, 현재가 9700 < 9800 × 0.995 = 9751 → None (지지 깨짐)."""
+        s = Swing38Strategy()
+        pos = self._position(entry_days_ago=1)
+        candles = self._daily_candles(70, base=9700)
+        ctx = AnalysisContext(symbol="TEST", candles=candles, market_type=MarketType.STOCK)
+        result = s.add_on_signal(pos, ctx, base_candle_low=Decimal("9800"))
+        assert result is None, "기준봉 지지 깨짐 차단 실패"
+
+    def test_add_on_signal_max_days_expired(self):
+        """D+6 → None (max_days=5 초과 — 추세 변경 위험으로 시한 만료)."""
+        s = Swing38Strategy()
+        pos = self._position(entry_days_ago=6)
+        ctx = AnalysisContext(
+            symbol="TEST", candles=self._daily_candles(70, base=10000),
+            market_type=MarketType.STOCK,
+        )
+        result = s.add_on_signal(pos, ctx, base_candle_low=Decimal("9800"))
+        assert result is None, "D+6 시한 만료 차단 실패"
+
+    def test_add_on_signal_disabled_returns_none(self):
+        """second_entry_enabled=False → None (회귀 보존)."""
+        s = Swing38Strategy(Swing38Params(second_entry_enabled=False))
+        pos = self._position(entry_days_ago=1)
+        ctx = AnalysisContext(
+            symbol="TEST", candles=self._daily_candles(70),
+            market_type=MarketType.STOCK,
+        )
+        result = s.add_on_signal(pos, ctx, base_candle_low=Decimal("9800"))
+        assert result is None
+
+    def test_add_on_signal_minute_candles_rejected(self):
+        """분봉 캔들 → None (require_daily_candles 일관성)."""
+        s = Swing38Strategy()
+        pos = self._position(entry_days_ago=1)
+        ctx = AnalysisContext(
+            symbol="TEST", candles=self._minute_candles(70),
+            market_type=MarketType.STOCK,
+        )
+        result = s.add_on_signal(pos, ctx, base_candle_low=Decimal("9800"))
+        assert result is None, "분봉 입력 차단 실패"
+
+    def test_add_on_signal_base_low_default_estimate(self):
+        """base_candle_low 미주입 시 avg_price × 0.99 보수 추정 (9900 ≥ 10000×0.99×0.995=9850.5)."""
+        s = Swing38Strategy()
+        pos = self._position(entry_days_ago=1, avg_price=10000.0)
+        candles = self._daily_candles(70, base=9900)
+        ctx = AnalysisContext(symbol="TEST", candles=candles, market_type=MarketType.STOCK)
+        result = s.add_on_signal(pos, ctx, base_candle_low=None)
+        assert result is not None
+        assert result.metadata["base_low_source"] == "estimated_avg*0.99"
+        assert result.metadata["base_candle_low"] == 9900.0  # 10000 × 0.99
+
+    def test_add_on_signal_reason_format(self):
+        """reason 메시지 포맷 — 경과일 + 기준봉 low + 현재가 가독성."""
+        s = Swing38Strategy()
+        pos = self._position(entry_days_ago=2, avg_price=10000.0)
+        candles = self._daily_candles(70, base=9850)
+        ctx = AnalysisContext(symbol="TEST", candles=candles, market_type=MarketType.STOCK)
+        result = s.add_on_signal(pos, ctx, base_candle_low=Decimal("9800"))
+        assert result is not None
+        assert "38스윙 2차" in result.reason
+        assert "+2일 경과" in result.reason
+        assert "9850" in result.reason  # 현재가
+        assert "9800" in result.reason  # 기준봉 low

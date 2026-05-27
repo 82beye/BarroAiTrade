@@ -258,13 +258,18 @@ class TestHoldingEvaluatorPhaseC:
         assert sw["max_hold_days"] == 8
 
     def test_swing_38_resolve_policy(self):
-        """resolve_policy('swing_38_v1') → min/max_hold_days 통합 + TP 10% 강화."""
+        """Phase D: resolve_policy('swing_38_v1') → TP 50% / partial 20% / SL -10% / BE +10%."""
         from decimal import Decimal
         from backend.core.risk.holding_evaluator import ExitPolicy, resolve_policy
         p = resolve_policy(ExitPolicy(), "swing_38_v1")
         assert p.min_hold_days == 3 and p.max_hold_days == 8
-        assert p.take_profit_pct == Decimal("10.0")
-        assert p.partial_tp_pct == Decimal("5.0")
+        assert p.take_profit_pct == Decimal("50.0")     # TP2 전량
+        assert p.partial_tp_pct == Decimal("20.0")      # TP1 50% 매도
+        assert p.stop_loss_pct == Decimal("-10.0")
+        assert p.breakeven_trigger_pct == Decimal("10.0")
+        assert p.trailing_start_pct == Decimal("20.0")
+        assert p.trailing_offset_pct == Decimal("5.0")
+        assert p.tightened_sl_pct == Decimal("-5.0")
 
     def test_swing_38_min_hold_returns_hold(self):
         """보유 1일 차 (min=3 미달) — HOLD + sell_qty=0."""
