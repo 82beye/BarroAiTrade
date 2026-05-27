@@ -106,17 +106,17 @@ class TestSwing38StrategyV2:
 
 class TestSwing38ExitPlan:
     def test_c4_exit_plan_stock(self, sample_position, sample_ctx):
-        """BAR-OPS-09 Phase D (2026-05-27): swing 패턴 — TP +20/+50%, SL -10%, BE +10%, time_exit 폐기."""
+        """Phase D2 (2026-05-28): swing 그리드 결합 최적 — TP +20/+50%, SL -15%, BE +10%, max_hold 20."""
         s = Swing38Strategy()
         plan = s.exit_plan(sample_position, sample_ctx)
         assert len(plan.take_profits) == 2
         assert plan.take_profits[0].price == Decimal("72000") * Decimal("1.20")
         assert plan.take_profits[1].price == Decimal("72000") * Decimal("1.50")
-        assert plan.stop_loss.fixed_pct == Decimal("-0.10")
+        assert plan.stop_loss.fixed_pct == Decimal("-0.15")
         assert plan.time_exit is None, "swing 전략은 time_exit 폐기 (multi-day)"
         assert plan.breakeven_trigger == Decimal("0.10")
         assert plan.min_hold_days == 3
-        assert plan.max_hold_days == 8
+        assert plan.max_hold_days == 20
 
     def test_c8_crypto_no_time_exit(self, sample_position, sample_ctx_crypto):
         """crypto 도 동일 swing 패턴 — time_exit None."""
@@ -209,9 +209,10 @@ class TestSwing38VolatilityFilter:
         result = s._analyze_v2(ctx)
         assert result is None, "저변동 종목 진입 거부 실패"
 
-    def test_default_filter_disabled(self):
+    def test_default_filter_enabled_d2(self):
+        """Phase D2 (2026-05-28): default min_atr_pct 0.0 → 0.03 활성 (S7 시뮬 결과)."""
         s = Swing38Strategy()
-        assert s.params.min_atr_pct == 0.0
+        assert s.params.min_atr_pct == 0.03
 
     def test_default_atr_n_is_14(self):
         s = Swing38Strategy()
@@ -319,11 +320,11 @@ class TestSwing38PhaseC:
         return out
 
     def test_default_phase_c_params(self):
-        """default — require_daily_candles=True, min/max_hold=3/8."""
+        """default — require_daily_candles=True, min_hold=3 / max_hold Phase D2(2026-05-28) 8→20."""
         p = Swing38Params()
         assert p.require_daily_candles is True
         assert p.min_hold_days == 3
-        assert p.max_hold_days == 8
+        assert p.max_hold_days == 20
 
     def test_minute_candles_rejected(self):
         """분봉 캔들 → 진입 거부 (require_daily_candles=True)."""
@@ -354,7 +355,7 @@ class TestSwing38PhaseC:
         assert result is None or result.symbol == "MIN"
 
     def test_exit_plan_swing_pattern(self):
-        """Phase D: TP +20/+50%, SL -10%, breakeven +10%, min/max_hold=3/8, time_exit=None."""
+        """Phase D2 (2026-05-28): TP +20/+50%, SL -15%, BE +10%, min/max_hold=3/20."""
         from backend.models.position import Position
         s = Swing38Strategy()
         pos = Position(
@@ -369,20 +370,20 @@ class TestSwing38PhaseC:
         plan = s.exit_plan(pos, ctx)
         assert plan.take_profits[0].price == Decimal("10000") * Decimal("1.20")
         assert plan.take_profits[1].price == Decimal("10000") * Decimal("1.50")
-        assert plan.stop_loss.fixed_pct == Decimal("-0.10")
+        assert plan.stop_loss.fixed_pct == Decimal("-0.15")
         assert plan.breakeven_trigger == Decimal("0.10")
         assert plan.time_exit is None, "swing 전략은 time_exit 없음 (당일 청산 폐기)"
         assert plan.min_hold_days == 3
-        assert plan.max_hold_days == 8
+        assert plan.max_hold_days == 20
 
     def test_intraday_simulator_uses_swing_params(self):
-        """_build_strategies('swing_38') 가 require_daily + min/max_hold 적용."""
+        """_build_strategies('swing_38') 가 require_daily + min/max_hold Phase D2(3/20) 적용."""
         from backend.core.backtester.intraday_simulator import _build_strategies
         out = _build_strategies(['swing_38'])
         p = out[0].params
         assert p.require_daily_candles is True
         assert p.min_hold_days == 3
-        assert p.max_hold_days == 8
+        assert p.max_hold_days == 20
 
 
 class TestSwing38PhaseD:
@@ -435,7 +436,7 @@ class TestSwing38PhaseD:
         assert p.second_entry_support_tolerance == 0.005
 
     def test_exit_plan_phase_d_values(self):
-        """exit_plan — TP1=+20%(50%) / TP2=+50%(50%) / SL=-10% / BE=+10%."""
+        """Phase D2 (2026-05-28) exit_plan — TP1=+20%(50%) / TP2=+50%(50%) / SL=-15% / BE=+10%."""
         s = Swing38Strategy()
         pos = self._position(entry_days_ago=2)
         ctx = AnalysisContext(
@@ -447,8 +448,9 @@ class TestSwing38PhaseD:
         assert plan.take_profits[0].qty_pct == Decimal("0.5")
         assert plan.take_profits[1].price == Decimal("10000") * Decimal("1.50")
         assert plan.take_profits[1].qty_pct == Decimal("0.5")
-        assert plan.stop_loss.fixed_pct == Decimal("-0.10")
+        assert plan.stop_loss.fixed_pct == Decimal("-0.15")
         assert plan.breakeven_trigger == Decimal("0.10")
+        assert plan.max_hold_days == 20
 
     def test_add_on_signal_same_day_blocked(self):
         """D = 진입일 → 당일 2차 진입 차단 (days=0 < min_days=1)."""

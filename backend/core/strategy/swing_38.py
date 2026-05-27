@@ -47,10 +47,11 @@ class Swing38Params:
     min_candles: int = 60
 
     # BAR-OPS-09 Phase 6 — 변동성 필터: ATR% < min_atr_pct 시 진입 거부.
-    # default 0.0 (필터 비활성) — 기존 baseline 회귀 보존.
-    # IntradaySimulator 시뮬 진입점에서 명시 override (0.035) — 저변동주 가짜 시그널 차단.
+    # Phase D2 (2026-05-28): default 0.0 → 0.03 활성 (S7 시뮬 결과).
+    # S7 진입 필터 시뮬 11 시나리오 중 ATR≥3% 단독 추가가 자본가중 +1.857% (baseline +1.808%,
+    # +2.71% 우위) 로 가장 cost-effective. 진입 수 6,397 → 6,095 (-4.7%, 저변동주만 차단).
     # 패턴: 5/15 LG씨엔에스 -514k (flu% 7.5%), 5/14 삼성전자 -80k (flu% 4.2%) 등
-    min_atr_pct: float = 0.0
+    min_atr_pct: float = 0.03
     atr_n: int = 14
 
     # BAR-OPS-09 Phase 8 — 진입 점수 임계 (impulse*0.4 + fib*0.4 + bounce*0.2 < min_score 차단).
@@ -74,7 +75,10 @@ class Swing38Params:
     # 기존 운영 swing_38 패턴 (당일 청산) 와 다른 새 정책. exit_plan() 에서 ExitPlan 으로 전달.
     require_daily_candles: bool = True
     min_hold_days: int = 3
-    max_hold_days: int = 8
+    # Phase D2 (2026-05-28): 8 → 20 (S6 결합 그리드 결과).
+    # S6 SL × max_hold 2D 그리드에서 SL=-15% × D+20 = 자본가중 +1.808% (baseline SL=-10%×D+8
+    # +0.597% 대비 +203%). 단일 변수 그리드 max_hold=20도 +1.096% (베이스 +84%) 우위.
+    max_hold_days: int = 20
 
     # BAR-OPS-09 Phase D (2026-05-27) — 분할 진입 (1차/2차 scale-in) + 큰 폭 TP/SL:
     # 사용자 요구: "일별 매수 1번, 다음날 추적 후 기준봉 지지하면 2차 매수".
@@ -235,14 +239,17 @@ class Swing38Strategy(Strategy):
     # === Strategy v2 override ===
 
     def exit_plan(self, position: Position, ctx: AnalysisContext) -> ExitPlan:
-        """BAR-OPS-09 Phase D (2026-05-27): 38스윙 = multi-day 스윙 + 큰 폭 TP/SL.
+        """BAR-OPS-09 Phase D2 (2026-05-28): 38스윙 그리드 서치 결합 최적 반영.
 
-        새 정책 (Phase C 5/10/-3 → Phase D 20/50/-10):
-        - TP1=+20% (50%), TP2=+50% (50%) — 스윙 폭 대폭 확대 (사용자 요구)
-        - SL=-10% (스윙 변동성 수용 폭 확대)
-        - breakeven_trigger=+10% (TP1 도달 시 본전 잠금)
-        - min_hold_days=3, max_hold_days=8 (params 기반, Phase C 유지)
-        - time_exit 제거 (당일 청산 패턴 폐기 — 일봉 스윙 전략)
+        S6 SL×max_hold 2D + S7 진입 필터 그리드 결과:
+        - TP1=+20% (50%) ← Phase D 유지 (TP1 그리드 결과 자본가중 최대)
+        - TP2=+50% (50%) ← Phase D 유지 (TP2 그리드 거의 무영향)
+        - SL=-15% ← Phase D -10% 에서 강화 (SL×D+20 결합 최적, 큰 손실 흡수 후 회복)
+        - breakeven_trigger=+10% ← Phase D 유지 (보수적 BE 잠금)
+        - min_hold_days=3, max_hold_days=20 ← Phase D 8 에서 확대 (회복 시간 확보)
+        - time_exit 제거 (Phase D 유지)
+        시뮬 자본가중 +1.808% (baseline Phase D +0.597% 대비 +203%).
+        Swing38Params.min_atr_pct=0.03 활성으로 추가 +2.71% (ATR≥3% 진입 필터).
         """
         p = self.params
         avg = Decimal(str(position.avg_price))
@@ -259,7 +266,7 @@ class Swing38Strategy(Strategy):
                     condition="38스윙 TP2 +50%",
                 ),
             ],
-            stop_loss=StopLoss(fixed_pct=Decimal("-0.10")),
+            stop_loss=StopLoss(fixed_pct=Decimal("-0.15")),
             breakeven_trigger=Decimal("0.10"),
             min_hold_days=p.min_hold_days,
             max_hold_days=p.max_hold_days,
