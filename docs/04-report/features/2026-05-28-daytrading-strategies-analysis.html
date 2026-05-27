@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>활성 단타 3 전략 상세 분석 (sf_zone · f_zone · gold_zone) — 2026-05-28</title>
+<style>
+  :root {
+    --c-text:#1a1a1a; --c-muted:#5f6b7a; --c-bg:#fafbfc;
+    --c-card:#ffffff; --c-border:#e3e8ee;
+    --c-accent:#0b5cad; --c-accent-bg:#eaf2fb;
+    --c-warn:#b25400; --c-warn-bg:#fff3e6;
+    --c-good:#0a7a3d; --c-good-bg:#e9f7ee;
+    --c-bad:#b03333; --c-bad-bg:#fbecec;
+    --c-code-bg:#f4f6f8;
+  }
+  * { box-sizing:border-box; }
+  body {
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Segoe UI",Roboto,sans-serif;
+    background:var(--c-bg); color:var(--c-text); margin:0;
+    line-height:1.65; font-size:15px; -webkit-font-smoothing:antialiased;
+  }
+  .container { max-width:1080px; margin:0 auto; padding:32px 28px 80px; }
+  header {
+    border-bottom:3px solid var(--c-accent); padding-bottom:18px; margin-bottom:32px;
+  }
+  header h1 { margin:0 0 8px; font-size:28px; letter-spacing:-0.02em; }
+  header .meta { color:var(--c-muted); font-size:13px; line-height:1.6; }
+  h2 {
+    font-size:22px; margin:42px 0 14px; padding:8px 0 8px 14px;
+    border-left:5px solid var(--c-accent); background:var(--c-accent-bg);
+    border-radius:0 4px 4px 0;
+  }
+  h3 {
+    font-size:17px; margin:28px 0 10px;
+    color:var(--c-accent); letter-spacing:-0.01em;
+  }
+  h4 { font-size:15px; margin:18px 0 8px; color:#333; }
+  p { margin:8px 0; }
+  ul, ol { margin:6px 0 14px 22px; }
+  li { margin:3px 0; }
+  table {
+    width:100%; border-collapse:collapse; margin:14px 0 22px;
+    background:var(--c-card); border:1px solid var(--c-border);
+    border-radius:6px; overflow:hidden; font-size:13.5px;
+  }
+  thead { background:var(--c-accent); color:#fff; }
+  th, td { padding:9px 12px; text-align:left; border-bottom:1px solid var(--c-border); vertical-align:top; }
+  th:not(:first-child), td:not(:first-child) { border-left:1px solid #f0f3f7; }
+  tbody tr:nth-child(even) { background:#fafbfd; }
+  tbody tr:hover { background:#f3f7fc; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  td.center, th.center { text-align:center; }
+  code, pre {
+    font-family:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+    font-size:13px;
+  }
+  code { background:var(--c-code-bg); padding:1px 6px; border-radius:3px; }
+  pre {
+    background:var(--c-code-bg); padding:14px 16px; border-radius:6px;
+    overflow-x:auto; border:1px solid var(--c-border);
+    line-height:1.5; font-size:13px;
+  }
+  pre code { background:transparent; padding:0; }
+  blockquote {
+    border-left:4px solid var(--c-muted); margin:14px 0; padding:8px 16px;
+    background:#f4f6f8; color:#3a4756; border-radius:0 4px 4px 0;
+  }
+  .summary-box {
+    background:var(--c-card); border:1px solid var(--c-border); border-left:5px solid var(--c-accent);
+    border-radius:6px; padding:18px 22px; margin:18px 0 28px;
+  }
+  .summary-box h3 { margin-top:0; }
+  .key-findings {
+    background:var(--c-accent-bg); border:1px solid #c7dcf0;
+    border-radius:6px; padding:14px 20px; margin:18px 0 28px;
+  }
+  .key-findings ol { margin:6px 0 0 22px; }
+  .key-findings li { margin:5px 0; }
+  .badge {
+    display:inline-block; padding:2px 9px; border-radius:11px;
+    font-size:11.5px; font-weight:600; margin:0 3px;
+  }
+  .b-good { background:var(--c-good-bg); color:var(--c-good); }
+  .b-warn { background:var(--c-warn-bg); color:var(--c-warn); }
+  .b-bad  { background:var(--c-bad-bg);  color:var(--c-bad);  }
+  .b-info { background:var(--c-accent-bg); color:var(--c-accent); }
+  .star { color:#cf9b00; font-weight:700; }
+  .strong { color:var(--c-accent); font-weight:600; }
+  .warn-line {
+    background:var(--c-warn-bg); border-left:4px solid var(--c-warn);
+    padding:10px 14px; border-radius:0 4px 4px 0; margin:14px 0;
+  }
+  .good-line {
+    background:var(--c-good-bg); border-left:4px solid var(--c-good);
+    padding:10px 14px; border-radius:0 4px 4px 0; margin:14px 0;
+  }
+  .strategy-card {
+    background:var(--c-card); border:1px solid var(--c-border); border-radius:8px;
+    padding:18px 22px 12px; margin:24px 0;
+  }
+  .strategy-card .title {
+    font-size:18px; font-weight:700; color:var(--c-accent);
+    margin:0 0 4px; letter-spacing:-0.01em;
+  }
+  .strategy-card .subtitle { color:var(--c-muted); font-size:13px; margin:0 0 12px; }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:760px) { .grid-2 { grid-template-columns:1fr; } table { font-size:12.5px; } th, td { padding:7px 9px; } }
+  .toc {
+    background:var(--c-card); border:1px solid var(--c-border); border-radius:6px;
+    padding:14px 22px; margin:8px 0 32px;
+  }
+  .toc ol { margin:6px 0 0 22px; }
+  .toc a { color:var(--c-accent); text-decoration:none; }
+  .toc a:hover { text-decoration:underline; }
+  footer {
+    margin-top:60px; padding-top:18px; border-top:1px solid var(--c-border);
+    color:var(--c-muted); font-size:12.5px;
+  }
+  @media print {
+    body { background:#fff; font-size:11.5pt; }
+    .container { max-width:none; padding:18mm 14mm; }
+    h2 { page-break-after:avoid; }
+    table, .strategy-card { page-break-inside:avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>활성 단타 3 전략 상세 분석</h1>
+  <div class="meta">
+    <strong>sf_zone · f_zone · gold_zone</strong> &nbsp;|&nbsp;
+    작성일 <strong>2026-05-28</strong> &nbsp;|&nbsp;
+    브랜치 <code>BAR-OPS-09</code> (Phase D2.1 단타 전용 모드 적용 후) &nbsp;|&nbsp;
+    대상 SignalScanner default 활성 전략 3개 &nbsp;|&nbsp;
+    비활성(참조) <code>blue_line</code> · <code>crypto_breakout</code> · <code>swing_38</code>
+  </div>
+</header>
+
+<div class="summary-box">
+  <h3>Executive Summary</h3>
+  <p>BAR-OPS-09 Phase D2.1 (2026-05-28) 머지로 단타 전용 모드 전환 — <strong>sf_zone(1), f_zone(2), gold_zone(6)</strong> 만 SignalScanner default 활성. 본 리포트는 단타 전략 완성 BAR 작업의 의사결정 근거 정리.</p>
+  <table>
+    <thead><tr><th>전략</th><th class="center">진입 빈도</th><th class="center">시그널 신뢰도</th><th class="center">live 검증</th><th class="num">TP 폭</th><th class="num">SL 폭 (exit_plan)</th></tr></thead>
+    <tbody>
+      <tr><td><code>f_zone</code></td><td class="center">중</td><td class="center">중-상</td><td class="center">9개월+</td><td class="num">+3% / +5%</td><td class="num">−2%</td></tr>
+      <tr><td><code>sf_zone</code></td><td class="center"><span class="badge b-info">최저</span></td><td class="center"><span class="badge b-good">최상</span></td><td class="center">5건 100% win</td><td class="num">+3% / +5% / <strong>+7%</strong></td><td class="num"><strong>−1.5%</strong></td></tr>
+      <tr><td><code>gold_zone</code></td><td class="center"><span class="badge b-warn">최고 (예상)</span></td><td class="center">중</td><td class="center"><span class="badge b-bad">0건 ★ D2.1 데뷔</span></td><td class="num">+2% / +4%</td><td class="num">−1.5%</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="key-findings">
+  <h3 style="margin-top:0">핵심 발견 4가지</h3>
+  <ol>
+    <li>모든 전략에서 <code>exit_plan</code> SL(<strong>−1.5~−2%</strong>) 이 <code>holding_evaluator</code> SL(<strong>−4%</strong>) 보다 빡빡 → 먼저 발동</li>
+    <li><code>sf_zone</code> 시뮬 진입점에 <code>entry_time_cutoff</code> <span class="badge b-warn">누락</span> (f_zone, gold_zone과 비일관)</li>
+    <li><code>gold_zone</code> live 노출 <strong>0건</strong> — D2.1 첫 데뷔라 첫 영업일 집중 모니터링 필수</li>
+    <li><code>gold_zone</code> <code>min_score=2.5</code>, sf_zone 7.0, f_zone 4.0 — 진입 게이트 임계가 큰 차이</li>
+  </ol>
+</div>
+
+<nav class="toc">
+  <strong>목차</strong>
+  <ol>
+    <li><a href="#s1">f_zone (FZone Strategy) — 가장 정교한 4단계 진입</a></li>
+    <li><a href="#s2">sf_zone (SF존) — F존 + 강화 필터, delegate 패턴</a></li>
+    <li><a href="#s3">gold_zone (골드존) — 보수적 되돌림 매수 (D2.1 신규 등록 ★)</a></li>
+    <li><a href="#s4">통합 비교</a></li>
+    <li><a href="#s5">단타 완성 BAR 작업 우선순위</a></li>
+    <li><a href="#s6">운영 모니터링 가이드 (Phase D2.1 머지 후 첫 주)</a></li>
+    <li><a href="#s7">참고 (비활성 전략 · 관련 문서 · BAR 이력)</a></li>
+  </ol>
+</nav>
+
+<h2 id="s1">1. <code>f_zone</code> (FZone Strategy) — 가장 정교한 4단계 진입</h2>
+
+<div class="strategy-card">
+  <p class="title">f_zone_v1</p>
+  <p class="subtitle">원리: 급등 기준봉 → 눌림목 → 이평선 지지 → 반등 (서희파더 특허 기법, <code>thetrading2021</code>)</p>
+
+<h3>1-1. 진입 4단계 (모두 충족 필수)</h3>
+<table>
+  <thead><tr><th>단계</th><th>조건</th><th>기본값 (<code>FZoneParams</code>)</th></tr></thead>
+  <tbody>
+    <tr><td>① 기준봉</td><td>최근 N봉 내 양봉 + 거래량 폭증</td><td><code>impulse_min=3%</code>, <code>max=100%</code> (무제한), <code>vol=2.0x</code>, <code>lookback=5봉</code></td></tr>
+    <tr><td>② 눌림목</td><td>기준봉 이후 하락 + 거래량 감소</td><td><code>pullback −0.5%~−5%</code>, <code>vol≤0.7x</code>, <code>max_candles=10</code></td></tr>
+    <tr><td>③ 이평 지지</td><td>현재 저점이 MA(5/20/60) 근접</td><td><code>ma_periods=[5,20,60]</code>, <code>tolerance=±1%</code></td></tr>
+    <tr><td>④ 반등</td><td>마지막 봉 양봉 + 거래량 재증가</td><td><code>bounce_min=0.5%</code>, <code>vol=1.2x</code></td></tr>
+  </tbody>
+</table>
+
+<h3>1-2. 점수 계산 (0~10점)</h3>
+<pre><code>score = gain_score (max 2)              # min(impulse_gain/sf_min_gain, 1) × 2
+      + vol_score (max 1)               # min(impulse_vol/sf_vol_ratio, 1) × 1
+      + pullback_score (max 2)          # max(0, 1 - depth/0.05) × 2
+      + ma_score (max 2)                # 2 - (touch_pct / tolerance)
+      + bounce_score (max 1.5)          # min(bounce_gain/0.02, 1) × 1.5
+      + bounce_vol_score (max 1.5)      # min(bounce_vol/2.0, 1) × 1.5
+      [+ watermelon_bonus (1.0) 옵션, default OFF]
+
+F존 판정 :  score >= 4.0
+SF존 판정 : F존 + impulse_gain ≥ 5% + vol ≥ 3.0x + score ≥ 7.0
+</code></pre>
+
+<h3>1-3. 청산 — 두 경로</h3>
+<table>
+  <thead><tr><th>경로</th><th class="num">TP1</th><th class="num">TP2</th><th class="num">SL</th><th class="num">BE</th><th>trailing</th><th class="num">time_exit</th></tr></thead>
+  <tbody>
+    <tr><td><code>exit_plan</code> (가격 기반)</td><td class="num">+3% (50%)</td><td class="num">+5% (50%)</td><td class="num"><strong>−2%</strong></td><td class="num">+1.5%</td><td>—</td><td class="num">14:50</td></tr>
+    <tr><td><code>holding_evaluator</code> (pnl_rate)</td><td class="num">partial 3% (50%)</td><td class="num">full 5%</td><td class="num"><strong>−4%</strong></td><td class="num">+2.5%</td><td>start 3.5% / off −1.0%</td><td>—</td></tr>
+  </tbody>
+</table>
+<blockquote>SL: <code>exit_plan</code>(−2%) 가 더 빡빡 → 먼저 발동. <code>holding_evaluator</code>(−4%) 는 fallback.</blockquote>
+
+<h3>1-4. 필터 / 시뮬 override</h3>
+<table>
+  <thead><tr><th>필터</th><th class="center">default</th><th>시뮬 override (<code>intraday_simulator._build_strategies</code>)</th></tr></thead>
+  <tbody>
+    <tr><td><code>min_atr_pct</code></td><td class="center">0.0</td><td><strong>0.035</strong> <span class="badge b-good">✓</span></td></tr>
+    <tr><td><code>entry_time_cutoff</code></td><td class="center">None</td><td><strong>dtime(14, 0)</strong> <span class="badge b-good">✓</span> (Phase 8e)</td></tr>
+  </tbody>
+</table>
+
+<h3>1-5. 프리셋 (다중 timeframe)</h3>
+<table>
+  <thead><tr><th>프리셋</th><th class="center">timeframe</th><th>주요 조정</th></tr></thead>
+  <tbody>
+    <tr><td><code>FZoneParams.for_5min()</code></td><td class="center">5분봉</td><td>impulse +2%, lookback 12봉, MA [12,36,72], min_candles 72</td></tr>
+    <tr><td><code>FZoneParams.for_intraday()</code></td><td class="center">1분봉</td><td>impulse +1%, lookback 15봉, pullback_vol 0.85, min_candles 120</td></tr>
+  </tbody>
+</table>
+
+<h3>1-6. 강·약점 / 튜닝 후보</h3>
+<div class="grid-2">
+  <div class="good-line"><strong>강점</strong>
+    <ul>
+      <li>4단계 순차 검증 → false positive 최소</li>
+      <li>운영 9개월+ 실 검증된 패턴</li>
+      <li>score 4점 이상만 시그널 → 약한 신호 차단</li>
+      <li>5분/1분봉 프리셋 보유</li>
+    </ul>
+  </div>
+  <div class="warn-line"><strong>약점</strong>
+    <ul>
+      <li>진입 빈도 낮음 (4단 모두 통과 필요)</li>
+      <li><code>impulse_max_gain_pct=1.0</code> (무제한) — 과열 진입 위험</li>
+      <li><code>bounce_volume_ratio=1.2</code> 약함 — 가짜 반등 통과</li>
+      <li><code>pullback_max −5%</code> 깊은 눌림 허용 — 손실 trade 비율 ↑</li>
+    </ul>
+  </div>
+</div>
+
+<p><strong>단타 완성 시 튜닝 후보</strong>:</p>
+<ul>
+  <li><code>pullback_max_pct: -0.05 → -0.03</code> 강화 (얕은 눌림만)</li>
+  <li><code>bounce_volume_ratio: 1.2 → 1.5</code> 강화</li>
+  <li><code>impulse_max_gain_pct: 1.0 → 0.07</code> (단 <code>LESSON_FZONE_MAX_GAIN.md</code> 우려 — winning까지 동시 죽임)</li>
+  <li><code>ma_support_tolerance: 0.01 → 0.005</code></li>
+  <li>default <code>min_atr_pct: 0.0 → 0.035</code> 활성화</li>
+</ul>
+</div>
+
+<h2 id="s2">2. <code>sf_zone</code> (SF존, "슈퍼존") — F존 + 강화 필터, delegate 패턴</h2>
+
+<div class="strategy-card">
+  <p class="title">sf_zone_v1</p>
+  <p class="subtitle">원리: F존 모든 조건 + 강한 기준봉 + 높은 점수만 통과 (내부에 <code>FZoneStrategy</code> 인스턴스 보유, BAR-47)</p>
+
+<h3>2-1. 진입 조건</h3>
+<p>F존 4단계 + <strong>추가 게이트</strong>:</p>
+<ul>
+  <li><code>impulse_gain ≥ 5%</code> (F존 3% 의 1.67배)</li>
+  <li><code>impulse_volume_ratio ≥ 3.0x</code> (F존 2.0x 의 1.5배)</li>
+  <li><strong>F존 종합 점수 ≥ 7.0</strong></li>
+</ul>
+<blockquote>즉 F존 시그널 중 상위 ~20% 만 sf_zone 으로 통과.</blockquote>
+
+<h3>2-2. 청산 — 3단 분할 (sf_zone 만의 특징 <span class="star">★</span>)</h3>
+<table>
+  <thead><tr><th>경로</th><th class="num">TP1</th><th class="num">TP2</th><th class="num">TP3</th><th class="num">SL</th><th class="num">BE</th><th>trailing</th></tr></thead>
+  <tbody>
+    <tr><td><code>exit_plan</code></td><td class="num">+3% (33%)</td><td class="num">+5% (33%)</td><td class="num"><strong>+7% (34%)</strong> <span class="star">★</span></td><td class="num"><strong>−1.5%</strong> (단타 중 최저)</td><td class="num">+1.0%</td><td>—</td></tr>
+    <tr><td><code>holding_evaluator</code></td><td class="num">partial 3% (33%)</td><td class="num">—</td><td class="num">full 7%</td><td class="num">−4%</td><td class="num">+2.0%</td><td>3.0% / −1.5%</td></tr>
+  </tbody>
+</table>
+
+<h3>2-3. 시뮬 override <span class="badge b-warn">⚠ entry_time_cutoff 누락</span></h3>
+<pre><code># backend/core/backtester/intraday_simulator.py
+SFZoneStrategy(FZoneParams(min_atr_pct=0.035))
+# f_zone 은 entry_time_cutoff=dtime(14, 0) 있는데 sf_zone 누락
+</code></pre>
+
+<h3>2-4. 강·약점 / 튜닝 후보</h3>
+<div class="grid-2">
+  <div class="good-line"><strong>강점</strong>
+    <ul>
+      <li>BAR-OPS-09 누적 발동 5건 <strong>100% win</strong>, flu% ≥10.2%</li>
+      <li>3단 분할로 +7% 까지 추적</li>
+      <li>SL −1.5% 가장 타이트 → 손실 폭 작음</li>
+      <li>강한 기준봉 + 높은 점수 → 신뢰도 최상</li>
+    </ul>
+  </div>
+  <div class="warn-line"><strong>약점</strong>
+    <ul>
+      <li>진입 빈도 매우 낮음 (F존 의 ~20%)</li>
+      <li>delegate 패턴 — 디버깅 시 두 클래스 추적</li>
+      <li><code>entry_time_cutoff</code> 시뮬 override 누락 (f_zone과 비일관)</li>
+      <li>F존 default 변경 시 자동 영향 받음</li>
+    </ul>
+  </div>
+</div>
+
+<p><strong>단타 완성 시 튜닝 후보</strong>:</p>
+<ul>
+  <li>시뮬 override 에 <code>entry_time_cutoff=dtime(14, 0)</code> 추가 (f_zone과 일관성) ← <span class="badge b-good">우선순위 ★</span></li>
+  <li><code>score ≥ 7.0</code> 임계 조정 시뮬 (6.5 / 7.0 / 7.5 grid)</li>
+  <li>TP3 비중 34% → 25/30/40% grid 비교</li>
+  <li>live 실거래 시그널 발동 빈도 모니터링 (현재 5건뿐)</li>
+</ul>
+</div>
+
+<h2 id="s3">3. <code>gold_zone</code> (골드존) — 보수적 되돌림 매수 (D2.1 신규 SignalScanner 등록 <span class="star">★</span>)</h2>
+
+<div class="strategy-card">
+  <p class="title">gold_zone_v1</p>
+  <p class="subtitle">원리: BB 하단 + Fib zone + RSI 과매도 회복 (3 조건 중 2/3 충족, BAR-48)</p>
+
+<h3>3-1. 진입 3 조건 (<code>min_conditions=2</code>)</h3>
+<table>
+  <thead><tr><th>조건</th><th>임계</th><th>점수 [0, 1] 계산</th></tr></thead>
+  <tbody>
+    <tr><td>① BB 하단</td><td>1% 이내 (<code>bb_proximity_pct=0.03</code>)</td><td>가까울수록 높음, <code>close ≤ lower</code> 면 1.0</td></tr>
+    <tr><td>② Fib zone</td><td>0.236 ~ 0.786 (최근 30봉 고저 기준)</td><td>중심(0.511) 가까울수록 높음</td></tr>
+    <tr><td>③ RSI 회복</td><td>최근 10봉 min ≤ 35 + 현재 ≥ 38</td><td><code>(rsi_now - 35) / (38 - 35)</code> 정규화</td></tr>
+  </tbody>
+</table>
+
+<h3>3-2. 점수 → 진입 게이트</h3>
+<pre><code>raw   = bb_score × 0.4 + fib_score × 0.3 + rsi_score × 0.3
+score = raw × 10                                  # 0-10 스케일 정규화
+조건 충족 ≥ 2/3  AND  score ≥ 2.5  →  진입
+</code></pre>
+<blockquote><code>min_score=2.5</code> 가 단타 3 중 가장 낮음 (f_zone 4.0, sf_zone 7.0 대비)</blockquote>
+
+<h3>3-3. 청산 (가장 보수적, TP 폭 최소)</h3>
+<table>
+  <thead><tr><th>경로</th><th class="num">TP1</th><th class="num">TP2</th><th class="num">SL</th><th class="num">BE</th><th>trailing</th></tr></thead>
+  <tbody>
+    <tr><td><code>exit_plan</code></td><td class="num">+2% (50%)</td><td class="num">+4% (50%)</td><td class="num"><strong>−1.5%</strong></td><td class="num">+1.0%</td><td>—</td></tr>
+    <tr><td><code>holding_evaluator</code></td><td class="num">partial 2% (50%)</td><td class="num">full 4%</td><td class="num">−4%</td><td class="num">+2.5%</td><td>3.0% / −1.0%</td></tr>
+  </tbody>
+</table>
+
+<h3>3-4. 시뮬 override</h3>
+<pre><code>GoldZoneStrategy(GoldZoneParams(
+    min_atr_pct=0.035,
+    entry_time_cutoff=dtime(14, 0),   # 5/22 379800 KODEX S&P500 15:01 위험 진입 차단
+))</code></pre>
+
+<h3>3-5. 강·약점 / 튜닝 후보</h3>
+<div class="grid-2">
+  <div class="good-line"><strong>강점</strong>
+    <ul>
+      <li>보수적 진입 — 바닥권에서만 매수</li>
+      <li>3 조건 중 2 충족 유연성</li>
+      <li>RSI 과매도 회복 → 모멘텀 전환 포착</li>
+      <li>TP 폭 +2~+4% 짧음 → 빈번한 실현</li>
+    </ul>
+  </div>
+  <div class="warn-line"><strong>약점</strong>
+    <ul>
+      <li><strong>live 노출 0건</strong> (D2.1 첫 데뷔) — 실거래 미검증</li>
+      <li><code>min_conditions=2</code> 가 너무 유연 — 2/3와 3/3 동등 처리</li>
+      <li><code>min_score=2.5</code> 낮음 — 약한 시그널 통과 가능성</li>
+      <li>TP +4% 짧음 → 큰 상승 trade 놓침</li>
+    </ul>
+  </div>
+</div>
+
+<p><strong>단타 완성 시 튜닝 후보 (D2.1 신규 도입이라 중요도 ↑)</strong>:</p>
+<ul>
+  <li><strong>첫 영업일부터 trade 빈도·승률·자본가중 집중 모니터링</strong> <span class="badge b-bad">최우선</span></li>
+  <li><code>min_conditions: 2 → 3</code> (모든 조건 충족만) 시뮬</li>
+  <li><code>min_score: 2.5 → 4.0</code> (다른 v2 전략과 일치) 시뮬</li>
+  <li>TP2: +4% → +5%/+7% 확대 grid</li>
+  <li>BB-Fib-RSI 가중치 0.4/0.3/0.3 → 0.5/0.25/0.25 등 그리드</li>
+</ul>
+</div>
+
+<h2 id="s4">4. 통합 비교</h2>
+
+<h3>4-1. 진입 빈도·게이트 비교</h3>
+<table>
+  <thead><tr><th>항목</th><th><code>f_zone</code></th><th><code>sf_zone</code></th><th><code>gold_zone</code></th></tr></thead>
+  <tbody>
+    <tr><td>진입 단계</td><td><strong>4단 순차</strong></td><td>F존 + 강화 필터</td><td><strong>3 중 2/3</strong> (유연)</td></tr>
+    <tr><td>score 게이트</td><td class="num">≥ 4.0</td><td class="num">≥ 7.0</td><td class="num">≥ 2.5</td></tr>
+    <tr><td>진입 빈도 (상대)</td><td>중</td><td><strong>최저</strong></td><td>최고 (예상)</td></tr>
+    <tr><td>시그널 신뢰도</td><td>중-상</td><td><strong>최상</strong></td><td>중 (live 미검증)</td></tr>
+    <tr><td>live 검증</td><td>9개월+</td><td>5건 100% win</td><td><strong>0건</strong> (D2.1 데뷔)</td></tr>
+  </tbody>
+</table>
+
+<h3>4-2. 청산 비교 (<code>exit_plan</code> 기준)</h3>
+<table>
+  <thead><tr><th>항목</th><th class="num"><code>f_zone</code></th><th class="num"><code>sf_zone</code></th><th class="num"><code>gold_zone</code></th></tr></thead>
+  <tbody>
+    <tr><td>TP1</td><td class="num">+3% (50%)</td><td class="num">+3% (33%)</td><td class="num">+2% (50%)</td></tr>
+    <tr><td>TP2</td><td class="num">+5% (50%)</td><td class="num">+5% (33%)</td><td class="num">+4% (50%)</td></tr>
+    <tr><td>TP3</td><td class="num">—</td><td class="num"><strong>+7% (34%)</strong> <span class="star">★</span></td><td class="num">—</td></tr>
+    <tr><td>SL</td><td class="num">−2%</td><td class="num"><strong>−1.5%</strong> (가장 타이트)</td><td class="num">−1.5%</td></tr>
+    <tr><td>BE trigger</td><td class="num">+1.5%</td><td class="num">+1.0%</td><td class="num">+1.0%</td></tr>
+    <tr><td>time_exit</td><td class="num">14:50</td><td class="num">14:50</td><td class="num">14:50</td></tr>
+  </tbody>
+</table>
+
+<h3>4-3. <code>exit_plan</code> vs <code>holding_evaluator</code> SL 격차</h3>
+<table>
+  <thead><tr><th>전략</th><th class="num"><code>exit_plan</code> SL</th><th class="num"><code>holding_evaluator</code> SL</th><th class="num">격차</th></tr></thead>
+  <tbody>
+    <tr><td><code>f_zone</code></td><td class="num">−2%</td><td class="num">−4%</td><td class="num">2%p</td></tr>
+    <tr><td><code>sf_zone</code></td><td class="num">−1.5%</td><td class="num">−4%</td><td class="num">2.5%p</td></tr>
+    <tr><td><code>gold_zone</code></td><td class="num">−1.5%</td><td class="num">−4%</td><td class="num">2.5%p</td></tr>
+  </tbody>
+</table>
+<blockquote>
+모든 전략에서 <strong><code>exit_plan</code> SL 이 빡빡 → 먼저 발동</strong>. <code>holding_evaluator</code>(−4%) 는 사실상 fallback.
+<ul>
+  <li>ExitEngine: 분봉 close 기반, 진입 시 ExitPlan 생성</li>
+  <li>HoldingEvaluator: HoldingPosition <code>pnl_rate</code> 적응형 갱신 (peak 추적, trailing 발동)</li>
+</ul>
+두 경로 동시 사용 — 빠른 발동 우선. 의도된 fallback 인지, 일관성 위해 통일할지 별도 결정 필요.
+</blockquote>
+
+<h3>4-4. 시뮬 override 일관성 <span class="badge b-warn">⚠ 비일관 발견</span></h3>
+<table>
+  <thead><tr><th>전략</th><th class="num"><code>min_atr_pct</code></th><th><code>entry_time_cutoff</code></th></tr></thead>
+  <tbody>
+    <tr><td><code>f_zone</code></td><td class="num">0.035</td><td>dtime(14, 0) <span class="badge b-good">✓</span></td></tr>
+    <tr><td><code>sf_zone</code></td><td class="num">0.035</td><td><strong>누락</strong> <span class="badge b-warn">⚠</span></td></tr>
+    <tr><td><code>gold_zone</code></td><td class="num">0.035</td><td>dtime(14, 0) <span class="badge b-good">✓</span></td></tr>
+  </tbody>
+</table>
+<blockquote><code>sf_zone</code> 시뮬 진입점에 <code>entry_time_cutoff</code> 누락 — 다른 두 전략과 일관성 깨짐. 단타 완성 BAR 작업 시 작은 수정으로 큰 일관성 가치 회복.</blockquote>
+
+<h3>4-5. Phase 9 균등 진입 (5/23 머지)</h3>
+<p>세 전략 모두 <code>position_size()</code> 가 <code>even_position_size()</code> 호출 — score 차등 무력화, 종목당 동일 비율 (default 0.08, <code>max_per_position</code>).</p>
+
+<h3>4-6. 우선순위 (<code>SignalScanner._analyze_symbol</code>)</h3>
+<pre><code>SF > F > Gold > Blue > Crypto > Swing38</code></pre>
+<p>활성 단타 3개만 → <strong>SF → F → Gold</strong> 순으로 dispatch. 첫 시그널 반환 시 다음 전략 skip.</p>
+
+<h2 id="s5">5. 단타 완성 BAR 작업 우선순위</h2>
+<table>
+  <thead><tr><th class="num">순위</th><th>작업</th><th>예상 효과</th></tr></thead>
+  <tbody>
+    <tr><td class="num">1</td><td><strong><code>gold_zone</code> live 데뷔 첫 주 모니터링</strong></td><td>live 미검증 전략 검증, 비정상 시 즉시 비활성</td></tr>
+    <tr><td class="num">2</td><td><code>sf_zone</code> 시뮬 <code>entry_time_cutoff</code> 일관성 수정</td><td>운영 일관성 (작은 작업, 큰 가치)</td></tr>
+    <tr><td class="num">3</td><td>3 전략 동일 종목 시뮬 — 자본가중·승률 비교</td><td>어느 전략에 자본 배분 비중 늘릴지 결정</td></tr>
+    <tr><td class="num">4</td><td><code>gold_zone</code> <code>min_conditions</code> 2→3 grid</td><td>시그널 정밀도 ↑, 진입 빈도 ↓ trade-off</td></tr>
+    <tr><td class="num">5</td><td><code>f_zone</code> <code>pullback_max</code> 강화 grid</td><td>손실 trade 비율 감소 시도</td></tr>
+    <tr><td class="num">6</td><td><code>exit_plan</code> vs <code>holding_evaluator</code> SL 격차 통일 검토</td><td>운영 의도 명확화 (의도된 fallback 인지 결정)</td></tr>
+    <tr><td class="num">7</td><td><code>sf_zone</code> TP3 비중 (34%) grid 서치</td><td>+7% 도달 trade 의 자본 회수율 최적화</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s6">6. 운영 모니터링 가이드 (Phase D2.1 머지 후 첫 주)</h2>
+
+<h3>6-1. 시작 확인</h3>
+<p>운영 데몬 재기동 후 INFO 로그에 다음 출력 확인:</p>
+<pre><code>SignalScanner 활성 전략: ['sf_zone', 'f_zone', 'gold_zone']</code></pre>
+
+<h3>6-2. 일별 측정 KPI</h3>
+<table>
+  <thead><tr><th>KPI</th><th>측정 방법</th><th>기대</th></tr></thead>
+  <tbody>
+    <tr><td>시그널 발동 빈도</td><td><code>logs/barro.log</code> <code>grep "신호 발생"</code> 일별 카운트</td><td>f_zone &gt; gold_zone &gt; sf_zone 예상</td></tr>
+    <tr><td>전략별 trade 수</td><td><code>data/order_audit.csv</code> <code>strategy_id</code> 별</td><td>f_zone 다수, sf_zone 희소</td></tr>
+    <tr><td>전략별 평균 PnL%</td><td>order_audit + active_positions 매칭</td><td>sf_zone 최대 (시뮬상 100% win)</td></tr>
+    <tr><td>전략별 승률</td><td>trade close 결과</td><td>gold_zone 첫 주는 보수적 추정</td></tr>
+    <tr><td>청산 사유 분포</td><td>ExitEngine vs HoldingEvaluator 발동 비율</td><td>exit_plan SL 우세 예상</td></tr>
+  </tbody>
+</table>
+
+<h3>6-3. 알람 기준</h3>
+<table>
+  <thead><tr><th>조건</th><th>대응</th></tr></thead>
+  <tbody>
+    <tr><td><code>gold_zone</code> 일 trade &gt; 20건 + 승률 &lt; 30%</td><td><code>gold_zone</code> 즉시 비활성 (<code>enabled_strategies={"gold_zone": False}</code>)</td></tr>
+    <tr><td>단일 전략 자본가중 누적 −3% 도달</td><td>해당 전략 비활성 + 사후 분석</td></tr>
+    <tr><td>ExitEngine SL 발동 vs HoldingEvaluator 발동 비율 &lt; 5%</td><td><code>exit_plan</code> SL 너무 빡빡 → 완화 검토</td></tr>
+    <tr><td><code>sf_zone</code> 일주일 trade 0건</td><td>진입 임계 (score≥7.0) 완화 시뮬</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s7">7. 참고</h2>
+
+<h3>비활성 전략 (<code>enabled_strategies</code> override 로 재활성화 가능)</h3>
+<ul>
+  <li><code>blue_line</code> (3번) — 5EMA × 20EMA 골든크로스 + 거래량 1.5x</li>
+  <li><code>crypto_breakout</code> (4번) — 박스권(20봉) 돌파 + 1% 버퍼</li>
+  <li><code>swing_38</code> (5번) — 일봉 multi-day 스윙, Phase D2 결합 최적 보존 (TP+20/+50/SL−15/max_hold=20)</li>
+</ul>
+
+<h3>관련 문서</h3>
+<ul>
+  <li><code>docs/04-report/features/2026-05-28-phase-d-grid-summary.md</code> — swing_38 Phase D 그리드 시리즈</li>
+  <li><code>backend/core/scanner/signal_scanner.py</code> — Phase D2.1 단타 전용 모드</li>
+  <li><code>backend/core/strategy/{f_zone,sf_zone,gold_zone}.py</code> — 본 분석 대상 코드</li>
+  <li><code>backend/core/risk/holding_evaluator.py</code> — <code>STRATEGY_EXIT_PROFILES</code> 운영 청산 정책</li>
+</ul>
+
+<h3>관련 BAR 이력</h3>
+<ul>
+  <li>BAR-47: SF존 클래스 분리 (delegate 패턴)</li>
+  <li>BAR-48: gold_zone 신규 포팅</li>
+  <li>BAR-49: swing_38 신규 포팅</li>
+  <li>BAR-OPS-09 Phase 4/5/6: 변동성 필터 <code>min_atr_pct</code> 시뮬 활성</li>
+  <li>BAR-OPS-09 Phase 8c/8d/8e: 진입 시간 cutoff (14:00)</li>
+  <li>BAR-OPS-09 Phase 9: 균등 진입 (<code>even_position_size</code>)</li>
+  <li>BAR-OPS-09 Phase D2.1: SignalScanner 단타 전용 모드 + gold_zone 등록 (PR #176)</li>
+</ul>
+
+<footer>
+  본 리포트는 BarroAiTrade Phase D2.1 단타 전용 모드 머지(PR #176, 2026-05-28) 직후 작성된 단타 전략 분석 산출물입니다.
+  코드 출처: <code>backend/core/strategy/{f_zone,sf_zone,gold_zone}.py</code> · <code>backend/core/risk/holding_evaluator.py</code> · <code>backend/core/backtester/intraday_simulator.py</code>.
+  운영 적용 절차 및 첫 주 모니터링은 본 리포트 §6 참조.
+</footer>
+
+</div>
+</body>
+</html>
