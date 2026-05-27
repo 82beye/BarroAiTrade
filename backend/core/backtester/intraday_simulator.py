@@ -184,9 +184,13 @@ def _build_strategies(
             from backend.core.strategy.f_zone import FZoneParams
 
             # BAR-OPS-09 Phase 5: 변동성 필터 명시 적용 — sf_zone 의 inner FZoneStrategy 에 min_atr_pct=0.035.
-            # default 0.0 (회귀 보존), 시뮬 진입점에서만 0.035 활성화 (Phase 4 gold_zone 동일 패턴).
+            # BAR-OPS-09 Phase D2.2 (2026-05-28, B2): entry_time_cutoff=14:00 추가 — f_zone/gold_zone 일관성.
+            # 직전엔 sf_zone 시뮬 진입점에 cutoff 누락 (분석 리포트 §4-4 발견).
             # 누적 발동 5건 모두 flu% ≥10.2% — ATR% 도 충분히 높을 가능성, 100% win 보존 기대.
-            out.append(SFZoneStrategy(FZoneParams(min_atr_pct=0.035)))
+            out.append(SFZoneStrategy(FZoneParams(
+                min_atr_pct=0.035,
+                entry_time_cutoff=dtime(14, 0),
+            )))
         elif sid == "gold_zone":
             from backend.core.strategy.gold_zone import GoldZoneStrategy, GoldZoneParams
 
