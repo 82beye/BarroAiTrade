@@ -223,3 +223,26 @@ class TestFZoneBaselineRegression:
         assert len(f.trades) == 6, f"거래 수 {len(f.trades)} ≠ 6 (베이스라인 회귀)"
         assert abs(f.metrics.win_rate - 1.0 / 3.0) < 0.05, f"승률 회귀 ({f.metrics.win_rate})"
         assert abs(f.metrics.total_return_pct - (-0.0042)) < 0.05, f"수익률 회귀 ({f.metrics.total_return_pct})"
+
+
+class TestFZonePhaseD24:
+    """BAR-OPS-09 Phase D2.4 (2026-05-28, B5 그리드 결과) — pullback_min_pct -0.05 → -0.03."""
+
+    def test_default_pullback_min_pct_is_minus_3pct(self):
+        """default pullback_min_pct=-0.03 (B5 시뮬 자본가중 +25% 개선, baseline=-0.05).
+
+        ⚠ FZoneParams 변수명 confusion 주의:
+          - pullback_min_pct = 눌림 *최대* 하락 (-3%, 깊은 하락 한계)
+          - pullback_max_pct = 눌림 *최소* 하락 (-0.5%, 얕은 하락 시작점)
+        """
+        from backend.core.strategy.f_zone import FZoneParams
+        p = FZoneParams()
+        assert p.pullback_min_pct == -0.03, (
+            f"default pullback_min_pct={p.pullback_min_pct}, expected -0.03 (Phase D2.4)"
+        )
+
+    def test_default_bounce_volume_ratio_preserved(self):
+        """default bounce_volume_ratio=1.2 유지 (B5 시뮬 1.2→1.5 강화는 자본가중 단조 ↓)."""
+        from backend.core.strategy.f_zone import FZoneParams
+        p = FZoneParams()
+        assert p.bounce_volume_ratio == 1.2

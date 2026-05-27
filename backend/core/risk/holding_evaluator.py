@@ -74,7 +74,26 @@ class ExitPolicy:
 
 
 # ── 전략별 매도 프로파일 ─────────────────────────────────────────
-# 각 전략의 exit_plan() 과 동일한 기준을 적응형 매도에 매핑
+# 각 전략의 exit_plan() 과 동일한 기준을 적응형 매도에 매핑.
+#
+# BAR-OPS-09 Phase D2.5 (2026-05-28, B6 결정) — SL 격차 의도:
+#   intraday 단타 (f_zone/sf_zone/gold_zone) 의 stop_loss_pct(-4%) 는 각 전략의
+#   exit_plan() SL (-1.5~-2%) 보다 의도적으로 2~2.5%p 더 너그러움.
+#
+#   - ExitEngine (Strategy.exit_plan 기반, 분봉 close): 1차 방어선 -1.5~-2%
+#   - HoldingEvaluator (본 profile 기반, broker pnl_rate): 2차 안전망 -4%
+#
+#   격차는 운영 robustness 안전망 — ExitEngine 누락 시 (데몬 다운, 분봉 fetch
+#   실패, 시그널 누락 등) HoldingEvaluator 가 fallback 매도. broker pnl_rate
+#   노이즈 흡수 폭도 확보.
+#
+#   재검토 트리거 (Forward Test 1주 후):
+#   - HoldingEvaluator STOP_LOSS 발동 비율 > 20% (ExitEngine 누락 잦음) → 통일 검토
+#   - broker pnl_rate noise 로 false trigger 발견 → 격차 축소 (-2.5%) 검토
+#   상세: docs/04-report/features/2026-05-28-sl-gap-decision.md
+#
+#   swing_38 (Phase D2 multi-day) 는 ExitEngine SL=-15% 와 본 profile SL=-15%
+#   가 동일 — 의도된 격차는 intraday 단타 전략에만 적용.
 STRATEGY_EXIT_PROFILES: dict[str, dict] = {
     "f_zone": {
         "stop_loss_pct": Decimal("-4.0"),

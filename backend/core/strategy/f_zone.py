@@ -55,7 +55,13 @@ class FZoneParams:
     impulse_lookback: int = 5                 # 기준봉 탐색 과거 봉 수
 
     # 눌림목 조건
-    pullback_min_pct: float = -0.05           # 눌림 최대 하락: -5%
+    # BAR-OPS-09 Phase D2.4 (2026-05-28, B5 그리드 결과): pullback_min_pct -0.05 → -0.03.
+    # B5 시뮬(791종목·9셀, pullback_min × bounce_vol):
+    #   - pullback_min=-0.05 × bounce_vol=1.2 (baseline): 자본가중 +0.7501%
+    #   - pullback_min=-0.03 × bounce_vol=1.2 (변경): 자본가중 +0.9382% (+25%) ★
+    # bounce_vol 1.2 → 1.5 강화는 모든 pullback 면에서 자본가중 단조 ↓ → bounce_vol=1.2 유지.
+    # ⚠ 변수명 confusion 주의: pullback_min_pct=눌림 최대 하락(-3~-5%), pullback_max_pct=눌림 최소 하락(-0.5%).
+    pullback_min_pct: float = -0.03           # 눌림 최대 하락: -3% (was -5%, Phase D2.4)
     pullback_max_pct: float = -0.005          # 눌림 최소 하락: -0.5%
     pullback_volume_ratio: float = 0.7        # 눌림 시 거래량 감소 비율 (기준봉 대비)
     pullback_max_candles: int = 10            # 눌림 최대 허용 봉 수
@@ -321,6 +327,7 @@ class FZoneStrategy(Strategy):
         # KRX 정규장 강제 청산 (14:50). crypto 는 None.
         time_exit = dtime(14, 50) if ctx.market_type == MarketType.STOCK else None
 
+        # Phase D2.5 (B6): ExitEngine 1차 방어선 SL. HoldingEvaluator(-4%) 가 2차 fallback.
         return ExitPlan(
             take_profits=take_profits,
             stop_loss=StopLoss(fixed_pct=Decimal("-0.02")),
