@@ -67,13 +67,13 @@ class TestSignalScannerTimeframeMatrix:
 
     @pytest.mark.asyncio
     async def test_swing_38_requires_daily_candles_via_params(self):
-        """swing_38 params 가 require_daily_candles=True default."""
+        """swing_38 params 가 require_daily_candles=True default (Phase D2 max_hold=20)."""
         gw = MagicMock()
         gw.market_type = MarketType.STOCK
         scanner = SignalScanner(gw)
         assert scanner.swing_38.params.require_daily_candles is True
         assert scanner.swing_38.params.min_hold_days == 3
-        assert scanner.swing_38.params.max_hold_days == 8
+        assert scanner.swing_38.params.max_hold_days == 20
 
     @pytest.mark.asyncio
     async def test_custom_swing_38_params_override(self):

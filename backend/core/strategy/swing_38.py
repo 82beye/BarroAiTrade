@@ -47,10 +47,11 @@ class Swing38Params:
     min_candles: int = 60
 
     # BAR-OPS-09 Phase 6 — 변동성 필터: ATR% < min_atr_pct 시 진입 거부.
-    # default 0.0 (필터 비활성) — 기존 baseline 회귀 보존.
-    # IntradaySimulator 시뮬 진입점에서 명시 override (0.035) — 저변동주 가짜 시그널 차단.
+    # Phase D2 (2026-05-28): default 0.0 → 0.03 활성 (S7 시뮬 결과).
+    # S7 진입 필터 시뮬 11 시나리오 중 ATR≥3% 단독 추가가 자본가중 +1.857% (baseline +1.808%,
+    # +2.71% 우위) 로 가장 cost-effective. 진입 수 6,397 → 6,095 (-4.7%, 저변동주만 차단).
     # 패턴: 5/15 LG씨엔에스 -514k (flu% 7.5%), 5/14 삼성전자 -80k (flu% 4.2%) 등
-    min_atr_pct: float = 0.0
+    min_atr_pct: float = 0.03
     atr_n: int = 14
 
     # BAR-OPS-09 Phase 8 — 진입 점수 임계 (impulse*0.4 + fib*0.4 + bounce*0.2 < min_score 차단).
@@ -74,7 +75,24 @@ class Swing38Params:
     # 기존 운영 swing_38 패턴 (당일 청산) 와 다른 새 정책. exit_plan() 에서 ExitPlan 으로 전달.
     require_daily_candles: bool = True
     min_hold_days: int = 3
-    max_hold_days: int = 8
+    # Phase D2 (2026-05-28): 8 → 20 (S6 결합 그리드 결과).
+    # S6 SL × max_hold 2D 그리드에서 SL=-15% × D+20 = 자본가중 +1.808% (baseline SL=-10%×D+8
+    # +0.597% 대비 +203%). 단일 변수 그리드 max_hold=20도 +1.096% (베이스 +84%) 우위.
+    max_hold_days: int = 20
+
+    # BAR-OPS-09 Phase D (2026-05-27) — 분할 진입 (1차/2차 scale-in) + 큰 폭 TP/SL:
+    # 사용자 요구: "일별 매수 1번, 다음날 추적 후 기준봉 지지하면 2차 매수".
+    # exit_plan() 에서 TP1=+20% / TP2=+50% / SL=-10% / breakeven=+10% 적용 (Phase C 5/10/3 → D 20/50/10).
+    # add_on_signal(position, ctx, base_candle_low) 가 다음 신호 발행:
+    #  - 1차 진입 후 second_entry_min_days <= 경과일 < second_entry_max_days
+    #  - 현재가 >= 기준봉 low * (1 - second_entry_support_tolerance)
+    #  → entry_round=2 metadata 와 함께 EntrySignal 반환.
+    # caller(orchestrator/scanner) 가 동일 종목 당일 2차 중복 진입 차단 (entry_round=2 이미 실행).
+    second_entry_enabled: bool = True
+    second_entry_min_days: int = 1     # 1차 진입 D, D+1 부터 평가 (당일 추가 진입 차단)
+    second_entry_max_days: int = 5     # D+5 까지만 (그 후 미실행 폐기 — 추세 변경 위험)
+    second_entry_size_ratio: float = 0.5  # 1차 진입 수량 × 0.5 (신호 metadata, 운영이 적용)
+    second_entry_support_tolerance: float = 0.005  # 기준봉 low * (1 - 0.005) 까지 지지 인정
 
 
 class Swing38Strategy(Strategy):
@@ -221,34 +239,131 @@ class Swing38Strategy(Strategy):
     # === Strategy v2 override ===
 
     def exit_plan(self, position: Position, ctx: AnalysisContext) -> ExitPlan:
-        """BAR-OPS-09 Phase C (2026-05-27): 38스윙 = multi-day 스윙 전략.
+        """BAR-OPS-09 Phase D2 (2026-05-28): 38스윙 그리드 서치 결합 최적 반영.
 
-        새 정책:
-        - TP1=+5% (50%), TP2=+10% (50%) — 스윙 폭 큼
-        - SL=-3% (스윙 변동성 수용)
-        - breakeven_trigger=+2.5% (TP1 발동 후 SL 을 +0.5% 로 잠금)
-        - min_hold_days=3, max_hold_days=8 (params 기반)
-        - time_exit 제거 (당일 청산 패턴 폐기 — 일봉 스윙 전략)
+        S6 SL×max_hold 2D + S7 진입 필터 그리드 결과:
+        - TP1=+20% (50%) ← Phase D 유지 (TP1 그리드 결과 자본가중 최대)
+        - TP2=+50% (50%) ← Phase D 유지 (TP2 그리드 거의 무영향)
+        - SL=-15% ← Phase D -10% 에서 강화 (SL×D+20 결합 최적, 큰 손실 흡수 후 회복)
+        - breakeven_trigger=+10% ← Phase D 유지 (보수적 BE 잠금)
+        - min_hold_days=3, max_hold_days=20 ← Phase D 8 에서 확대 (회복 시간 확보)
+        - time_exit 제거 (Phase D 유지)
+        시뮬 자본가중 +1.808% (baseline Phase D +0.597% 대비 +203%).
+        Swing38Params.min_atr_pct=0.03 활성으로 추가 +2.71% (ATR≥3% 진입 필터).
         """
         p = self.params
         avg = Decimal(str(position.avg_price))
         return ExitPlan(
             take_profits=[
                 TakeProfitTier(
-                    price=avg * Decimal("1.05"),
+                    price=avg * Decimal("1.20"),
                     qty_pct=Decimal("0.5"),
-                    condition="38스윙 TP1 +5%",
+                    condition="38스윙 TP1 +20%",
                 ),
                 TakeProfitTier(
-                    price=avg * Decimal("1.10"),
+                    price=avg * Decimal("1.50"),
                     qty_pct=Decimal("0.5"),
-                    condition="38스윙 TP2 +10%",
+                    condition="38스윙 TP2 +50%",
                 ),
             ],
-            stop_loss=StopLoss(fixed_pct=Decimal("-0.03")),
-            breakeven_trigger=Decimal("0.025"),
+            stop_loss=StopLoss(fixed_pct=Decimal("-0.15")),
+            breakeven_trigger=Decimal("0.10"),
             min_hold_days=p.min_hold_days,
             max_hold_days=p.max_hold_days,
+        )
+
+    def add_on_signal(
+        self,
+        position: Position,
+        ctx: AnalysisContext,
+        base_candle_low: Optional[Decimal] = None,
+    ) -> Optional[EntrySignal]:
+        """BAR-OPS-09 Phase D (2026-05-27) — 38스윙 2차 분할 진입 시그널.
+
+        사용자 요구: "일별 매수는 1번, 다음날 추적 후 기준봉 지지하면 추가 2차 매수".
+
+        조건 (AND):
+          1. params.second_entry_enabled
+          2. params.require_daily_candles=True 면 ctx.candles 일봉 간격 검증
+          3. second_entry_min_days <= 경과일 <= second_entry_max_days
+             - 일별 1회 제약: caller 가 entry_round=2 이미 실행한 종목을 dispatch 제외
+          4. 현재가 >= 기준봉 low * (1 - second_entry_support_tolerance)
+             - base_candle_low: 1차 진입일 일봉의 low. caller(orchestrator) 가
+               position.metadata['base_candle_low'] 또는 별도 OHLCV 조회로 주입.
+               미주입 시 보수 추정 — avg_price * (1 - 0.01) (1% 손실까지 지지로 인정).
+
+        반환:
+          EntrySignal(signal_type="swing_38_add", metadata={'entry_round': 2,
+                       'parent_entry_time': iso, 'base_candle_low': float,
+                       'elapsed_days': int, 'size_ratio': float})
+          → caller 가 수량 = round1_qty × size_ratio 로 매수 호가 송출.
+        """
+        p = self.params
+        if not p.second_entry_enabled:
+            return None
+        if position.entry_time is None:
+            return None
+        if len(ctx.candles) < 1:
+            return None
+
+        # 일봉 간격 게이트 (Phase C 와 동일 — 분봉 노이즈 차단)
+        if p.require_daily_candles and len(ctx.candles) >= 2:
+            interval_hours = (
+                ctx.candles[-1].timestamp - ctx.candles[-2].timestamp
+            ).total_seconds() / 3600
+            if interval_hours < 12:
+                return None
+
+        # 경과일 (D = 1차 진입일, D+1 부터 평가)
+        et = position.entry_time
+        if et.tzinfo is None:
+            et = et.replace(tzinfo=timezone.utc)
+        days = (datetime.now(timezone.utc) - et).days
+        if days < p.second_entry_min_days:
+            return None  # 당일(D) 추가 진입 차단
+        if days > p.second_entry_max_days:
+            return None  # 시한 만료 — 추세 변경 위험
+
+        last = ctx.candles[-1]
+        cur_price = Decimal(str(last.close))
+
+        # 기준봉 low 결정 — 미주입 시 보수 추정 (avg × 0.99)
+        if base_candle_low is None:
+            base_low = Decimal(str(position.avg_price)) * Decimal("0.99")
+            base_source = "estimated_avg*0.99"
+        else:
+            base_low = base_candle_low
+            base_source = "provided"
+
+        support_threshold = base_low * (
+            Decimal("1") - Decimal(str(p.second_entry_support_tolerance))
+        )
+        if cur_price < support_threshold:
+            return None  # 기준봉 지지 깨짐
+
+        return EntrySignal(
+            symbol=ctx.symbol,
+            name=ctx.name or ctx.symbol,
+            price=float(last.close),
+            signal_type="swing_38",
+            score=10.0,
+            reason=(
+                f"38스윙 2차: 1차 +{days}일 경과, 기준봉 지지 "
+                f"(현재가 {float(cur_price):.0f} ≥ low {float(base_low):.0f} "
+                f"× {1 - p.second_entry_support_tolerance:.3f})"
+            ),
+            market_type=ctx.market_type,
+            strategy_id=self.STRATEGY_ID,
+            timestamp=datetime.now(timezone.utc),
+            metadata={
+                "swing_38_subtype": "swing_38_add",
+                "entry_round": 2,
+                "parent_entry_time": position.entry_time.isoformat(),
+                "base_candle_low": float(base_low),
+                "base_low_source": base_source,
+                "elapsed_days": days,
+                "size_ratio": p.second_entry_size_ratio,
+            },
         )
 
     def position_size(self, signal: EntrySignal, account: Account) -> Decimal:
