@@ -268,3 +268,38 @@ class TestGoldZoneEntryTimeGate:
         assert out[0].params.entry_time_cutoff == dtime(14, 0), (
             "IntradaySimulator gold_zone 분기에서 entry_time_cutoff=14:00 적용 실패"
         )
+
+
+class TestGoldZonePhaseD23:
+    """BAR-OPS-09 Phase D2.3 (2026-05-28, B4 그리드 결과) — min_score 2.5 → 4.0."""
+
+    def test_default_min_score_is_4_0(self):
+        """default min_score=4.0 (B4 시뮬 자본가중 +56% 개선)."""
+        from backend.core.strategy.gold_zone import GoldZoneParams
+        p = GoldZoneParams()
+        assert p.min_score == 4.0, (
+            f"default min_score={p.min_score}, expected 4.0 (Phase D2.3)"
+        )
+
+    def test_default_min_conditions_preserved(self):
+        """default min_conditions=2 유지 (B4 시뮬 min_cond=3 강화는 무효 확인)."""
+        from backend.core.strategy.gold_zone import GoldZoneParams
+        p = GoldZoneParams()
+        assert p.min_conditions == 2
+
+    def test_min_score_3_5_rejects_signal_with_lower_score(self):
+        """min_score 임계 동작 검증 — 점수가 임계 미만이면 진입 거부."""
+        from backend.core.strategy.gold_zone import GoldZoneStrategy, GoldZoneParams
+        # 매우 높은 min_score (예: 9.5) 로 어떤 신호도 통과 못 하도록
+        s = GoldZoneStrategy(GoldZoneParams(min_score=9.5))
+        # 임의 캔들에서 시그널 강도가 9.5 이상 안 되도록 — 합성 평탄 데이터
+        from datetime import datetime, timedelta
+        from backend.models.market import OHLCV
+        candles = [
+            OHLCV(symbol="T", timestamp=datetime(2026, 5, 1) + timedelta(days=i),
+                  open=1000, high=1010, low=990, close=1000, volume=10000,
+                  market_type=MarketType.STOCK)
+            for i in range(70)
+        ]
+        ctx = AnalysisContext(symbol="T", candles=candles, market_type=MarketType.STOCK)
+        assert s._analyze_v2(ctx) is None, "min_score=9.5 라도 진입 허용"

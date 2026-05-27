@@ -46,6 +46,13 @@ class GoldZoneParams:
     bb_proximity_pct: float = 0.03
     min_candles: int = 60
     min_conditions: int = 2          # 최소 충족 조건 수 (2/3 허용)
+    # BAR-OPS-09 Phase D2.3 (2026-05-28, B4 그리드 결과): min_score 임계 파라미터화.
+    # 직전엔 _analyze_v2 안에 2.5 hardcoded. B4 시뮬(791종목·6셀):
+    #   - score≥2.5 (baseline): 자본가중 +0.148%
+    #   - score≥4.0 (변경): 자본가중 +0.231% (+56% 개선) ★
+    #   - score≥5.5: 자본가중 +0.229% (4.0 와 거의 동일 — 4.0 sweet spot)
+    # min_conditions=3 강화는 모든 PnL 악화로 무효 확인 → default 2 유지.
+    min_score: float = 4.0
 
     # BAR-OPS-09 Phase 4 — 변동성 필터: ATR% < min_atr_pct 시 진입 거부.
     # default 0.0 (필터 비활성) — 기존 baseline 회귀 보존.
@@ -100,7 +107,8 @@ class GoldZoneStrategy(Strategy):
         raw = bb_score * 0.4 + fib_score * 0.3 + rsi_score * 0.3
         # 0-10 스케일 정규화 (다른 v2 전략과 통일 — BacktestConfig.min_signal_score=4.0 기준)
         score = raw * 10.0
-        if score < 2.5:
+        # Phase D2.3: hardcoded 2.5 → p.min_score (default 4.0, B4 시뮬 결과)
+        if score < p.min_score:
             return None
 
         return EntrySignal(
@@ -209,7 +217,10 @@ class GoldZoneStrategy(Strategy):
     # === Strategy v2 override ===
 
     def exit_plan(self, position: Position, ctx: AnalysisContext) -> ExitPlan:
-        """골드존 보수적 정책: TP1=+2% (50%), TP2=+4% (50%), SL=-1.5%, breakeven=+1.0%."""
+        """골드존 보수적 정책: TP1=+2% (50%), TP2=+4% (50%), SL=-1.5%, breakeven=+1.0%.
+
+        Phase D2.5 (B6): ExitEngine 1차 방어선 SL. HoldingEvaluator(-4%) 가 2차 fallback.
+        """
         avg = Decimal(str(position.avg_price))
         return ExitPlan(
             take_profits=[

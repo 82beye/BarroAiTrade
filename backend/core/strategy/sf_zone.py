@@ -72,6 +72,7 @@ class SFZoneStrategy(Strategy):
 
         time_exit = dtime(14, 50) if ctx.market_type == MarketType.STOCK else None
 
+        # Phase D2.5 (B6): ExitEngine 1차 방어선 SL (단타 중 최저). HoldingEvaluator(-4%) 가 2차 fallback.
         return ExitPlan(
             take_profits=take_profits,
             stop_loss=StopLoss(fixed_pct=Decimal("-0.015")),
