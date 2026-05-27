@@ -239,9 +239,10 @@ export default function BalancePage() {
                     />
                     <Tooltip
                       contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', color: '#e2e8f0' }}
-                      formatter={(v: number, name: string) => {
+                      formatter={(v: any, name: any) => {
                         const label = name === 'total' ? '총 자산' : name === 'cash' ? '예수금' : '평가금';
-                        return [`${v.toLocaleString()}원`, label];
+                        const val = typeof v === 'number' ? v : Number(v) || 0;
+                        return [`${val.toLocaleString()}원`, label];
                       }}
                       labelFormatter={(label) => `${label}`}
                     />
@@ -425,9 +426,10 @@ export default function BalancePage() {
                     />
                     <Tooltip
                       contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', color: '#e2e8f0' }}
-                      formatter={(v: number, name: string) => {
+                      formatter={(v: any, name: any) => {
                         const label = name === 'daily' ? '일별 손익' : '누적 손익';
-                        return [`${v.toLocaleString()}원`, label];
+                        const val = typeof v === 'number' ? v : Number(v) || 0;
+                        return [`${val.toLocaleString()}원`, label];
                       }}
                       labelFormatter={(label) => `${label}`}
                     />

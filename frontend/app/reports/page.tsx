@@ -187,11 +187,12 @@ export default function ReportsPage() {
                   />
                   <Tooltip
                     contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', color: '#e2e8f0' }}
-                    formatter={(v: number, name: string) =>
-                      name === 'trades_count'
-                        ? [`${v}건`, '매매건수']
-                        : [`${v.toFixed(2)}%`, '수익률']
-                    }
+                    formatter={(v: any, name: any) => {
+                      const val = typeof v === 'number' ? v : Number(v) || 0;
+                      return name === 'trades_count'
+                        ? [`${val}건`, '매매건수']
+                        : [`${val.toFixed(2)}%`, '수익률'];
+                    }}
                   />
                   <Bar yAxisId="left" dataKey="trades_count" fill="#3b82f6" opacity={0.6} name="trades_count" />
                   <Line yAxisId="right" type="monotone" dataKey="pnl_pct" stroke="#f59e0b" strokeWidth={2} dot={{ fill: '#f59e0b' }} name="pnl_pct" />

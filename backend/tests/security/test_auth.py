@@ -54,8 +54,11 @@ class TestEncodeDecode:
 
     def test_tampered_token_raises(self, jwt_service):
         token = jwt_service.encode_access("u", Role.VIEWER)
-        # 마지막 글자 변경
-        tampered = token[:-1] + ("X" if token[-1] != "X" else "Y")
+        # 서명부(signature)의 첫 문자를 변조하여 확실하게 서명 훼손
+        parts = token.split(".")
+        sig = parts[2]
+        tampered_sig = ("X" if sig[0] != "X" else "Y") + sig[1:]
+        tampered = f"{parts[0]}.{parts[1]}.{tampered_sig}"
         with pytest.raises(ValueError):
             jwt_service.decode(tampered)
 
