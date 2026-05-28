@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BAR-OPS-09 Phase D2.1 단타 일일 모니터링 (B1).
+BAR-OPS-09 Phase D2.1 단타 일일 모니터링 (B1 v2 — 2026-05-29 보강).
 
 운영 머신에서 매일 장 마감 후 실행:
     venv/bin/python scripts/daytrading_daily_monitor.py
@@ -8,8 +8,8 @@ BAR-OPS-09 Phase D2.1 단타 일일 모니터링 (B1).
 
 소스:
   1. data/barro_trade.db  trades 테이블 (strategy_id 포함, 신뢰성 최상)
-  2. data/order_audit.csv (백업 감사 — strategy_id 없음, 행 수만 활용)
-  3. data/active_positions.json (현재 보유)
+  2. data/order_audit.csv (백업 감사 + 미청산 종목 검출 — B1 v2)
+  3. data/active_positions.json (현재 보유 — 시스템 측 인식)
   4. logs/barro.log (JSON line — "신호 발생 [strategy]" 패턴)
 
 출력:
@@ -21,10 +21,17 @@ BAR-OPS-09 Phase D2.1 단타 일일 모니터링 (B1).
   - gold_zone 일 trade > 20 + 승률 < 30% → 비활성 권고
   - 단일 전략 자본가중 누적 -3% → 사후 분석 권고
   - sf_zone 일주일 누적 trade 0건 → 임계 완화 시뮬 권고
+
+B1 v2 (2026-05-29) — 미청산 종목 자동 감지 알람:
+  - order_audit.csv 의 전체 buy/sell 누적 매칭으로 미청산 종목 검출.
+  - active_positions.json 과 비교해 불일치 시 HIGH 알람.
+  - 2026-05-29 swing_38 잔여 4종목(001820/006660/012330/034220) 인시던트 재발 방지.
+  - active_positions {} 빈 객체 + order_audit buy > sell 누적 양수인 종목 발견 시 → 시스템 동기화 누락.
 """
 from __future__ import annotations
 
 import argparse
+import csv as csv_mod
 import json
 import re
 import sqlite3
@@ -133,6 +140,119 @@ def _match_trades_to_pnl(trades: list[dict]) -> dict[str, list[float]]:
     return dict(pnl_by_strategy)
 
 
+# ── B1 v2 (2026-05-29) — order_audit.csv 기반 미청산 종목 검출 ──
+
+def _aggregate_unfilled_from_csv(
+    csv_path: Path, max_lookback_days: int = 60,
+) -> dict[str, dict[str, Any]]:
+    """order_audit.csv 의 전체 buy/sell 누적으로 종목별 미청산 수량 추정.
+
+    Args:
+        csv_path: order_audit.csv 경로
+        max_lookback_days: 과거 N일 데이터만 (None=전체)
+                           default 60일 — swing_38 max_hold=20일 + 보수 여유.
+
+    Returns:
+        {symbol: {"buy_qty": int, "sell_qty": int, "net_qty": int,
+                  "buy_count": int, "sell_count": int,
+                  "first_buy_ts": str, "last_buy_ts": str, "last_sell_ts": str}}
+        net_qty > 0 인 종목만 포함 (= 미청산 추정).
+    """
+    if not csv_path.exists():
+        return {}
+
+    cutoff_ts: Optional[str] = None
+    if max_lookback_days is not None:
+        cutoff = datetime.now() - timedelta(days=max_lookback_days)
+        cutoff_ts = cutoff.isoformat()
+
+    by_symbol: dict[str, dict[str, Any]] = defaultdict(lambda: {
+        "buy_qty": 0, "sell_qty": 0,
+        "buy_count": 0, "sell_count": 0,
+        "first_buy_ts": None, "last_buy_ts": None, "last_sell_ts": None,
+    })
+
+    with csv_path.open("r", encoding="utf-8") as f:
+        reader = csv_mod.DictReader(f)
+        for row in reader:
+            ts = row.get("ts", "")
+            action = (row.get("action") or "").upper()
+            side = (row.get("side") or "").lower()
+            symbol = row.get("symbol", "").strip()
+            try:
+                qty = int(row.get("qty", "0") or 0)
+            except ValueError:
+                qty = 0
+            rc = row.get("return_code", "")
+
+            # DRY_RUN 은 미체결 — 무시. ORDERED + return_code=0 만 매칭.
+            if action == "DRY_RUN":
+                continue
+            if rc != "0":
+                continue
+            if not symbol or qty <= 0:
+                continue
+            if cutoff_ts is not None and ts and ts < cutoff_ts:
+                continue
+
+            bucket = by_symbol[symbol]
+            if side in ("buy", "bid"):
+                bucket["buy_qty"] += qty
+                bucket["buy_count"] += 1
+                if bucket["first_buy_ts"] is None or ts < bucket["first_buy_ts"]:
+                    bucket["first_buy_ts"] = ts
+                if bucket["last_buy_ts"] is None or ts > bucket["last_buy_ts"]:
+                    bucket["last_buy_ts"] = ts
+            elif side in ("sell", "ask"):
+                bucket["sell_qty"] += qty
+                bucket["sell_count"] += 1
+                if bucket["last_sell_ts"] is None or ts > bucket["last_sell_ts"]:
+                    bucket["last_sell_ts"] = ts
+
+    # net_qty 계산 + 미청산만 반환
+    unfilled: dict[str, dict[str, Any]] = {}
+    for symbol, bucket in by_symbol.items():
+        net = bucket["buy_qty"] - bucket["sell_qty"]
+        if net > 0:
+            bucket["net_qty"] = net
+            bucket["symbol"] = symbol
+            unfilled[symbol] = bucket
+    return unfilled
+
+
+def _detect_position_discrepancy(
+    unfilled: dict[str, dict[str, Any]],
+    active_positions: dict[str, Any],
+) -> dict[str, list[dict]]:
+    """미청산(order_audit 기준) vs active_positions 불일치 검출.
+
+    Returns:
+        {
+          "unfilled_not_in_active": [...],  # order_audit 잔여인데 active 빈 (동기화 누락)
+          "active_not_in_unfilled": [...],  # active 보유인데 order_audit buy 없음 (이상)
+        }
+    """
+    unfilled_symbols = set(unfilled.keys())
+    active_symbols = set(active_positions.keys()) if active_positions else set()
+
+    # active_positions 가 dict 인 경우 — 키만 비교. 값은 별도 메타데이터.
+    only_in_csv = unfilled_symbols - active_symbols       # ★ 어제 인시던트 패턴
+    only_in_active = active_symbols - unfilled_symbols    # 이상 케이스
+    both = unfilled_symbols & active_symbols              # 일치 OK
+
+    return {
+        "unfilled_not_in_active": [
+            {**unfilled[s], "symbol": s} for s in sorted(only_in_csv)
+        ],
+        "active_not_in_unfilled": [
+            {"symbol": s, "active_data": active_positions[s]}
+            for s in sorted(only_in_active)
+        ],
+        "matched": sorted(both),
+        "matched_count": len(both),
+    }
+
+
 def _aggregate(
     signals: dict[str, int],
     trades: list[dict],
@@ -177,8 +297,12 @@ def _aggregate(
     }
 
 
-def _check_alarms(per_strategy: dict[str, dict], week_signals: dict[str, int]) -> list[dict]:
-    """알람 조건 검사 — 분석 리포트 §6.3."""
+def _check_alarms(
+    per_strategy: dict[str, dict],
+    week_signals: dict[str, int],
+    discrepancy: Optional[dict[str, list[dict]]] = None,
+) -> list[dict]:
+    """알람 조건 검사 — 분석 리포트 §6.3 + B1 v2 미청산 검출."""
     alarms: list[dict] = []
     # gold_zone 일 trade > 20 + 승률 < 30%
     gz = per_strategy.get("gold_zone", {})
@@ -209,6 +333,34 @@ def _check_alarms(per_strategy: dict[str, dict], week_signals: dict[str, int]) -
             "key": "sf_zone_no_signal_week",
             "msg": "sf_zone 일주일 누적 신호 0건 → score≥7.0 임계 완화 시뮬 권고",
         })
+
+    # ── B1 v2 (2026-05-29) — 미청산 종목 불일치 ──
+    if discrepancy is not None:
+        for item in discrepancy.get("unfilled_not_in_active", []):
+            symbol = item["symbol"]
+            net_qty = item["net_qty"]
+            buy_qty = item["buy_qty"]
+            sell_qty = item["sell_qty"]
+            last_buy = item.get("last_buy_ts", "")[:10]
+            alarms.append({
+                "level": "HIGH",
+                "key": f"unfilled_not_in_active_{symbol}",
+                "msg": (
+                    f"⚠ {symbol} order_audit 미청산 {net_qty}주 (buy {buy_qty} − sell {sell_qty}, "
+                    f"마지막 buy {last_buy}) — active_positions.json 누락 "
+                    "→ 시스템 동기화 점검 + broker 잔고 직접 조회"
+                ),
+            })
+        for item in discrepancy.get("active_not_in_unfilled", []):
+            symbol = item["symbol"]
+            alarms.append({
+                "level": "HIGH",
+                "key": f"active_not_in_unfilled_{symbol}",
+                "msg": (
+                    f"⚠ {symbol} active_positions 보유인데 order_audit buy 이력 없음 "
+                    "→ 데이터 일관성 점검 (수동 입력 또는 데이터 손실 가능성)"
+                ),
+            })
     return alarms
 
 
@@ -241,6 +393,33 @@ def _render_console(report: dict, target_day: date) -> str:
         lines.append(f"\n{B}── 활성 보유 ──{RESET}")
         for sym, pos in report["active_positions"].items():
             lines.append(f"  {sym}: {pos}")
+
+    # B1 v2: 미청산(order_audit 기준) + 불일치 출력
+    discrepancy = report.get("discrepancy", {})
+    unfilled_not_in_active = discrepancy.get("unfilled_not_in_active", [])
+    active_not_in_unfilled = discrepancy.get("active_not_in_unfilled", [])
+    matched = discrepancy.get("matched", [])
+
+    lines.append(f"\n{B}── order_audit 미청산 검출 (B1 v2) ──{RESET}")
+    lines.append(
+        f"  active_positions 일치: {len(matched)}건 / "
+        f"⚠ order_audit 미청산-active 누락: {len(unfilled_not_in_active)}건 / "
+        f"⚠ active-order_audit 누락: {len(active_not_in_unfilled)}건"
+    )
+    if unfilled_not_in_active:
+        lines.append(f"  {R}● order_audit 미청산이지만 active_positions 누락:{RESET}")
+        for item in unfilled_not_in_active:
+            last_buy = (item.get("last_buy_ts") or "")[:10]
+            last_sell = (item.get("last_sell_ts") or "")[:10] or "없음"
+            lines.append(
+                f"    {R}{item['symbol']}{RESET}: net {item['net_qty']}주 "
+                f"(buy {item['buy_qty']}/sell {item['sell_qty']}, "
+                f"마지막 buy {last_buy} · sell {last_sell})"
+            )
+    if active_not_in_unfilled:
+        lines.append(f"  {R}● active_positions 인데 order_audit buy 이력 없음:{RESET}")
+        for item in active_not_in_unfilled:
+            lines.append(f"    {R}{item['symbol']}{RESET}: {item['active_data']}")
 
     alarms = report.get("alarms", [])
     if alarms:
@@ -283,6 +462,36 @@ def _render_markdown(report: dict, target_day: date, alarms: list[dict]) -> str:
         md.append(json.dumps(report["active_positions"], ensure_ascii=False, indent=2))
         md.append("```")
 
+    # B1 v2: 미청산 + 불일치 출력
+    discrepancy = report.get("discrepancy", {})
+    unfilled_not_in_active = discrepancy.get("unfilled_not_in_active", [])
+    active_not_in_unfilled = discrepancy.get("active_not_in_unfilled", [])
+    matched = discrepancy.get("matched", [])
+    md.append("")
+    md.append("## order_audit 미청산 검출 (B1 v2)")
+    md.append("")
+    md.append(
+        f"- active_positions 일치: **{len(matched)}건**"
+    )
+    md.append(
+        f"- ⚠ order_audit 미청산이지만 active_positions 누락: **{len(unfilled_not_in_active)}건**"
+    )
+    md.append(
+        f"- ⚠ active_positions 인데 order_audit buy 이력 없음: **{len(active_not_in_unfilled)}건**"
+    )
+    if unfilled_not_in_active:
+        md.append("")
+        md.append("### 동기화 누락 종목 (order_audit 미청산 + active 누락)")
+        md.append("")
+        md.append("| 종목 | net 주 | buy 주 | sell 주 | 마지막 buy | 마지막 sell |")
+        md.append("|---|---:|---:|---:|---|---|")
+        for item in unfilled_not_in_active:
+            md.append(
+                f"| {item['symbol']} | {item['net_qty']} | {item['buy_qty']} | "
+                f"{item['sell_qty']} | {(item.get('last_buy_ts') or '')[:10]} | "
+                f"{(item.get('last_sell_ts') or '')[:10] or '—'} |"
+            )
+
     md.append("")
     md.append("## 알람")
     if alarms:
@@ -318,6 +527,13 @@ def main():
 
     report = _aggregate(signals, trades, pnl_by_strategy, active_positions)
 
+    # B1 v2: order_audit 미청산 종목 + active_positions 불일치
+    unfilled = _aggregate_unfilled_from_csv(ORDER_AUDIT_CSV, max_lookback_days=60)
+    discrepancy = _detect_position_discrepancy(unfilled, active_positions)
+    report["unfilled_count"] = len(unfilled)
+    report["unfilled"] = unfilled
+    report["discrepancy"] = discrepancy
+
     # 주간 시그널 (sf_zone 0건 알람용)
     week_signals: dict[str, int] = defaultdict(int)
     for i in range(7):
@@ -325,7 +541,7 @@ def main():
         for k, v in _parse_barro_log_signals(BARRO_LOG, d).items():
             week_signals[k] += v
 
-    alarms = _check_alarms(report["per_strategy"], week_signals)
+    alarms = _check_alarms(report["per_strategy"], week_signals, discrepancy)
     report["alarms"] = alarms
     report["week_signals"] = dict(week_signals)
 
