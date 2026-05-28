@@ -306,16 +306,13 @@ class TradingOrchestrator:
                             from backend.core.scanner import SignalScanner
                             from backend.core.strategy.f_zone import FZoneParams
                             from backend.core.strategy.blue_line import BlueLineParams
-                            from backend.core.strategy.gold_zone import GoldZoneParams
                             # BAR-OPS-09 Phase 2/3: 변동성 필터 운영 경로 적용 — ATR% < 3.5% 차단 (저변동·고가주).
                             # BAR-OPS-09 Phase 8e/8f: 진입 시간 게이트 — 14:00 이후 운영 신규 진입 차단 (장 후반 청산 여유 부족 손실 방지).
-                            # gold_zone 운영-시뮬 일관화 (2026-05-29): D2.1 신규 등록 시 gold_zone_params 누락되어
-                            #   운영 default(min_atr_pct=0.0, cutoff=None) 사용 → 시뮬·f_zone/blue_line 과 불일치. 일관 적용.
+                            # 2026-05-29: gold_zone 1m+0.035 일관화(제안1) 원복 — 격자 백테스트상 근거 없음(1m+0.035=신호 전멸). gold default 유지.
                             scanner = SignalScanner(
                                 gateway,
                                 f_zone_params=FZoneParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
                                 blue_line_params=BlueLineParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
-                                gold_zone_params=GoldZoneParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
                             )
                             signals = await scanner.scan(app_state.watchlist)
                             last_scan_time = now
