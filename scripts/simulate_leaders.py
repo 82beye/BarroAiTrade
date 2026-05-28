@@ -316,7 +316,7 @@ async def _run(args) -> int:
 
                 # active_positions 저장 (전략 정보 + 분할 계획)
                 # BAR-169: 종목별 최적 전략 사용 (전체 합산 PnL 오용 버그 수정)
-                best_strategy = best_strategy_by_symbol.get(r.symbol, "swing_38")
+                best_strategy = best_strategy_by_symbol.get(r.symbol, "f_zone")
                 leader = next((c for c in filtered_leaders if c.symbol == r.symbol), None)
                 # 전략별 SL 자동 적용
                 from backend.core.risk.holding_evaluator import STRATEGY_EXIT_PROFILES
@@ -368,7 +368,7 @@ def main() -> None:
     )
     ap.add_argument(
         "--strategies",
-        default="f_zone,sf_zone,gold_zone,swing_38,scalping_consensus",
+        default="f_zone,sf_zone,gold_zone",
         help="실행 전략 (comma-separated)",
     )
     ap.add_argument(

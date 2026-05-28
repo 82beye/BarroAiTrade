@@ -486,12 +486,12 @@ async def _scan_and_buy(
         bearish_min_pnl = 50_000.0  # BEARISH: 강한 신호만 (best_pnl > 50k)
         print(f"  [{ts_r}][REGIME] BEARISH — 가중치≥1.0 전략 + best_pnl>50k 만, 최대 1건")
     elif regime == MarketRegime.SIDEWAYS:
-        regime_max_buy = 1  # P8 신규 — 박스권도 보수 운영
-        print(f"  [{ts_r}][REGIME] SIDEWAYS — 보수 운영, 최대 1건")
+        regime_max_buy = 2  # P8→D2.1 — 박스권 보수 운영 (1→2건 완화, 단타 시그널 확보)
+        print(f"  [{ts_r}][REGIME] SIDEWAYS — 보수 운영, 최대 2건")
 
     # 전략 시뮬레이션 시그널 검증
     sim = IntradaySimulator()
-    strategies = ["f_zone", "sf_zone", "gold_zone", "swing_38"]
+    strategies = ["f_zone", "sf_zone", "gold_zone"]
     signals = []
 
     for c in filtered:
