@@ -223,33 +223,64 @@ def _aggregate_unfilled_from_csv(
 def _detect_position_discrepancy(
     unfilled: dict[str, dict[str, Any]],
     active_positions: dict[str, Any],
+    stale_buy_days: int = 7,
 ) -> dict[str, list[dict]]:
     """미청산(order_audit 기준) vs active_positions 불일치 검출.
 
+    v2.1 (2026-05-29, 4번 작업): CSV ground truth 가정 약화.
+      - 439960 케이스 — broker 청산됐는데 CSV sell 행 누락 가능.
+      - 마지막 buy 가 stale_buy_days 이전이면 "stale" 라벨 → MEDIUM 알람으로 다운그레이드 가능.
+      - 즉 갓 매수한 종목 잔여는 동기화 누락이 강함(HIGH), 오래된 잔여는 CSV 누락 의심(MEDIUM).
+
     Returns:
         {
-          "unfilled_not_in_active": [...],  # order_audit 잔여인데 active 빈 (동기화 누락)
-          "active_not_in_unfilled": [...],  # active 보유인데 order_audit buy 없음 (이상)
+          "unfilled_not_in_active": [
+            {symbol, net_qty, ..., stale: bool, days_since_last_buy: int},
+            ...
+          ],
+          "active_not_in_unfilled": [...],
+          "matched": [...],
+          "matched_count": int,
         }
     """
     unfilled_symbols = set(unfilled.keys())
     active_symbols = set(active_positions.keys()) if active_positions else set()
 
-    # active_positions 가 dict 인 경우 — 키만 비교. 값은 별도 메타데이터.
     only_in_csv = unfilled_symbols - active_symbols       # ★ 어제 인시던트 패턴
     only_in_active = active_symbols - unfilled_symbols    # 이상 케이스
     both = unfilled_symbols & active_symbols              # 일치 OK
 
+    # v2.1: stale 판정 — 마지막 buy 가 stale_buy_days 이전인지
+    now_iso = datetime.now().isoformat()
+    cutoff_iso = (datetime.now() - timedelta(days=stale_buy_days)).isoformat()
+
+    discrepancy_items = []
+    for s in sorted(only_in_csv):
+        item = {**unfilled[s], "symbol": s}
+        last_buy = item.get("last_buy_ts", "") or ""
+        is_stale = bool(last_buy and last_buy < cutoff_iso)
+        item["stale"] = is_stale
+        if last_buy:
+            try:
+                last_buy_dt = datetime.fromisoformat(last_buy.replace("+00:00", "+00:00"))
+                # naive comparison
+                days_diff = (datetime.now() - last_buy_dt.replace(tzinfo=None)).days
+                item["days_since_last_buy"] = days_diff
+            except (ValueError, AttributeError):
+                item["days_since_last_buy"] = None
+        else:
+            item["days_since_last_buy"] = None
+        discrepancy_items.append(item)
+
     return {
-        "unfilled_not_in_active": [
-            {**unfilled[s], "symbol": s} for s in sorted(only_in_csv)
-        ],
+        "unfilled_not_in_active": discrepancy_items,
         "active_not_in_unfilled": [
             {"symbol": s, "active_data": active_positions[s]}
             for s in sorted(only_in_active)
         ],
         "matched": sorted(both),
         "matched_count": len(both),
+        "stale_buy_days_threshold": stale_buy_days,
     }
 
 
@@ -335,22 +366,38 @@ def _check_alarms(
         })
 
     # ── B1 v2 (2026-05-29) — 미청산 종목 불일치 ──
+    # v2.1 (4번 작업): stale 종목은 MEDIUM 으로 다운그레이드 (CSV sell 누락 가능 — 439960 패턴).
     if discrepancy is not None:
         for item in discrepancy.get("unfilled_not_in_active", []):
             symbol = item["symbol"]
             net_qty = item["net_qty"]
             buy_qty = item["buy_qty"]
             sell_qty = item["sell_qty"]
-            last_buy = item.get("last_buy_ts", "")[:10]
-            alarms.append({
-                "level": "HIGH",
-                "key": f"unfilled_not_in_active_{symbol}",
-                "msg": (
-                    f"⚠ {symbol} order_audit 미청산 {net_qty}주 (buy {buy_qty} − sell {sell_qty}, "
-                    f"마지막 buy {last_buy}) — active_positions.json 누락 "
-                    "→ 시스템 동기화 점검 + broker 잔고 직접 조회"
-                ),
-            })
+            last_buy = (item.get("last_buy_ts") or "")[:10]
+            is_stale = item.get("stale", False)
+            days_diff = item.get("days_since_last_buy")
+            if is_stale:
+                # MEDIUM: 오래된 잔여 — broker 청산 + CSV sell 누락 가능성 ↑ (439960 패턴)
+                alarms.append({
+                    "level": "MEDIUM",
+                    "key": f"unfilled_stale_{symbol}",
+                    "msg": (
+                        f"⚠ {symbol} order_audit 미청산 {net_qty}주 (last buy {days_diff}일 전, {last_buy}) "
+                        "— stale → broker 잔고 직접 조회로 청산 여부 확인 "
+                        "(CSV sell 행 누락 가능성)"
+                    ),
+                })
+            else:
+                # HIGH: 최근 매수 종목인데 active 누락 (어제 인시던트 패턴, 5/28 4종목)
+                alarms.append({
+                    "level": "HIGH",
+                    "key": f"unfilled_not_in_active_{symbol}",
+                    "msg": (
+                        f"⚠ {symbol} order_audit 미청산 {net_qty}주 (buy {buy_qty} − sell {sell_qty}, "
+                        f"마지막 buy {last_buy}) — active_positions.json 누락 "
+                        "→ 시스템 동기화 점검 + broker 잔고 직접 조회"
+                    ),
+                })
         for item in discrepancy.get("active_not_in_unfilled", []):
             symbol = item["symbol"]
             alarms.append({
