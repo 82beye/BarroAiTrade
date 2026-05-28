@@ -17,6 +17,7 @@ from datetime import time as _dtime
 from backend.core.scanner import SignalScanner
 from backend.core.strategy.f_zone import FZoneParams
 from backend.core.strategy.blue_line import BlueLineParams
+from backend.core.strategy.gold_zone import GoldZoneParams
 from backend.models.signal import EntrySignal
 from backend.models.market import MarketType
 from backend.core.state import app_state
@@ -70,10 +71,14 @@ async def scan_signals(
     try:
         # BAR-OPS-09 Phase 2/3: 변동성 필터 운영 경로 적용 — ATR% < 3.5% 차단.
         # BAR-OPS-09 Phase 8e/8f: 진입 시간 게이트 — 14:00 이후 운영 신규 진입 차단.
+        # gold_zone 운영-시뮬 일관화 (2026-05-29): D2.1 신규 등록 시 gold_zone_params 누락 →
+        #   운영 default(min_atr_pct=0.0, cutoff=None) 사용되어 시뮬(0.035/14:00)·f_zone/blue_line 과 불일치.
+        #   일봉 백테스트상 저변동(atr<3.5%) 진입 -61.7% 차단 효과. 첫 주 발동빈도 모니터링.
         scanner = SignalScanner(
             gateway,
             f_zone_params=FZoneParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
             blue_line_params=BlueLineParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
+            gold_zone_params=GoldZoneParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
         )
         signals = await scanner.scan(symbol_list)
         return {
