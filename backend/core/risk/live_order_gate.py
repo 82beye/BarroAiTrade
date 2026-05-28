@@ -36,7 +36,42 @@ logger = logging.getLogger(__name__)
 _AUDIT_HEADERS = [
     "ts", "action", "side", "symbol", "qty", "price",
     "order_no", "return_code", "blocked", "reason",
+    "strategy_id",  # BAR-OPS-09 Phase D2.6 (2026-05-29) — 전략별 KPI 측정 인프라
 ]
+
+
+def _migrate_audit_csv_header(audit_path: Path) -> bool:
+    """기존 10 컬럼 audit csv 를 11 컬럼(strategy_id 추가) 으로 in-place migration.
+
+    Returns:
+        True 시 migration 수행, False 시 이미 migrated 또는 파일 없음.
+    """
+    if not audit_path.exists():
+        return False
+    try:
+        with open(audit_path, "r", encoding="utf-8", newline="") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+    except OSError:
+        return False
+    if not rows:
+        return False
+    header = rows[0]
+    if "strategy_id" in header:
+        return False  # already migrated
+
+    new_header = header + ["strategy_id"]
+    # 기존 row 끝에 빈 strategy_id 추가
+    new_rows = [new_header] + [r + [""] for r in rows[1:]]
+
+    # atomic write — tempfile + replace
+    tmp = audit_path.with_suffix(audit_path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerows(new_rows)
+    tmp.replace(audit_path)
+    logger.info("order_audit.csv migration 완료 (10→11 컬럼, +strategy_id)")
+    return True
 
 
 class TradingDisabled(RuntimeError):
@@ -115,33 +150,37 @@ class LiveOrderGate:
         self, symbol: str, qty: int,
         price: Optional[Decimal] = None,
         daily_pnl_pct: Decimal = Decimal("0.0"),
+        strategy_id: Optional[str] = None,
     ) -> OrderResult:
-        return await self._gated(OrderSide.BUY, symbol, qty, price, daily_pnl_pct)
+        return await self._gated(OrderSide.BUY, symbol, qty, price, daily_pnl_pct, strategy_id)
 
     async def place_sell(
         self, symbol: str, qty: int,
         price: Optional[Decimal] = None,
         daily_pnl_pct: Decimal = Decimal("0.0"),
+        strategy_id: Optional[str] = None,
     ) -> OrderResult:
-        return await self._gated(OrderSide.SELL, symbol, qty, price, daily_pnl_pct)
+        return await self._gated(OrderSide.SELL, symbol, qty, price, daily_pnl_pct, strategy_id)
 
     async def _gated(
         self, side: OrderSide, symbol: str, qty: int,
         price: Optional[Decimal], daily_pnl_pct: Decimal,
+        strategy_id: Optional[str] = None,
     ) -> OrderResult:
         # 0) qty 검증 — 호출자(DCA 분할 등) 에서 0/음수가 들어와도 executor 진입 전 차단.
         #    이전엔 executor 측 ValueError 가 audit 에 'FAILED' 로 남아 추적 어려웠음.
         if qty <= 0:
             err = InvalidOrderQty(f"qty must be > 0, got {qty}")
             self._audit("BLOCKED", side, symbol, qty, price, None, None,
-                        blocked=True, reason=str(err))
+                        blocked=True, reason=str(err), strategy_id=strategy_id)
             await self._notify_blocked(side, symbol, str(err))
             raise err
 
         try:
             self._preflight(side, daily_pnl_pct)
         except (TradingDisabled, DailyLossLimitExceeded, DailyOrderLimitExceeded) as e:
-            self._audit("BLOCKED", side, symbol, qty, price, None, None, blocked=True, reason=str(e))
+            self._audit("BLOCKED", side, symbol, qty, price, None, None,
+                        blocked=True, reason=str(e), strategy_id=strategy_id)
             await self._notify_blocked(side, symbol, str(e))
             raise
 
@@ -152,7 +191,7 @@ class LiveOrderGate:
                 result = await self._executor.place_sell(symbol, qty, price)
         except Exception as e:
             self._audit("FAILED", side, symbol, qty, price, None, None,
-                        blocked=False, reason=type(e).__name__)
+                        blocked=False, reason=type(e).__name__, strategy_id=strategy_id)
             await self._notify_blocked(side, symbol, f"{type(e).__name__}: {e}")
             raise
 
@@ -160,6 +199,7 @@ class LiveOrderGate:
             "ORDERED" if not result.dry_run else "DRY_RUN",
             side, symbol, qty, price,
             result.order_no, result.return_code, blocked=False,
+            strategy_id=strategy_id,
         )
         return result
 
@@ -167,9 +207,18 @@ class LiveOrderGate:
         self, action: str, side: OrderSide, symbol: str, qty: int,
         price: Optional[Decimal], order_no: Optional[str],
         return_code: Optional[int], blocked: bool, reason: str = "",
+        strategy_id: Optional[str] = None,
     ) -> None:
         try:
             new_file = not self._audit_path.exists()
+            # Phase D2.6: 기존 10 컬럼 파일이 있으면 11 컬럼으로 자동 migration (한 번만 실행).
+            if not new_file and not getattr(self, "_migrated", False):
+                try:
+                    _migrate_audit_csv_header(self._audit_path)
+                except Exception as me:
+                    logger.warning("audit csv migration 실패: %s", type(me).__name__)
+                self._migrated = True
+
             with open(self._audit_path, "a", encoding="utf-8", newline="") as f:
                 w = csv.writer(f)
                 if new_file:
@@ -182,6 +231,7 @@ class LiveOrderGate:
                     str(return_code) if return_code is not None else "",
                     "1" if blocked else "0",
                     reason,
+                    strategy_id or "",  # Phase D2.6 신규 컬럼
                 ])
         except OSError as exc:
             logger.error("audit log write failed (%s) — %s %s not recorded",

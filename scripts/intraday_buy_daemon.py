@@ -314,7 +314,11 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
         else:
             sell_qty = d.qty
         try:
-            r = await gate.place_sell(symbol=d.symbol, qty=sell_qty)
+            # Phase D2.6: strategy_id 전파 — active_positions 메타에서 조회 (없으면 None)
+            _ap = active_positions.get(d.symbol) if isinstance(active_positions, dict) else None
+            _strategy = getattr(_ap, "strategy", None) if _ap else None
+            r = await gate.place_sell(symbol=d.symbol, qty=sell_qty,
+                                      strategy_id=_strategy)
             tag = "DRY_RUN" if r.dry_run else "SOLD"
             ts = _now_kst().strftime("%H:%M:%S")
             print(
@@ -613,8 +617,10 @@ async def _scan_and_buy(
     for r, strategy in buyable[:regime_max_buy]:
         tranche1_qty = max(1, round(r.recommended_qty * 0.5))
         try:
+            # Phase D2.6: strategy_id 전파 (order_audit.csv 신규 컬럼)
             result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty,
-                                          daily_pnl_pct=daily_pnl_pct)
+                                          daily_pnl_pct=daily_pnl_pct,
+                                          strategy_id=strategy)
             tag = "DRY_RUN" if result.dry_run else "ORDERED"
             ts = _now_kst().strftime("%H:%M:%S")
             print(

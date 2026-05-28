@@ -295,7 +295,10 @@ async def _cmd_confirm_sell(bot: TelegramBot, msg: dict) -> str:
     lines = [f"🚀 *매도 실행* (dry\\_run={dry_run})"]
     for o in batch.orders:
         try:
-            r = await gate.place_sell(symbol=o.symbol, qty=o.qty)
+            # Phase D2.6: strategy_id 전파 — pos_store 메타에서 조회
+            _pos = pos_store.load_all().get(o.symbol)
+            _strategy = getattr(_pos, "strategy", None) if _pos else None
+            r = await gate.place_sell(symbol=o.symbol, qty=o.qty, strategy_id=_strategy)
             tag = "🧪 DRY_RUN" if r.dry_run else "✅ ORDERED"
             lines.append(f"{tag} `{o.symbol}` qty={o.qty}")
             if o.signal == "partial_tp":

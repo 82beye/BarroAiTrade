@@ -191,7 +191,11 @@ async def _run(args) -> int:
     for d in sell_targets:
         sell_qty = d.sell_qty if d.sell_qty > 0 else d.qty
         try:
-            r = await gate.place_sell(symbol=d.symbol, qty=sell_qty)
+            # Phase D2.6: strategy_id 전파 — active_positions 메타에서 조회 (없으면 None)
+            _ap = active_positions.get(d.symbol) if "active_positions" in dir() else None
+            _strategy = getattr(_ap, "strategy", None) if _ap else None
+            r = await gate.place_sell(symbol=d.symbol, qty=sell_qty,
+                                      strategy_id=_strategy)
             tag = "DRY_RUN" if r.dry_run else "ORDERED"
             print(
                 f"  [{tag}] {d.symbol} {d.name:<14} qty={sell_qty:>5}/{d.qty} "
