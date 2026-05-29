@@ -107,25 +107,20 @@ class ActivePosition:
 
 
 def _build_tranches(total_qty: int, entry_price: float, order_no: str, filled_at: str) -> list[Tranche]:
-    """3분할 트랜치 생성 — 1분할 50%, 2분할 25%, 3분할 25%."""
-    q1 = round(total_qty * 0.5)
-    q2 = round(total_qty * 0.25)
-    q3 = total_qty - q1 - q2   # 나머지 전부 3분할로
+    """2분할 트랜치 생성 — T1 60% 즉시, T2 40% at -1.5% (SL -4% 전 완료)."""
+    q1 = round(total_qty * 0.6)
+    q2 = total_qty - q1  # 나머지 전부 T2로
 
     now = filled_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
     return [
         Tranche(
-            tranche=1, ratio=0.5, qty=q1,
+            tranche=1, ratio=0.6, qty=q1,
             trigger_drop_pct=0.0, status="filled",
             order_no=order_no, filled_price=entry_price, filled_at=now,
         ),
         Tranche(
-            tranche=2, ratio=0.25, qty=q2,
-            trigger_drop_pct=-2.0, status="pending",
-        ),
-        Tranche(
-            tranche=3, ratio=0.25, qty=q3,
-            trigger_drop_pct=-4.0, status="pending",
+            tranche=2, ratio=0.4, qty=q2,
+            trigger_drop_pct=-1.5, status="pending",
         ),
     ]
 

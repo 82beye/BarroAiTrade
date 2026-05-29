@@ -301,8 +301,8 @@ async def _run(args) -> int:
             if r.blocked or r.recommended_qty <= 0:
                 continue
 
-            # 1분할(50%) 수량 계산
-            tranche1_qty = max(1, round(r.recommended_qty * 0.5))
+            # T1(60%) 수량 계산
+            tranche1_qty = max(1, round(r.recommended_qty * 0.6))
 
             try:
                 result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty,

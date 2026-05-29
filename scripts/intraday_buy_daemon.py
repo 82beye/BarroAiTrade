@@ -615,7 +615,7 @@ async def _scan_and_buy(
 
     executed = 0
     for r, strategy in buyable[:regime_max_buy]:
-        tranche1_qty = max(1, round(r.recommended_qty * 0.5))
+        tranche1_qty = max(1, round(r.recommended_qty * 0.6))
         try:
             # Phase D2.6: strategy_id 전파 (order_audit.csv 신규 컬럼)
             result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty,
