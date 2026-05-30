@@ -7,6 +7,7 @@ from backend.core.gateway.kiwoom_native_orderbook import parse_orderbook, _abs_i
 from backend.core.strategy.ob_scalp import (
     OBScalpStrategy, OBScalpParams,
     krx_tick_size, order_flow_imbalance, spread_ticks, microprice, best_bid_ask, top_depth,
+    net_return_pct, breakeven_ticks, ROUND_TRIP_COST_PCT,
 )
 from backend.models.market import OHLCV, OrderBook, MarketType
 from backend.models.strategy import AnalysisContext
@@ -93,16 +94,55 @@ class TestStrategy:
         thin = _book(bids=[(10000, 10), (9990, 5)], asks=[(10010, 8), (10020, 5)])
         assert OBScalpStrategy(OBScalpParams(min_depth=100))._analyze_v2(_ctx(thin)) is None
 
-    def test_exit_plan_tick_based(self):
+    def test_exit_plan_cost_aware_tp(self):
         from backend.models.position import Position
         pos = Position(symbol="005930", name="삼성전자", quantity=10, avg_price=10000,
                        current_price=10000, realized_pnl=0, unrealized_pnl=0, pnl_pct=0,
                        market_type=MarketType.STOCK, entry_time=datetime.now(timezone.utc),
                        strategy_id="ob_scalp_v1", total_value=100000)
-        plan = OBScalpStrategy(OBScalpParams(tp_ticks=3, sl_ticks=2)).exit_plan(pos, _ctx(STRONG))
-        # tick(10000)=10 → TP=10000+3*10=10030, SL=-2*10/10000=-0.002
-        assert float(plan.take_profits[0].price) == 10030
-        assert abs(float(plan.stop_loss.fixed_pct) - (-0.002)) < 1e-9
+        plan = OBScalpStrategy(OBScalpParams(profit_ticks=2, sl_ticks=3)).exit_plan(pos, _ctx(STRONG))
+        # tick=10, breakeven=ceil(2.1)=3틱, TP=3+2=5틱 → 10050. SL=-3*10/10000=-0.003
+        assert float(plan.take_profits[0].price) == 10050
+        assert abs(float(plan.stop_loss.fixed_pct) - (-0.003)) < 1e-9
+        # ★ TP 도달 시 수수료+제세금 차감 후 순수익 > 0 보장
+        assert net_return_pct(10000, 10050) > 0
+
+
+class TestCostModel:
+    """수수료+제세금 내재화 — 스캘핑 생존의 핵심."""
+
+    def test_round_trip_cost(self):
+        # 수수료 0.015%×2 + 거래세 0.18% ≈ 0.21%
+        assert abs(ROUND_TRIP_COST_PCT - 0.0021) < 1e-9
+
+    def test_breakeven_ticks(self):
+        assert abs(breakeven_ticks(10000, 10) - 2.1) < 0.01   # 0.21%×10000/10
+        assert breakeven_ticks(1500, 1) > 3.0                  # 저가주 = 비용 과중(3.15틱)
+
+    def test_net_return_includes_costs(self):
+        # +1틱(10000→10010): gross +0.1%, 비용 ~0.21% → 순 음수 (스캘핑 함정)
+        assert net_return_pct(10000, 10010) < 0
+        # +3틱(10030): gross +0.3% - 0.21% → 겨우 양수
+        assert net_return_pct(10000, 10030) > 0
+        # +5틱(10050): 분명한 순이익
+        assert net_return_pct(10000, 10050) > net_return_pct(10000, 10030)
+
+    def test_cost_gate_rejects_costly(self):
+        # 저가주(틱 대비 비용 과중): breakeven 3.15틱 > max_breakeven 3 → 진입 차단
+        cheap = OrderBook(symbol="X", bids=[(1500, 800), (1499, 500), (1498, 400)],
+                          asks=[(1501, 60), (1502, 40), (1503, 30)],
+                          timestamp=datetime.now(timezone.utc), market_type=MarketType.STOCK)
+        ctx = _ctx(cheap)
+        # 강매수우위·좁은스프레드여도 비용 과중이면 차단
+        assert OBScalpStrategy(OBScalpParams(max_breakeven_ticks=3.0))._analyze_v2(ctx) is None
+        # 허용 임계 높이면 통과(신호 발생)
+        assert OBScalpStrategy(OBScalpParams(max_breakeven_ticks=5.0))._analyze_v2(ctx) is not None
+
+    def test_signal_carries_net_tp(self):
+        sig = OBScalpStrategy()._analyze_v2(_ctx(STRONG))
+        assert sig is not None
+        assert sig.metadata["net_tp_pct"] > 0  # TP 목표는 비용 차감 후 순(+)
+        assert sig.metadata["breakeven_ticks"] > 0
 
 
 class TestKa10004Parser:
