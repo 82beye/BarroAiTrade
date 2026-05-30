@@ -27,6 +27,7 @@ from typing import Optional
 import httpx
 
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
+from backend.core.gateway.krx_symbol import is_valid_krx_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +102,8 @@ class KiwoomNativeOrderExecutor:
         """미체결 주문 취소 (kt10003)."""
         if not original_order_no or not original_order_no.strip():
             raise ValueError("original_order_no required")
-        if not symbol or not symbol.isdigit() or len(symbol) != 6:
-            raise ValueError(f"invalid symbol: {symbol!r} (expected 6-digit)")
+        if not is_valid_krx_symbol(symbol):
+            raise ValueError(f"invalid symbol: {symbol!r} (expected 6-char [0-9A-Z])")
         if cancel_qty < 0:
             raise ValueError(f"cancel_qty must be ≥ 0 (0=all), got {cancel_qty}")
 
@@ -170,8 +171,8 @@ class KiwoomNativeOrderExecutor:
         qty: int,
         price: Optional[Decimal],
     ) -> OrderResult:
-        if not symbol or not symbol.isdigit() or len(symbol) != 6:
-            raise ValueError(f"invalid symbol: {symbol!r} (expected 6-digit)")
+        if not is_valid_krx_symbol(symbol):
+            raise ValueError(f"invalid symbol: {symbol!r} (expected 6-char [0-9A-Z])")
         if qty <= 0:
             raise ValueError(f"qty must be > 0, got {qty}")
         if price is not None and price <= 0:
