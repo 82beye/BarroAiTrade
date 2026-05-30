@@ -60,6 +60,7 @@
 - **Phase 1 (저위험, dry-run/test 후 1~2주)**: 4, 5, 9(테스트만).
 - **Phase 2 (실거래 hot-path, shadow/HITL 후 2~4주)**: 6, 7, 8.
 - **Phase 3 (정책·OOS, 사용자 승인 후)**: 9(정합), 10. **자본증액은 OOS 관문 통과 후.**
+  - ✅ **#10 OOS 검증 관문 구현·실행** (`scripts/_oos_validation.py`, 결과 `2026-05-30-oos-validation.md`): 랜덤 유니버스+3분할+실비용+holdout+drop1, 3 seed. **f존·gold존 일봉 3/3 PASS**(+2~3%, holdout 양수, 부호안정) → **일봉 흑자가 선택편향 아님 입증**. gold는 일봉 견고/intraday만 문제(#6~8이 처방). sf존 표본<30 FAIL. 정책(gold 비중·5m·자본증액)은 사용자 결정(잔존 한계: 단일 데이터소스·슬리피지 미반영 → 소액 단계 진입).
 
 ---
 
