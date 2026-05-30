@@ -382,6 +382,57 @@ def _save_refined_signals(signals: list, regime) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# ── 고도화 #6 (2026-05-30): 진입 시 전략 analyze() 재검증 게이트 ──────────
+#   문제: 데몬은 일봉 sim 으로 전략을 선정하나 진입 시점에 그 전략의 진입조건을
+#   재검증하지 않아, gold(바닥매수)가 장중 고점에 진입(5/29 한온시스템 -6%).
+#   해결: 진입 직전 선정 전략을 '분봉' 컨텍스트로 analyze() 재호출 → None 이면 skip.
+#   분봉 적정 min_atr=0.01 (일봉 0.035 와 분리 — 0.035 는 분봉서 신호 전멸).
+#   안전: 데이터 부족/예외 시 보수적 통과(over-block 방지). enforce 는 --entry-revalidate.
+
+_REVAL_MIN_BARS = 120          # 재검증 최소 분봉 수 (f_zone for_intraday min_candles)
+_REVAL_WINDOW = 200            # 사용할 최근 분봉 수
+_REVAL_MIN_ATR = 0.01          # 분봉 적정 변동성 임계
+
+
+def _build_reval_strategy(strategy_id: str):
+    """진입 재검증용 분봉 전략 인스턴스 (분봉 min_atr 0.01)."""
+    from backend.core.strategy.f_zone import FZoneStrategy, FZoneParams
+    from backend.core.strategy.sf_zone import SFZoneStrategy
+    from backend.core.strategy.gold_zone import GoldZoneStrategy, GoldZoneParams
+    if strategy_id in ("f_zone", "sf_zone"):
+        p = FZoneParams.for_intraday()
+        p.min_atr_pct = _REVAL_MIN_ATR
+        return SFZoneStrategy(p) if strategy_id == "sf_zone" else FZoneStrategy(p)
+    if strategy_id == "gold_zone":
+        return GoldZoneStrategy(GoldZoneParams(min_atr_pct=_REVAL_MIN_ATR))
+    return None
+
+
+def _revalidate_entry(strategy_id: str, symbol: str, name: str, minute_bars: list):
+    """선정 전략을 분봉으로 analyze 재호출. 반환 (ok: bool, reason: str).
+
+    ok=False(=진입조건 미충족)만 명확한 차단 신호. 데이터 부족/예외는 ok=True(보수적 통과).
+    """
+    strat = _build_reval_strategy(strategy_id)
+    if strat is None:
+        return True, "미지원전략-통과"
+    # forming(미완성) 마지막 봉 제외 → 최근 _REVAL_WINDOW 봉
+    bars = minute_bars[:-1] if len(minute_bars) > 1 else minute_bars
+    window = bars[-_REVAL_WINDOW:]
+    if len(window) < _REVAL_MIN_BARS:
+        return True, f"분봉부족({len(window)})-통과"
+    from backend.models.strategy import AnalysisContext
+    from backend.models.market import MarketType
+    try:
+        ctx = AnalysisContext(symbol=symbol, name=name, candles=window, market_type=MarketType.STOCK)
+        sig = strat.analyze(ctx)
+    except Exception as exc:  # noqa: BLE001
+        return True, f"analyze예외-통과({type(exc).__name__})"
+    if sig is None:
+        return False, "진입조건 미충족"
+    return True, "통과"
+
+
 async def _scan_and_buy(
     args, oauth, session_bought: set[str],
     recent_buys: dict[str, datetime] | None = None,
@@ -572,6 +623,22 @@ async def _scan_and_buy(
                             f"{day_high:,.0f} vs cur {cur:,.0f} (거리 {proximity_pct:.2f}% "
                             f"< {MIN_HIGH_PROXIMITY_PCT}%) — 고점 인접 + 모멘텀 종료"
                         )
+                        continue
+                # ⑥ 진입 재검증 게이트 — 일봉 sim 선정 전략을 분봉으로 analyze 재호출.
+                #   진입 시점에 진입조건이 깨졌으면(gold 고점 등) None → skip. 항상 shadow
+                #   로그, --entry-revalidate 시에만 enforce(continue). 보수적 통과(데이터부족/예외).
+                reval_ok, reval_reason = _revalidate_entry(
+                    best_strategy, c.symbol, c.name, minute_bars
+                )
+                if not reval_ok:
+                    ts_v = _now_kst().strftime("%H:%M:%S")
+                    enforce = getattr(args, "entry_revalidate", False)
+                    print(
+                        f"  [{ts_v}][{'SKIP-REVAL' if enforce else 'SHADOW-REVAL'}] "
+                        f"{c.symbol} {c.name:<14} 전략={best_strategy} "
+                        f"진입조건 재검증 실패 ({reval_reason})"
+                    )
+                    if enforce:
                         continue
             except Exception:
                 pass  # 분봉 fetch 실패 시 통과 (보수적 fallback)
@@ -786,6 +853,11 @@ def main():
     ap.add_argument("--telegram", action="store_true", help="텔레그램 알림")
     ap.add_argument("--audit-log", default=str(_DATA_DIR / "order_audit.csv"))
     ap.add_argument("--pos-log", default=str(_DATA_DIR / "active_positions.json"))
+    ap.add_argument(
+        "--entry-revalidate", action="store_true",
+        help="고도화 #6: 진입 시 선정 전략을 분봉으로 재검증해 조건 미충족 시 매수 skip "
+             "(enforce). 미지정 시 shadow 로그만(동작 불변) — 충분한 shadow 검증 후 활성화 권장.",
+    )
     args = ap.parse_args()
 
     loop = asyncio.new_event_loop()
