@@ -23,7 +23,7 @@ from decimal import Decimal
 from typing import Any, Optional
 
 from backend.models.position import Position
-from backend.models.signal import EntrySignal
+from backend.models.signal import EntrySignal, ExitSignal
 from backend.models.strategy import (
     Account,
     AnalysisContext,
@@ -74,6 +74,24 @@ class Strategy(ABC):
             take_profits=[],
             stop_loss=StopLoss(fixed_pct=Decimal("-0.02")),
         )
+
+    def exit_on_signal(
+        self,
+        position: Position,
+        ctx: AnalysisContext,
+        current_price: Decimal,
+    ) -> Optional[ExitSignal]:
+        """지표 기반 반대 시그널 청산 — 기본 None (가격 기반 ExitPlan 만 사용).
+
+        추세추종 전략(supertrend 등)이 자신의 지표로 **추세전환(매도/숏) 시그널**을
+        감지했을 때, 가격 SL 도달 전이라도 보유 포지션을 즉시 청산하도록 override.
+        SupertrendExitWatcher 가 position.strategy_id 로 라우팅하므로, 해당 전략이
+        진입한 포지션에 대해서만 호출된다 (다른 전략 포지션엔 영향 없음).
+
+        Returns:
+            청산해야 하면 ExitSignal(exit_type="reverse_signal"), 아니면 None.
+        """
+        return None
 
     def position_size(self, signal: EntrySignal, account: Account) -> Decimal:
         """포지션 사이징 — BAR-OPS-09 Phase 9 (2026-05-23) 균등 진입.

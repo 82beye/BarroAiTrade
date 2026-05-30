@@ -28,7 +28,7 @@ class EntrySignal(BaseModel):
 class ExitSignal(BaseModel):
     symbol: str
     name: str
-    exit_type: Literal["take_profit_1", "take_profit_2", "stop_loss", "forced", "manual"]
+    exit_type: Literal["take_profit_1", "take_profit_2", "stop_loss", "forced", "manual", "reverse_signal"]
     price: float
     pnl_pct: float
     reason: str

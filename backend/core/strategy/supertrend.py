@@ -27,7 +27,7 @@ from typing import Any, List, Optional, Sequence
 from backend.core.strategy.base import Strategy
 from backend.models.market import MarketType
 from backend.models.position import Position
-from backend.models.signal import EntrySignal
+from backend.models.signal import EntrySignal, ExitSignal
 from backend.models.strategy import AnalysisContext, ExitPlan, StopLoss
 
 logger = logging.getLogger(__name__)
@@ -258,6 +258,57 @@ class SupertrendStrategy(Strategy):
                 "multiplier": p.multiplier,
                 "atr_period": p.atr_period,
             },
+        )
+
+    def exit_on_signal(
+        self,
+        position: Position,
+        ctx: AnalysisContext,
+        current_price: Decimal,
+    ) -> Optional[ExitSignal]:
+        """슈퍼트렌드 하락 추세전환(매도/숏 시그널) 시 보유 롱 포지션 청산.
+
+        진입의 거울상 — 진입은 trend +1, 청산은 trend -1(sellSignal). 가격 SL
+        도달 전이라도 추세선(up밴드)을 종가가 하향 이탈해 추세가 꺾이면 즉시 정리.
+        데이터 부족 시 None (강제청산 안 함 — 가격 SL 이 안전망).
+        """
+        p = self.params
+        candles = ctx.candles
+        if len(candles) < p.min_candles:
+            return None
+        # 롱 포지션만 대상 (현물 long-only). side 비-long 이면 평가 안 함.
+        if (getattr(position, "side", "long") or "long") != "long":
+            return None
+
+        res = compute_supertrend(
+            candles, period=p.atr_period, multiplier=p.multiplier, source=p.source,
+        )
+        if not res.trend or res.trend[-1] != -1:
+            return None  # 여전히 상승추세 — 보유 유지
+
+        entry = float(position.avg_price)
+        cur = float(current_price)
+        pnl_pct = (cur - entry) / entry * 100 if entry > 0 else 0.0
+        st_line = res.supertrend[-1]
+
+        # 전환 신선도 (몇 봉 전 sell 전환인지) — 진단용
+        if True in res.sell_signals:
+            flip_bar = len(res.sell_signals) - 1 - res.sell_signals[::-1].index(True)
+            bars_since = (len(candles) - 1) - flip_bar
+            fresh = f" (전환 {bars_since}봉 전)"
+        else:
+            fresh = ""
+
+        return ExitSignal(
+            symbol=position.symbol,
+            name=position.name or position.symbol,
+            exit_type="reverse_signal",
+            price=cur,
+            pnl_pct=pnl_pct,
+            reason=(f"[슈퍼트렌드] 하락 추세전환 매도/숏 시그널{fresh} — "
+                    f"ST {st_line:.0f} 하향 이탈 → 포지션 정리"),
+            market_type=position.market_type,
+            timestamp=datetime.now(),
         )
 
     def exit_plan(self, position: Position, ctx: AnalysisContext) -> ExitPlan:
