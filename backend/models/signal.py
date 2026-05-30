@@ -15,7 +15,7 @@ class EntrySignal(BaseModel):
     symbol: str
     name: str
     price: float
-    signal_type: Literal["blue_line", "watermelon", "crypto_breakout", "f_zone", "sf_zone", "swing_38", "gold_zone", "blue_dotted_line"]
+    signal_type: Literal["blue_line", "watermelon", "crypto_breakout", "f_zone", "sf_zone", "swing_38", "gold_zone", "blue_dotted_line", "ob_scalp"]
     score: float
     reason: str
     market_type: MarketType
