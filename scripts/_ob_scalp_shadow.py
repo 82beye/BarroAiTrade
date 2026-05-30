@@ -84,6 +84,7 @@ class Observation:
     # 추적 상태
     max_bid: float = 0.0      # 관측 중 최고 매수호가(상방 best-case)
     min_bid: float = 0.0      # 관측 중 최저 매수호가
+    last_bid: float = 0.0     # 마지막 관측 매수호가(종료 flush 시 미실현 평가용)
     outcome: str = ""         # tp_hit / sl_hit / time_exit
     exit_bid: float = 0.0     # first-touch 청산가(매도호가 기준=best_bid)
     resolved: bool = False
@@ -96,6 +97,7 @@ class Observation:
         """
         if self.resolved:
             return True
+        self.last_bid = bb
         self.max_bid = max(self.max_bid, bb)
         self.min_bid = bb if self.min_bid == 0.0 else min(self.min_bid, bb)
         if bb >= self.tp_target:
@@ -200,7 +202,11 @@ async def run_shadow(args: argparse.Namespace) -> int:
         return bb, ba
 
     async def _fetch_book(symbol: str):
-        """호가 조회 + 429 경량 백오프 재시도. 실패 시 None (관측 계속)."""
+        """호가 조회 + 경량 백오프 재시도. 실패 시 None (관측 계속).
+
+        재시도 대상: 429(rate-limit) + 네트워크 전송오류(httpx.TransportError:
+        ConnectError/ReadTimeout/ConnectTimeout/RemoteProtocolError 등).
+        그 외 4xx/5xx·예외는 즉시 None(과도 재시도 방지)."""
         for attempt in range(args.max_retries + 1):
             try:
                 return await ob_fetcher.fetch_orderbook(symbol)
@@ -211,157 +217,181 @@ async def run_shadow(args: argparse.Namespace) -> int:
                 logger.write("error", {"where": "fetch_orderbook", "symbol": symbol,
                                         "status": e.response.status_code, "err": repr(e)})
                 return None
+            except httpx.TransportError as e:
+                if attempt < args.max_retries:
+                    await asyncio.sleep(args.req_delay * (attempt + 2))  # 네트워크 장애 백오프
+                    continue
+                logger.write("error", {"where": "fetch_orderbook", "symbol": symbol,
+                                        "kind": "transport", "err": repr(e)})
+                return None
             except Exception as e:  # noqa: BLE001
                 logger.write("error", {"where": "fetch_orderbook", "symbol": symbol, "err": repr(e)})
                 return None
 
-    cycle = 0
-    while not stop["flag"]:
-        if not args.ignore_hours and not _in_obs_hours():
-            now_t = _now_kst().time()
-            if now_t > _OBS_CLOSE:
-                print("[shadow] 관측 시간 종료(15:15 KST).")
-                break
-            await asyncio.sleep(min(30, args.interval))
-            continue
-
-        cycle += 1
-        now = _now_kst()
-
-        # universe 갱신(leader refresh interval) — pending 종목은 항상 유지
-        if (last_leader_refresh is None
-                or (now - last_leader_refresh).total_seconds() >= args.leader_refresh):
-            try:
-                leaders_cache = await picker.pick(top_n=args.top)
-                last_leader_refresh = now
-            except Exception as e:  # noqa: BLE001
-                logger.write("error", {"where": "picker.pick", "err": repr(e)})
-        # ob_scalp 틱 모델은 주식(equity) 기준 — ETF/ETN(5원 단일틱)은 기본 제외(측정 순도).
-        if args.equity_only:
-            kept = {c.symbol: c.name for c in leaders_cache if c.symbol.isdigit()}
-            dropped = [c.symbol for c in leaders_cache if not c.symbol.isdigit()]
-            if dropped and last_leader_refresh == now:
-                logger.write("universe_filter", {"equity_only": True, "dropped": dropped,
-                                                 "kept": list(kept.keys())})
-            watch = kept
-        else:
-            watch = {c.symbol: c.name for c in leaders_cache}
-        for obs in pending.values():
-            watch.setdefault(obs.symbol, obs.name)
-
-        for idx, (symbol, name) in enumerate(list(watch.items())):
-            if idx > 0 and args.req_delay > 0:
-                await asyncio.sleep(args.req_delay)  # rate-limit(429) 회피 throttle
-            book = await _fetch_book(symbol)
-            if book is None:
-                continue
-            bb, ba = _book_quotes(book)
-            if bb is None or ba is None:
+    try:
+        cycle = 0
+        while not stop["flag"]:
+            if not args.ignore_hours and not _in_obs_hours():
+                now_t = _now_kst().time()
+                if now_t > _OBS_CLOSE:
+                    print("[shadow] 관측 시간 종료(15:15 KST).")
+                    break
+                await asyncio.sleep(min(30, args.interval))
                 continue
 
-            # ── 1) 진행 중 관측 갱신 (first-touch 페이퍼 체결) ──
-            for obs in pending.values():
-                if obs.symbol == symbol:
-                    obs.update(bb, now)
+            cycle += 1
+            now = _now_kst()
 
-            # ── 2) 신규 신호 판정 (cooldown 외) ──
-            if now < cooldown_until.get(symbol, now):
-                continue
-            mid = (bb + ba) / 2
-            candle = OHLCV(symbol=symbol, timestamp=datetime.now(timezone.utc),
-                           open=mid, high=ba, low=bb, close=mid, volume=0,
-                           market_type=MarketType.STOCK)
-            ctx = AnalysisContext(symbol=symbol, name=name or symbol, candles=[candle],
-                                  market_type=MarketType.STOCK, orderbook=book)
-            sig = strat._analyze_v2(ctx)
-            if sig is None:
-                continue
-
-            m = sig.metadata
-            tick = int(m.get("tick") or krx_tick_size(ba))
-            sl_price = ba * (1.0 - (params.sl_ticks * tick) / ba)
-            obs_id = f"{symbol}-{now.strftime('%H%M%S')}-{cycle}"
-            obs = Observation(
-                obs_id=obs_id, symbol=symbol, name=name or symbol, signal_ts=now,
-                entry_ask=float(ba), tick=tick, tp_target=float(m["tp_target"]),
-                sl_price=float(sl_price), breakeven_ticks=float(m["breakeven_ticks"]),
-                ofi=float(m["ofi"]), spread_ticks=float(m["spread_ticks"]),
-                net_tp_pct=float(m["net_tp_pct"]),
-                resolve_at=now + timedelta(seconds=args.horizon),
-                min_bid=bb, max_bid=bb,
-            )
-            pending[obs_id] = obs
-            cooldown_until[symbol] = now + timedelta(seconds=args.cooldown)
-            stats.signals += 1
-            logger.write("signal", {
-                "obs_id": obs_id, "symbol": symbol, "name": name,
-                "entry_ask": ba, "best_bid": bb, "tick": tick,
-                "ofi": obs.ofi, "spread_ticks": obs.spread_ticks,
-                "breakeven_ticks": obs.breakeven_ticks, "tp_target": obs.tp_target,
-                "sl_price": round(sl_price, 2), "net_tp_pct": obs.net_tp_pct,
-                "score": sig.score, "reason": sig.reason,
-            })
-            print(f"[signal] {symbol} {name} · OFI {obs.ofi:+.2f} · 진입 {ba:.0f} → TP {obs.tp_target:.0f} "
-                  f"(순+{obs.net_tp_pct:.2f}%) · SL {sl_price:.0f}")
-
-        # ── 3) 해결된 관측 → outcome 로깅 + 집계 ──
-        done = [o for o in pending.values() if o.resolved]
-        for obs in done:
-            net = net_return_pct(obs.entry_ask, obs.exit_bid)          # 실현 순수익률(first-touch)
-            net_best = net_return_pct(obs.entry_ask, obs.max_bid)      # 상방 best-case(순)
-            stats.resolved += 1
-            stats.net_pcts.append(net)
-            if obs.outcome == "tp_hit":
-                stats.tp_hits += 1
-            elif obs.outcome == "sl_hit":
-                stats.sl_hits += 1
+            # universe 갱신(leader refresh interval) — pending 종목은 항상 유지
+            if (last_leader_refresh is None
+                    or (now - last_leader_refresh).total_seconds() >= args.leader_refresh):
+                try:
+                    leaders_cache = await picker.pick(top_n=args.top)
+                    last_leader_refresh = now
+                except Exception as e:  # noqa: BLE001
+                    logger.write("error", {"where": "picker.pick", "err": repr(e)})
+            # ob_scalp 틱 모델은 주식(equity) 기준 — ETF/ETN(5원 단일틱)은 기본 제외(측정 순도).
+            if args.equity_only:
+                kept = {c.symbol: c.name for c in leaders_cache if c.symbol.isdigit()}
+                dropped = [c.symbol for c in leaders_cache if not c.symbol.isdigit()]
+                if dropped and last_leader_refresh == now:
+                    logger.write("universe_filter", {"equity_only": True, "dropped": dropped,
+                                                     "kept": list(kept.keys())})
+                watch = kept
             else:
-                stats.time_exits += 1
-            held_s = (min(_now_kst(), obs.resolve_at) - obs.signal_ts).total_seconds()
-            logger.write("outcome", {
-                "obs_id": obs.obs_id, "symbol": obs.symbol, "outcome": obs.outcome,
-                "entry_ask": obs.entry_ask, "exit_bid": obs.exit_bid,
-                "net_pct": round(net, 4), "net_best_pct": round(net_best, 4),
+                watch = {c.symbol: c.name for c in leaders_cache}
+            for obs in pending.values():
+                watch.setdefault(obs.symbol, obs.name)
+
+            for idx, (symbol, name) in enumerate(list(watch.items())):
+                if idx > 0 and args.req_delay > 0:
+                    await asyncio.sleep(args.req_delay)  # rate-limit(429) 회피 throttle
+                book = await _fetch_book(symbol)
+                if book is None:
+                    continue
+                bb, ba = _book_quotes(book)
+                if bb is None or ba is None:
+                    continue
+
+                # ── 1) 진행 중 관측 갱신 (first-touch 페이퍼 체결) ──
+                for obs in pending.values():
+                    if obs.symbol == symbol:
+                        obs.update(bb, now)
+
+                # ── 2) 신규 신호 판정 (cooldown 외) ──
+                if now < cooldown_until.get(symbol, now):
+                    continue
+                mid = (bb + ba) / 2
+                candle = OHLCV(symbol=symbol, timestamp=datetime.now(timezone.utc),
+                               open=mid, high=ba, low=bb, close=mid, volume=0,
+                               market_type=MarketType.STOCK)
+                ctx = AnalysisContext(symbol=symbol, name=name or symbol, candles=[candle],
+                                      market_type=MarketType.STOCK, orderbook=book)
+                sig = strat._analyze_v2(ctx)
+                if sig is None:
+                    continue
+
+                m = sig.metadata
+                tick = int(m.get("tick") or krx_tick_size(ba))
+                sl_price = ba * (1.0 - (params.sl_ticks * tick) / ba)
+                obs_id = f"{symbol}-{now.strftime('%H%M%S')}-{cycle}"
+                obs = Observation(
+                    obs_id=obs_id, symbol=symbol, name=name or symbol, signal_ts=now,
+                    entry_ask=float(ba), tick=tick, tp_target=float(m["tp_target"]),
+                    sl_price=float(sl_price), breakeven_ticks=float(m["breakeven_ticks"]),
+                    ofi=float(m["ofi"]), spread_ticks=float(m["spread_ticks"]),
+                    net_tp_pct=float(m["net_tp_pct"]),
+                    resolve_at=now + timedelta(seconds=args.horizon),
+                    min_bid=bb, max_bid=bb, last_bid=bb,
+                )
+                pending[obs_id] = obs
+                cooldown_until[symbol] = now + timedelta(seconds=args.cooldown)
+                stats.signals += 1
+                logger.write("signal", {
+                    "obs_id": obs_id, "symbol": symbol, "name": name,
+                    "entry_ask": ba, "best_bid": bb, "tick": tick,
+                    "ofi": obs.ofi, "spread_ticks": obs.spread_ticks,
+                    "breakeven_ticks": obs.breakeven_ticks, "tp_target": obs.tp_target,
+                    "sl_price": round(sl_price, 2), "net_tp_pct": obs.net_tp_pct,
+                    "score": sig.score, "reason": sig.reason,
+                })
+                print(f"[signal] {symbol} {name} · OFI {obs.ofi:+.2f} · 진입 {ba:.0f} → TP {obs.tp_target:.0f} "
+                      f"(순+{obs.net_tp_pct:.2f}%) · SL {sl_price:.0f}")
+
+            # ── 3) 해결된 관측 → outcome 로깅 + 집계 ──
+            done = [o for o in pending.values() if o.resolved]
+            for obs in done:
+                net = net_return_pct(obs.entry_ask, obs.exit_bid)          # 실현 순수익률(first-touch)
+                net_best = net_return_pct(obs.entry_ask, obs.max_bid)      # 상방 best-case(순)
+                stats.resolved += 1
+                stats.net_pcts.append(net)
+                if obs.outcome == "tp_hit":
+                    stats.tp_hits += 1
+                elif obs.outcome == "sl_hit":
+                    stats.sl_hits += 1
+                else:
+                    stats.time_exits += 1
+                held_s = (min(_now_kst(), obs.resolve_at) - obs.signal_ts).total_seconds()
+                logger.write("outcome", {
+                    "obs_id": obs.obs_id, "symbol": obs.symbol, "outcome": obs.outcome,
+                    "entry_ask": obs.entry_ask, "exit_bid": obs.exit_bid,
+                    "net_pct": round(net, 4), "net_best_pct": round(net_best, 4),
+                    "max_bid": obs.max_bid, "min_bid": obs.min_bid,
+                    "held_seconds": round(held_s, 1), "tp_target": obs.tp_target, "sl_price": obs.sl_price,
+                })
+                mark = "✅" if net > 0 else "❌"
+                print(f"[outcome] {mark} {obs.symbol} {obs.outcome} · 순 {net:+.3f}% "
+                      f"(best {net_best:+.3f}%) · {held_s:.0f}s")
+                del pending[obs.obs_id]
+
+            stats.polls += 1
+            if args.once:
+                break
+            # 폴링 간 대기 (인터럽트 반응성 위해 잘게)
+            slept = 0.0
+            while slept < args.interval and not stop["flag"]:
+                await asyncio.sleep(min(0.5, args.interval - slept))
+                slept += 0.5
+            if args.max_cycles and cycle >= args.max_cycles:
+                print(f"[shadow] max-cycles {args.max_cycles} 도달 — 종료.")
+                break
+    except Exception as e:  # noqa: BLE001
+        logger.write("error", {"where": "main_loop", "err": repr(e)})
+        print(f"[shadow] 예외 종료: {e!r}")
+    finally:
+        # 종료 시 미해결 pending → 'unresolved' 로깅(투명성·silent drop 방지).
+        # horizon 미경과분이므로 기대값/승률 집계엔 제외(절단편향 방지) — net_pcts 에 넣지 않음.
+        for obs in pending.values():
+            last = obs.last_bid if obs.last_bid > 0 else obs.entry_ask
+            logger.write("unresolved", {
+                "obs_id": obs.obs_id, "symbol": obs.symbol,
+                "entry_ask": obs.entry_ask, "last_bid": last,
+                "unrealized_net_pct": round(net_return_pct(obs.entry_ask, last), 4),
                 "max_bid": obs.max_bid, "min_bid": obs.min_bid,
-                "held_seconds": round(held_s, 1), "tp_target": obs.tp_target, "sl_price": obs.sl_price,
+                "note": "horizon 미경과 — 기대값 집계 제외",
             })
-            mark = "✅" if net > 0 else "❌"
-            print(f"[outcome] {mark} {obs.symbol} {obs.outcome} · 순 {net:+.3f}% "
-                  f"(best {net_best:+.3f}%) · {held_s:.0f}s")
-            del pending[obs.obs_id]
-
-        stats.polls += 1
-        if args.once:
-            break
-        # 폴링 간 대기 (인터럽트 반응성 위해 잘게)
-        slept = 0.0
-        while slept < args.interval and not stop["flag"]:
-            await asyncio.sleep(min(0.5, args.interval - slept))
-            slept += 0.5
-        if args.max_cycles and cycle >= args.max_cycles:
-            print(f"[shadow] max-cycles {args.max_cycles} 도달 — 종료.")
-            break
-
-    await http.aclose()
-
-    # ── 요약 ──
-    summary = {
-        "polls": stats.polls, "signals": stats.signals, "resolved": stats.resolved,
-        "pending_unresolved": len(pending),
-        "tp_hits": stats.tp_hits, "sl_hits": stats.sl_hits, "time_exits": stats.time_exits,
-        "win_rate_pct": round(stats.win_rate(), 2),
-        "expectancy_net_pct": round(stats.expectancy(), 4),
-        "round_trip_cost_pct": 0.21,
-    }
-    logger.write("session_summary", summary)
-    print("\n" + "═" * 60)
-    print(f"[shadow] 요약 — 신호 {stats.signals} · 해결 {stats.resolved} "
-          f"(TP {stats.tp_hits}/SL {stats.sl_hits}/시간 {stats.time_exits})")
-    print(f"[shadow] 적중률(순+) {stats.win_rate():.1f}% · 거래당 기대값(순) {stats.expectancy():+.4f}%")
-    print(f"[shadow] 판정 기준: 기대값(순) > 0 이어야 페이퍼/소액 실거래 검토 가능 "
-          f"(왕복비용 ~0.21% 이미 차감됨)")
-    print(f"[shadow] 로그: {log_path}")
-    print("═" * 60)
+        summary = {
+            "polls": stats.polls, "signals": stats.signals, "resolved": stats.resolved,
+            "pending_unresolved": len(pending),
+            "tp_hits": stats.tp_hits, "sl_hits": stats.sl_hits, "time_exits": stats.time_exits,
+            "win_rate_pct": round(stats.win_rate(), 2),
+            "expectancy_net_pct": round(stats.expectancy(), 4),
+            "round_trip_cost_pct": 0.21,
+        }
+        logger.write("session_summary", summary)
+        print("\n" + "═" * 60)
+        print(f"[shadow] 요약 — 신호 {stats.signals} · 해결 {stats.resolved} "
+              f"(TP {stats.tp_hits}/SL {stats.sl_hits}/시간 {stats.time_exits}) · 미해결 {len(pending)}")
+        if stats.resolved > 0:
+            print(f"[shadow] 적중률(순+) {stats.win_rate():.1f}% · 거래당 기대값(순) {stats.expectancy():+.4f}%")
+            print(f"[shadow] 판정 기준: 기대값(순) > 0 이어야 페이퍼/소액 실거래 검토 가능 "
+                  f"(왕복비용 ~0.21% 이미 차감됨)")
+        else:
+            print(f"[shadow] 해결 0건 — 기대값 미산출(관측 horizon 미경과). "
+                  f"무한 관측으로 신호 후 {args.horizon:.0f}s 경과분이 쌓여야 판정 가능.")
+        print(f"[shadow] 로그: {log_path}")
+        print("═" * 60)
+        await http.aclose()
     return 0
 
 
@@ -369,7 +399,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="ob_scalp 호가 스캘핑 shadow 신호 로깅 (주문 없음)")
     ap.add_argument("--interval", type=float, default=3.0, help="폴링 간격(초, 기본 3)")
     ap.add_argument("--req-delay", type=float, default=0.25, help="종목간 호가요청 간격(초, 429 회피)")
-    ap.add_argument("--max-retries", type=int, default=2, help="호가 429 재시도 횟수")
+    ap.add_argument("--max-retries", type=int, default=2, help="호가 429·네트워크 오류 재시도 횟수")
     ap.add_argument("--top", type=int, default=8, help="관측 universe 상위 N (기본 8)")
     ap.add_argument("--horizon", type=float, default=60.0, help="신호 후 시간청산 기준(초, 기본 60)")
     ap.add_argument("--cooldown", type=float, default=60.0, help="동일종목 재신호 쿨다운(초)")

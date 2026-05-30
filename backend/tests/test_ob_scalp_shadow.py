@@ -69,6 +69,23 @@ class TestFirstTouch:
         assert o.max_bid == 10040.0
         assert o.min_bid == 10005.0
 
+    def test_last_bid_tracks_latest(self):
+        # 종료 flush 시 미실현 평가는 '마지막 관측가' 기준 — 최신 bb 를 따라가야 함
+        o = _obs()
+        o.update(10030.0, T0 + timedelta(seconds=3))
+        o.update(10018.0, T0 + timedelta(seconds=6))
+        assert o.last_bid == 10018.0
+
+    def test_last_bid_default_zero_before_observation(self):
+        # 관측 전(같은 사이클 생성 직후 등) last_bid 기본 0 → flush 시 entry_ask 폴백 대상
+        o = Observation(
+            obs_id="x", symbol="005930", name="n", signal_ts=T0,
+            entry_ask=10010.0, tick=10, tp_target=10060.0, sl_price=9980.0,
+            breakeven_ticks=2.1, ofi=0.7, spread_ticks=1.0, net_tp_pct=0.3,
+            resolve_at=T0 + timedelta(seconds=60),
+        )
+        assert o.last_bid == 0.0
+
 
 class TestStats:
     def test_expectancy_and_winrate(self):
