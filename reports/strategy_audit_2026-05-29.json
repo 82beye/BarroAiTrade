@@ -1,0 +1,91 @@
+{
+  "date": "2026-05-29",
+  "per_strategy": {
+    "gold_zone": {
+      "realized": -225303.79700000002,
+      "matched_basis": 4393320.0,
+      "wins": 0,
+      "sells": 2,
+      "syms": 2
+    },
+    "f_zone": {
+      "realized": -35681.44350000001,
+      "matched_basis": 12157750.0,
+      "wins": 3,
+      "sells": 5,
+      "syms": 4
+    }
+  },
+  "per_symbol": {
+    "018260": {
+      "realized": -86716.575,
+      "buy_value": 2084500.0,
+      "sell_value": 2002000.0,
+      "matched_basis": 2084500.0,
+      "n_buys": 2,
+      "n_sells": 1,
+      "wins": 0,
+      "sells": 1,
+      "strategy": "gold_zone"
+    },
+    "018880": {
+      "realized": -138587.222,
+      "buy_value": 2308820.0,
+      "sell_value": 2174820.0,
+      "matched_basis": 2308820.0,
+      "n_buys": 2,
+      "n_sells": 1,
+      "wins": 0,
+      "sells": 1,
+      "strategy": "gold_zone"
+    },
+    "034220": {
+      "realized": -49803.5135,
+      "buy_value": 3103850.0,
+      "sell_value": 3060480.0,
+      "matched_basis": 3103850.0,
+      "n_buys": 2,
+      "n_sells": 1,
+      "wins": 0,
+      "sells": 1,
+      "strategy": "f_zone"
+    },
+    "035420": {
+      "realized": 8777.85,
+      "buy_value": 2949000.0,
+      "sell_value": 2964000.0,
+      "matched_basis": 2949000.0,
+      "n_buys": 2,
+      "n_sells": 1,
+      "wins": 1,
+      "sells": 1,
+      "strategy": "f_zone"
+    },
+    "064400": {
+      "realized": 134565.02,
+      "buy_value": 3028400.0,
+      "sell_value": 3169600.0,
+      "matched_basis": 3028400.0,
+      "n_buys": 2,
+      "n_sells": 2,
+      "wins": 2,
+      "sells": 2,
+      "strategy": "f_zone"
+    },
+    "066570": {
+      "realized": -129220.8,
+      "buy_value": 3076500.0,
+      "sell_value": 2953500.0,
+      "matched_basis": 3076500.0,
+      "n_buys": 2,
+      "n_sells": 1,
+      "wins": 0,
+      "sells": 1,
+      "strategy": "f_zone"
+    }
+  },
+  "total_realized": -260985.2405,
+  "alarms": [
+    "⚠️ gold_zone 자본가중 손익 -5.1% ≤ -3% → 사후분석 권고"
+  ]
+}

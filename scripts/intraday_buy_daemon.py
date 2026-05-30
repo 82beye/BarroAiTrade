@@ -246,7 +246,12 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
             if eff_drop_pct > tranche.trigger_drop_pct:
                 continue
             try:
-                r = await gate.place_buy(symbol=h.symbol, qty=tranche.qty)
+                # 고도화 #3 (2026-05-30): DCA buy 에 보유 포지션 전략 전파.
+                # 미전달 시 strategy_id 가 빈칸으로 기록돼 전략별 실현손익 귀속이
+                # 'unknown' 버킷에 격리됨(5/29 018880 DCA 행 빈칸). pos 는 232줄 로드.
+                r = await gate.place_buy(
+                    symbol=h.symbol, qty=tranche.qty, strategy_id=pos.strategy
+                )
                 tag = "DRY_RUN" if r.dry_run else "DCA"
                 ts = _now_kst().strftime("%H:%M:%S")
                 print(f"  [{ts}][{tag}] {h.symbol} {h.name} T{tranche.tranche} qty={tranche.qty}")
