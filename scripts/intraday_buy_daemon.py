@@ -235,6 +235,13 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
         pending = pos.pending_tranches()
         if not pending:
             continue
+        # ⑧ (2026-05-30): 되돌림(바닥) 전략 gold 는 하락 중 DCA(물타기) 비활성 — 약전략의
+        #   추세하락 평단 물타기가 손실을 키움(5/29 한온시스템 gold 고점매수→DCA→ -6%).
+        #   --dca-strategy-gate 시 활성. 기본 off(동작 불변).
+        if getattr(args, "dca_strategy_gate", False) and pos.strategy in _MEANREV_STRATEGIES:
+            ts_d = _now_kst().strftime("%H:%M:%S")
+            print(f"  [{ts_d}][DCA-SKIP] {h.symbol} {pos.strategy} 되돌림전략 — DCA(물타기) 비활성")
+            continue
         cur_price = float(h.cur_price)
         cur_rate = float(h.pnl_rate)
         # trough 기반 평가: 일중 lowest 가 trigger 도달했으면 발동
@@ -392,6 +399,8 @@ def _save_refined_signals(signals: list, regime) -> None:
 _REVAL_MIN_BARS = 120          # 재검증 최소 분봉 수 (f_zone for_intraday min_candles)
 _REVAL_WINDOW = 200            # 사용할 최근 분봉 수
 _REVAL_MIN_ATR = 0.01          # 분봉 적정 변동성 임계
+# ⑦/⑧ — 되돌림(바닥매수) 전략: 고점근접 무조건 차단 + DCA(물타기) 비활성 대상.
+_MEANREV_STRATEGIES = {"gold_zone"}
 
 
 def _build_reval_strategy(strategy_id: str):
@@ -616,6 +625,11 @@ async def _scan_and_buy(
                         last_bar.high >= day_high - 1e-6
                         or cur >= last_bar.high - 1e-6
                     )
+                    # ⑦ (2026-05-30): momentum 예외는 모멘텀형(f/sf)에만 적용. gold(되돌림/바닥
+                    #   전략)는 고점근접 시 momentum 이어도 무조건 차단 — 바닥전략의 고점진입 방지.
+                    #   #6 의 보조 방어선(분봉 fetch/analyze 실패 시에도 작동). --entry-revalidate 활성.
+                    if getattr(args, "entry_revalidate", False) and best_strategy in _MEANREV_STRATEGIES:
+                        momentum_active = False
                     if proximity_pct < MIN_HIGH_PROXIMITY_PCT and not momentum_active:
                         ts_p = _now_kst().strftime("%H:%M:%S")
                         print(
@@ -855,8 +869,13 @@ def main():
     ap.add_argument("--pos-log", default=str(_DATA_DIR / "active_positions.json"))
     ap.add_argument(
         "--entry-revalidate", action="store_true",
-        help="고도화 #6: 진입 시 선정 전략을 분봉으로 재검증해 조건 미충족 시 매수 skip "
-             "(enforce). 미지정 시 shadow 로그만(동작 불변) — 충분한 shadow 검증 후 활성화 권장.",
+        help="고도화 #6/#7: 진입 시 선정 전략을 분봉으로 재검증(조건 미충족 시 skip) + "
+             "gold(되돌림) 고점근접 무조건 차단. 미지정 시 #6 은 shadow 로그만(동작 불변).",
+    )
+    ap.add_argument(
+        "--dca-strategy-gate", action="store_true",
+        help="고도화 #8: gold(되돌림/바닥) 전략 포지션의 DCA(물타기) 비활성 — 약전략 "
+             "추세하락 평단 물타기 손실 확대 방지. 기본 off(동작 불변).",
     )
     args = ap.parse_args()
 

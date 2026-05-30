@@ -5,11 +5,14 @@
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from scripts.intraday_buy_daemon import (
     _build_reval_strategy,
     _revalidate_entry,
     _REVAL_MIN_ATR,
     _REVAL_MIN_BARS,
+    _MEANREV_STRATEGIES,
 )
 
 
@@ -52,3 +55,43 @@ class TestRevalidateSafeFallback:
         r = _revalidate_entry("gold_zone", "005930", "삼성", [])
         assert isinstance(r, tuple) and len(r) == 2
         assert isinstance(r[0], bool) and isinstance(r[1], str)
+
+
+class TestMeanRevClassification:
+    """⑦⑧ — 되돌림(바닥) 전략 분류. gold만 고점차단·DCA비활성 대상."""
+
+    def test_gold_is_meanrev(self):
+        assert "gold_zone" in _MEANREV_STRATEGIES
+
+    def test_momentum_strategies_not_meanrev(self):
+        assert "f_zone" not in _MEANREV_STRATEGIES
+        assert "sf_zone" not in _MEANREV_STRATEGIES
+
+
+class TestFlagGating:
+    """플래그 default off = 동작 불변. on + gold 일 때만 게이트 발동."""
+
+    @staticmethod
+    def _gate(flag_name: str, flag_val: bool, strategy: str) -> bool:
+        args = SimpleNamespace(**{flag_name: flag_val})
+        return getattr(args, flag_name, False) and strategy in _MEANREV_STRATEGIES
+
+    def test_entry_reval_off_no_gate(self):
+        # 플래그 off → gold 라도 ⑦ 미발동 (동작 불변)
+        assert self._gate("entry_revalidate", False, "gold_zone") is False
+
+    def test_entry_reval_on_gold_gates(self):
+        assert self._gate("entry_revalidate", True, "gold_zone") is True
+
+    def test_entry_reval_on_fzone_no_gate(self):
+        # 플래그 on 이어도 f_zone 은 ⑦ 미발동 (모멘텀형 momentum 예외 유지)
+        assert self._gate("entry_revalidate", True, "f_zone") is False
+
+    def test_dca_gate_off_no_skip(self):
+        assert self._gate("dca_strategy_gate", False, "gold_zone") is False
+
+    def test_dca_gate_on_gold_skips(self):
+        assert self._gate("dca_strategy_gate", True, "gold_zone") is True
+
+    def test_dca_gate_on_fzone_no_skip(self):
+        assert self._gate("dca_strategy_gate", True, "f_zone") is False
