@@ -32,6 +32,8 @@ _RESCAN_INTERVAL_SEC = 3         # 신호 스캔 주기
 _EXIT_INTERVAL_SEC = 1           # 청산 조건 체크 주기
 _TASK_RESTART_DELAY = 5          # 태스크 재시작 대기
 _DAILY_SCAN_INTERVAL_SEC = 3600  # 당일 스캔 주기 (1시간)
+_SUPERTREND_INTERVAL_SEC = 300   # 슈퍼트렌드 5분봉 진입/청산 평가 주기 (5분)
+_SUPERTREND_UNIVERSE_MAX = 80    # 슈퍼트렌드 스캔 유니버스 종목 상한
 
 
 def _record_balance_snapshot(balance: Any, today: date, position_count: int = 0) -> None:
@@ -106,6 +108,7 @@ class TradingOrchestrator:
             ("sync", self._sync_loop),
             ("market", self._market_loop),
             ("rescan", self._rescan_loop),
+            ("supertrend", self._supertrend_loop),
             ("daily_report", self._daily_report_loop),
         ]
 
@@ -328,6 +331,129 @@ class TradingOrchestrator:
             except Exception as e:
                 logger.error("rescan 오류: %s", e)
                 await asyncio.sleep(3)
+
+    async def _supertrend_loop(self) -> None:
+        """슈퍼트렌드 5분봉 진입/청산 평가 (시그널+로깅+알림, 실주문 없음).
+
+        BAR-OPS — 슈퍼트렌드 운영 배선 (2026-05-31):
+          1) 진입: 당일 순위 유니버스(RankUniverseProvider, 실패 시 watchlist fallback)
+             → SupertrendScanner 5분봉 상승 추세전환 신호 산출 → app_state 저장 + 알림.
+          2) 청산: 보유 포지션 중 strategy_id=supertrend 진입분을 SupertrendExitWatcher
+             가 추적 → 하락 추세전환 시 청산 시그널 산출 → 알림.
+
+        signal-only: 실제 매수/매도 주문은 송출하지 않는다. 슈퍼트렌드 진입 주문 경로가
+        운영에 별도 합의되기 전까지 관찰·알림 단계로 운용 (기존 가격기반 ExitEngine/
+        HoldingEvaluator·RiskEngine 청산과 독립). 청산 시그널을 실주문으로 승격하려면
+        _execute_exit() 를 호출하도록 후속 합의 후 연결.
+        """
+        last_run: Optional[float] = None
+        oauth = self._build_native_oauth()  # None 가능 (settings 미설정 시 watchlist fallback)
+
+        while self._running:
+            try:
+                gateway = app_state.market_gateway
+                if gateway:
+                    now = asyncio.get_running_loop().time()
+                    if last_run is None or (now - last_run) >= _SUPERTREND_INTERVAL_SEC:
+                        await self._supertrend_cycle(gateway, oauth)
+                        last_run = now
+                await asyncio.sleep(_SUPERTREND_INTERVAL_SEC)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("supertrend_loop 오류: %s", e)
+                await asyncio.sleep(_SUPERTREND_INTERVAL_SEC)
+
+    async def _supertrend_cycle(self, gateway: Any, oauth: Any) -> None:
+        """슈퍼트렌드 진입 스캔 + 보유분 청산 평가 1회 실행."""
+        from backend.core.scanner import (
+            RankUniverseProvider,
+            SupertrendExitWatcher,
+            SupertrendScanner,
+        )
+
+        # 1) 유니버스 — 당일 순위 합집합 (실패/미설정 시 watchlist fallback)
+        universe: List[str] = []
+        if oauth is not None:
+            try:
+                provider = RankUniverseProvider(oauth)
+                universe = await provider.fetch_universe(max_symbols=_SUPERTREND_UNIVERSE_MAX)
+            except Exception as e:
+                logger.warning("슈퍼트렌드 유니버스 조회 실패 — watchlist fallback: %s", e)
+        if not universe:
+            universe = list(app_state.watchlist)
+        if not universe:
+            return
+
+        # 2) 진입 스캔 (5분봉 상승 추세전환)
+        try:
+            scanner = SupertrendScanner(gateway)
+            entry_signals = await scanner.scan(universe)
+            app_state.supertrend_signals = [
+                {
+                    "symbol": s.symbol, "name": s.name, "price": s.price,
+                    "score": s.score, "reason": s.reason,
+                    "timestamp": s.timestamp.isoformat(),
+                }
+                for s in entry_signals
+            ]
+            if entry_signals:
+                logger.info("슈퍼트렌드 진입 신호 %d건: %s",
+                            len(entry_signals), [s.symbol for s in entry_signals])
+                if self._alert:
+                    for s in entry_signals:
+                        try:
+                            await self._alert.on_signal(s)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error("슈퍼트렌드 진입 스캔 실패: %s", e)
+
+        # 3) 청산 평가 (보유 슈퍼트렌드 진입분의 하락 추세전환)
+        if not self._position_mgr:
+            return
+        try:
+            positions = list(self._position_mgr.get_positions().values())
+            watcher = SupertrendExitWatcher(gateway)
+            exit_signals = await watcher.check(positions)
+            if exit_signals:
+                logger.warning("슈퍼트렌드 청산 시그널 %d건 (signal-only): %s",
+                               len(exit_signals), [e.symbol for e in exit_signals])
+                if self._alert:
+                    for ex in exit_signals:
+                        try:
+                            await self._alert.on_exit(
+                                symbol=ex.symbol, name=ex.name, price=ex.price,
+                                quantity=0, pnl=0.0, pnl_pct=ex.pnl_pct,
+                                exit_type=ex.exit_type,
+                            )
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error("슈퍼트렌드 청산 평가 실패: %s", e)
+
+    @staticmethod
+    def _build_native_oauth() -> Optional[Any]:
+        """RankUniverseProvider 용 키움 네이티브 OAuth — settings 미설정 시 None.
+
+        실패해도 슈퍼트렌드 루프는 watchlist fallback 으로 동작 (가용성 우선).
+        """
+        try:
+            from pydantic import SecretStr
+            from backend.config.settings import get_settings
+            from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
+            _s = get_settings()
+            key = getattr(_s, "kiwoom_app_key", "") or ""
+            secret = getattr(_s, "kiwoom_app_secret", "") or ""
+            if not key or not secret:
+                logger.info("슈퍼트렌드: 키움 키 미설정 — 순위 유니버스 비활성(watchlist 사용)")
+                return None
+            return KiwoomNativeOAuth(
+                app_key=SecretStr(key), app_secret=SecretStr(secret),
+            )
+        except Exception as e:
+            logger.warning("슈퍼트렌드 OAuth 초기화 실패 — watchlist fallback: %s", e)
+            return None
 
     async def _daily_report_loop(self) -> None:
         """매일 15:00 이후 일일 P&L 리포트 자동 전송"""

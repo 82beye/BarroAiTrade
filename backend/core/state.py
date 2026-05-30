@@ -30,6 +30,7 @@ class AppState:
 
         self.positions: Dict[str, Any] = {}
         self.watchlist: List[str] = []
+        self.supertrend_signals: List[Dict[str, Any]] = []   # 슈퍼트렌드 5분봉 진입 신호 (관찰/대시보드용)
         self.market_condition: Optional[Dict[str, Any]] = None
         self.config: Optional[Dict[str, Any]] = None
         self.risk_status: Optional[Dict[str, Any]] = None
