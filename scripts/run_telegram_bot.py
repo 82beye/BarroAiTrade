@@ -33,6 +33,10 @@ from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
 from backend.core.gateway.kiwoom_native_orders import KiwoomNativeOrderExecutor
 from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
+from backend.core.supertrend_auto_trader import (
+    SupertrendAutoConfig,
+    SupertrendAutoTrader,
+)
 from backend.core.journal.simulation_log import (
     SimulationLogger,
     summarize_by_strategy,
@@ -549,6 +553,55 @@ async def _cmd_history(bot: TelegramBot, msg: dict) -> str:
     return "\n".join(lines)
 
 
+def _env_truthy(name: str, default: str = "") -> bool:
+    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_supertrend_auto_trader(notifier):
+    """SUPERTREND_AUTO_ENABLED 가 truthy 면 자동매매 트레이더 구성, 아니면 None.
+
+    기존 봇 인프라(Native fetcher/주문, LiveOrderGate, ActivePositionStore)를 그대로 사용.
+    dry_run 기본 ON(SUPERTREND_AUTO_DRYRUN 미설정/truthy) → 실제 송출 대신 DRY_RUN 관찰.
+    실제 모의/실 체결은 SUPERTREND_AUTO_DRYRUN=0 으로 명시 해제해야 함.
+    """
+    if not _env_truthy("SUPERTREND_AUTO_ENABLED"):
+        return None
+
+    oauth = _build_oauth()
+    dry_run = os.environ.get("SUPERTREND_AUTO_DRYRUN", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+    candle_fetcher = KiwoomNativeCandleFetcher(oauth=oauth)
+    account_fetcher = KiwoomNativeAccountFetcher(oauth=oauth)
+    order_executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=dry_run)
+    order_gate = LiveOrderGate(
+        executor=order_executor, audit_path=_AUDIT_PATH,
+        policy=GatePolicy(), notifier=notifier,
+    )
+    pos_store = ActivePositionStore(_POS_LOG)
+    picker = KiwoomNativeLeaderPicker(oauth=oauth, min_score=0.5)
+
+    async def _universe():
+        # 진입 유니버스 = 당일 주도주 top-N (기존 /sim 과 동일 소스).
+        n = int(os.environ.get("SUPERTREND_AUTO_UNIVERSE_TOP", "20"))
+        leaders = await picker.pick(top_n=n)
+        return [(c.symbol, c.name) for c in leaders]
+
+    cfg = SupertrendAutoConfig(
+        enabled=True,
+        interval_sec=int(os.environ.get("SUPERTREND_AUTO_INTERVAL_SEC", "300")),
+        max_positions=int(os.environ.get("SUPERTREND_AUTO_MAX_POS", "10")),
+    )
+    return SupertrendAutoTrader(
+        candle_fetcher=candle_fetcher,
+        account_fetcher=account_fetcher,
+        order_gate=order_gate,
+        pos_store=pos_store,
+        universe_provider=_universe,
+        notifier=notifier,
+        config=cfg,
+    )
+
+
 def main() -> None:
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -584,8 +637,22 @@ def main() -> None:
 
     print(f"🤖 봇 시작 — chat_id={chat_id}, 명령={list(bot._handlers)}")
     print("   Ctrl+C 로 종료")
+
+    # 슈퍼트렌드 자동매매 루프 (opt-in) — SUPERTREND_AUTO_ENABLED 가 truthy 일 때만 가동.
+    auto_trader = _build_supertrend_auto_trader(notifier)
+    if auto_trader is not None:
+        dry = auto_trader.config  # 로그용
+        print(f"   ⚡ 슈퍼트렌드 자동매매 ON (interval={dry.interval_sec}s, "
+              f"max_pos={dry.max_positions}, dry_run={os.environ.get('SUPERTREND_AUTO_DRYRUN','1')})")
+
+    async def _run_all() -> None:
+        tasks = [asyncio.create_task(bot.run(), name="telegram_bot")]
+        if auto_trader is not None:
+            tasks.append(asyncio.create_task(auto_trader.run_forever(), name="supertrend_auto"))
+        await asyncio.gather(*tasks)
+
     try:
-        asyncio.run(bot.run())
+        asyncio.run(_run_all())
     except KeyboardInterrupt:
         print("\n봇 종료")
 
