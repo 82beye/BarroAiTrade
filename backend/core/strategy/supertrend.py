@@ -247,7 +247,9 @@ class SupertrendParams:
     # 청산 SL clamp (Supertrend 라인 트레일링 근사) — 음수 비율.
     sl_min_pct: float = -0.01     # 최소 손절 폭
     sl_max_pct: float = -0.08     # 최대 손절 폭
-    time_exit: Optional[dtime] = dtime(15, 10)  # 장 마감 전 강제청산(주식)
+    # 장마감 강제청산 비활성(2026-05-31): SELL 시그널 발생 시에만 매도.
+    #   None = 장 종료 시 자동매도 안 함. 운영에서 강제청산 원하면 dtime 으로 override.
+    time_exit: Optional[dtime] = None
 
 
 class SupertrendStrategy(Strategy):
