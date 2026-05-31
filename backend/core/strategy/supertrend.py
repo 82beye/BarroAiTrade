@@ -170,6 +170,11 @@ class SupertrendParams:
     #   N(int) = 마지막 N봉 내 상승 추세전환(buySignal) 발생 시에만 진입(flip-only).
     entry_lookback: Optional[int] = None
 
+    # 청산 트리거 — 슈퍼트렌드 **sell 시그널**(trend 1→-1 전환 봉) 발생 시에만 청산.
+    #   마지막 N봉 내 sellSignal 이 있어야 청산. 5분봉 폴링 타이밍 흔들림 흡수용 N=2 default.
+    #   "하락추세 동안 매 사이클 청산"이 아니라 "전환 이벤트 1회"가 되도록 함.
+    exit_lookback: int = 2
+
     # 변동성 필터 (운영 override) — ATR% < min_atr_pct 면 진입 거부. 0 이면 비활성.
     min_atr_pct: float = 0.0
     atr_n: int = 14
@@ -266,10 +271,12 @@ class SupertrendStrategy(Strategy):
         ctx: AnalysisContext,
         current_price: Decimal,
     ) -> Optional[ExitSignal]:
-        """슈퍼트렌드 하락 추세전환(매도/숏 시그널) 시 보유 롱 포지션 청산.
+        """슈퍼트렌드 **sell 시그널**(trend 1→-1 전환 봉) 발생 시 보유 롱 포지션 청산.
 
-        진입의 거울상 — 진입은 trend +1, 청산은 trend -1(sellSignal). 가격 SL
-        도달 전이라도 추세선(up밴드)을 종가가 하향 이탈해 추세가 꺾이면 즉시 정리.
+        진입(buySignal, trend -1→1)의 정확한 거울상. Pine 의
+        `sellSignal = trend == -1 and trend[1] == 1` 이 발생한 봉에서만 청산한다.
+        "이미 하락추세인 동안 매 사이클 청산"이 아니라 **전환 이벤트 1회**가 트리거.
+        최근 exit_lookback 봉 내 sellSignal 이 있어야 청산(폴링 타이밍 흔들림 흡수).
         데이터 부족 시 None (강제청산 안 함 — 가격 SL 이 안전망).
         """
         p = self.params
@@ -283,21 +290,21 @@ class SupertrendStrategy(Strategy):
         res = compute_supertrend(
             candles, period=p.atr_period, multiplier=p.multiplier, source=p.source,
         )
-        if not res.trend or res.trend[-1] != -1:
-            return None  # 여전히 상승추세 — 보유 유지
+        if not res.sell_signals:
+            return None
+        # 최근 N봉 내 sell 시그널(전환 봉)이 있어야 청산. 없으면 보유 유지.
+        lb = max(1, p.exit_lookback)
+        if not any(res.sell_signals[-lb:]):
+            return None
 
         entry = float(position.avg_price)
         cur = float(current_price)
         pnl_pct = (cur - entry) / entry * 100 if entry > 0 else 0.0
         st_line = res.supertrend[-1]
 
-        # 전환 신선도 (몇 봉 전 sell 전환인지) — 진단용
-        if True in res.sell_signals:
-            flip_bar = len(res.sell_signals) - 1 - res.sell_signals[::-1].index(True)
-            bars_since = (len(candles) - 1) - flip_bar
-            fresh = f" (전환 {bars_since}봉 전)"
-        else:
-            fresh = ""
+        # 전환 신선도 (몇 봉 전 sell 시그널인지) — 진단용
+        flip_bar = len(res.sell_signals) - 1 - res.sell_signals[::-1].index(True)
+        bars_since = (len(candles) - 1) - flip_bar
 
         return ExitSignal(
             symbol=position.symbol,
@@ -305,7 +312,7 @@ class SupertrendStrategy(Strategy):
             exit_type="reverse_signal",
             price=cur,
             pnl_pct=pnl_pct,
-            reason=(f"[슈퍼트렌드] 하락 추세전환 매도/숏 시그널{fresh} — "
+            reason=(f"[슈퍼트렌드] SELL 시그널 발생 ({bars_since}봉 전 전환) — "
                     f"ST {st_line:.0f} 하향 이탈 → 포지션 정리"),
             market_type=position.market_type,
             timestamp=datetime.now(),

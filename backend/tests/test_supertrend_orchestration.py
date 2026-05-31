@@ -27,7 +27,8 @@ def _candles(prices: List[float]) -> List[OHLCV]:
 
 
 _UPTREND_FLIP = [10000 - i * 50 for i in range(40)] + [8100 + i * 80 for i in range(20)]
-_DOWNTREND_FLIP = [10000 + i * 50 for i in range(40)] + [11900 - i * 90 for i in range(20)]
+# 최근 봉에 SELL 시그널(trend 1→-1 전환) 발생 — 청산 트리거 케이스.
+_SELL_RECENT = [10000 + i * 50 for i in range(56)] + [12800 - i * 300 for i in range(4)]
 
 
 class _FakeGateway:
@@ -77,13 +78,13 @@ def test_cycle_entry_scan_populates_app_state():
 
 
 def test_cycle_exit_eval_does_not_place_orders():
-    """보유 슈퍼트렌드 포지션 하락전환 → 청산 평가만, 실주문 호출 없음(signal-only)."""
+    """보유 슈퍼트렌드 포지션 SELL 시그널 → 청산 평가만, 실주문 호출 없음(signal-only)."""
     app_state.watchlist = ["005930"]
     app_state.supertrend_signals = []
     orch = TradingOrchestrator()
     # 실주문 경로가 호출되면 안 됨 → executor None 유지 + place_order 없는 gateway
     orch._position_mgr = _FakePositionMgr([_position(cur=9000.0)])
-    gw = _FakeGateway(_candles(_DOWNTREND_FLIP))
+    gw = _FakeGateway(_candles(_SELL_RECENT))
     # 예외 없이 완주해야 함 (실행 경로 미호출)
     _run(orch._supertrend_cycle(gw, oauth=None))
     assert orch._executor is None  # 실행기 미사용
