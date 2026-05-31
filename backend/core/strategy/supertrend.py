@@ -303,14 +303,30 @@ class SupertrendStrategy(Strategy):
                 return None
 
         # ── 횡보 휩쏘 필터 (2): 전환 강도(밴드 이탈 폭) 게이트 ────────────────
-        # BUY 전환 봉의 종가가 추세선(up밴드)을 ATR×mult 이상 돌파한 "강한 전환"만 통과.
-        # 박스권에서 밴드를 살짝 넘는 미세 전환(휩쏘)을 차단.
+        # BUY 전환 봉이 "방금 돌파한 저항"(전환 직전 dn밴드)을 ATR×mult 이상 넘은
+        # "강한 전환"만 통과. 박스권에서 저항을 살짝 넘는 미세 전환(휩쏘)을 차단.
+        #
+        # 2026-06-01 정정: 종전엔 `close − supertrend(=현재 up밴드)`로 측정했으나,
+        # BUY 전환 직후 up밴드는 방금 src−mult·ATR 로 새로 생겨 이탈폭이 거의 항상
+        # ~mult·ATR(=3·ATR) 가 되어 0.5·ATR 문턱은 99%+ 무조건 통과 → 게이트 무력화.
+        # BUY 전환 조건 자체가 `close > dn₁`(직전 dn밴드=저항 상향 돌파)이므로,
+        # 전환 봉 종가가 그 저항(dn₁)을 얼마나 큰 폭으로 넘었는지로 강도를 본다.
         if p.min_flip_atr_mult > 0:
-            atr_last = res.atr[-1]
-            breakout = float(candles[-1].close) - res.supertrend[-1]  # 밴드 위 이탈 폭
-            if atr_last <= 0 or breakout < p.min_flip_atr_mult * atr_last:
+            if True in res.buy_signals:
+                # 가장 최근 BUY 전환 봉 (entry_lookback 게이트가 최근 봉 내 존재 보장)
+                flip_bar = len(res.buy_signals) - 1 - res.buy_signals[::-1].index(True)
+                atr_ref = res.atr[flip_bar]
+                # 방금 돌파한 저항 = 전환 직전 봉의 dn밴드. (buy_signal 은 i≥1 보장)
+                resist = res.dn[flip_bar - 1] if flip_bar >= 1 else res.supertrend[flip_bar]
+                breakout = float(candles[flip_bar].close) - resist
+            else:
+                # 전환 봉이 없는 추세추종 모드(entry_lookback=None, 시작부터 상승추세)
+                # → 현재 종가의 추세선 위 여유로 폴백 평가.
+                atr_ref = res.atr[-1]
+                breakout = float(candles[-1].close) - res.supertrend[-1]
+            if atr_ref <= 0 or breakout < p.min_flip_atr_mult * atr_ref:
                 logger.debug("%s: 전환 이탈폭 %.1f < %.2f·ATR(%.1f) — supertrend 진입 거부",
-                             ctx.symbol, breakout, p.min_flip_atr_mult, atr_last)
+                             ctx.symbol, breakout, p.min_flip_atr_mult, atr_ref)
                 return None
 
         c = candles[-1]
