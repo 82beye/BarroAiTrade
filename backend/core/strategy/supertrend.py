@@ -92,6 +92,54 @@ def _src_series(candles, source: str) -> List[float]:
     return [(float(c.high) + float(c.low)) / 2 for c in candles]
 
 
+def compute_adx(candles, period: int = 14) -> List[float]:
+    """Wilder ADX(14) 시계열 — 추세 강도 측정 (방향 무관, 0~100).
+
+    횡보(추세 약함)와 추세 발생을 구분하는 핵심 지표. Pine `ta.adx` 와 동일 정의:
+      +DM = up_move if (up_move>down_move and up_move>0) else 0   (up_move = high-high[1])
+      -DM = down_move if (down_move>up_move and down_move>0) else 0 (down_move = low[1]-low)
+      +DI = 100 * RMA(+DM)/RMA(TR), -DI = 100 * RMA(-DM)/RMA(TR)
+      DX  = 100 * |+DI - -DI| / (+DI + -DI)
+      ADX = RMA(DX)
+    통상 ADX ≥ 20~25 면 추세 형성, < 20 이면 횡보. 초기 구간/데이터 부족은 0.0.
+
+    Returns:
+        candles 와 동일 길이 list[float] (ADX 값, 산출 불가 구간 0.0).
+    """
+    n = len(candles)
+    if n < 2:
+        return [0.0] * n
+
+    tr = _true_ranges(candles)
+    plus_dm: List[float] = [0.0] * n
+    minus_dm: List[float] = [0.0] * n
+    for i in range(1, n):
+        up_move = float(candles[i].high) - float(candles[i - 1].high)
+        down_move = float(candles[i - 1].low) - float(candles[i].low)
+        plus_dm[i] = up_move if (up_move > down_move and up_move > 0) else 0.0
+        minus_dm[i] = down_move if (down_move > up_move and down_move > 0) else 0.0
+
+    atr_s = _rma(tr, period)
+    plus_s = _rma(plus_dm, period)
+    minus_s = _rma(minus_dm, period)
+
+    dx: List[float] = [float("nan")] * n
+    for i in range(n):
+        a = atr_s[i]
+        if a != a or a <= 0:   # nan 또는 0
+            continue
+        pdi = 100.0 * (plus_s[i] / a) if plus_s[i] == plus_s[i] else 0.0
+        mdi = 100.0 * (minus_s[i] / a) if minus_s[i] == minus_s[i] else 0.0
+        denom = pdi + mdi
+        dx[i] = 100.0 * abs(pdi - mdi) / denom if denom > 0 else 0.0
+
+    # ADX = RMA(DX) — nan 구간은 평활에서 제외하기 위해 0 으로 두되, seed 안정화 위해
+    # DX 가 유효해진 이후부터 RMA 적용 (앞쪽 nan → 0.0 반환).
+    dx_clean = [v if v == v else 0.0 for v in dx]
+    adx_raw = _rma(dx_clean, period)
+    return [v if v == v else 0.0 for v in adx_raw]
+
+
 def compute_supertrend(
     candles,
     period: int = 10,
@@ -180,6 +228,19 @@ class SupertrendParams:
     min_atr_pct: float = 0.0
     atr_n: int = 14
 
+    # ─── 횡보 휩쏘(whipsaw) 필터 — 변동성 발생 시점의 시그널만 캐치 ───────────
+    # 슈퍼트렌드는 횡보 박스권에서 BUY/SELL 이 반복돼 비용만 소모(차트 27~28일 구간).
+    # 추세 강도(ADX)와 전환 봉의 밴드 이탈 폭으로 "추세가 살아난 전환"만 통과시킨다.
+    #
+    # (1) ADX 게이트 — min_adx > 0 이면 ADX(adx_period) < min_adx 인 봉은 진입 거부.
+    #     횡보(추세 약함) 구간 차단. 통상 20~25 권장. 0 이면 비활성(기존 회귀 보존).
+    min_adx: float = 0.0
+    adx_period: int = 14
+    # (2) 전환 강도(밴드 이탈 폭) 게이트 — BUY 전환 봉의 종가가 추세선(밴드)을
+    #     ATR 의 min_flip_atr_mult 배 이상 돌파했을 때만 진입. 박스권 미세 전환 차단.
+    #     예: 0.5 → 종가가 밴드를 +0.5·ATR 이상 넘어선 강한 전환만. 0 이면 비활성.
+    min_flip_atr_mult: float = 0.0
+
     # 진입 시간 게이트 (운영 override) — last candle.time() >= cutoff 면 차단. None 비활성.
     entry_time_cutoff: Optional[dtime] = None
 
@@ -227,6 +288,27 @@ class SupertrendStrategy(Strategy):
         if p.entry_lookback is not None:
             lb = max(1, p.entry_lookback)
             if not res.buy_signals or not any(res.buy_signals[-lb:]):
+                return None
+
+        # ── 횡보 휩쏘 필터 (1): ADX 추세강도 게이트 ──────────────────────────
+        # 횡보(추세 약함) 구간의 BUY 전환은 거짓 신호일 확률이 높음 → ADX 로 차단.
+        if p.min_adx > 0:
+            adx_series = compute_adx(candles, period=p.adx_period)
+            adx_now = adx_series[-1] if adx_series else 0.0
+            if adx_now < p.min_adx:
+                logger.debug("%s: ADX %.1f < %.1f (횡보) — supertrend 진입 거부",
+                             ctx.symbol, adx_now, p.min_adx)
+                return None
+
+        # ── 횡보 휩쏘 필터 (2): 전환 강도(밴드 이탈 폭) 게이트 ────────────────
+        # BUY 전환 봉의 종가가 추세선(up밴드)을 ATR×mult 이상 돌파한 "강한 전환"만 통과.
+        # 박스권에서 밴드를 살짝 넘는 미세 전환(휩쏘)을 차단.
+        if p.min_flip_atr_mult > 0:
+            atr_last = res.atr[-1]
+            breakout = float(candles[-1].close) - res.supertrend[-1]  # 밴드 위 이탈 폭
+            if atr_last <= 0 or breakout < p.min_flip_atr_mult * atr_last:
+                logger.debug("%s: 전환 이탈폭 %.1f < %.2f·ATR(%.1f) — supertrend 진입 거부",
+                             ctx.symbol, breakout, p.min_flip_atr_mult, atr_last)
                 return None
 
         c = candles[-1]
@@ -360,4 +442,5 @@ __all__ = [
     "SupertrendParams",
     "SupertrendResult",
     "compute_supertrend",
+    "compute_adx",
 ]
