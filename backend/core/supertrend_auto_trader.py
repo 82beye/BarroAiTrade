@@ -31,10 +31,12 @@ from decimal import Decimal
 from typing import Any, Awaitable, Callable, Optional, Sequence
 
 from backend.core.risk.balance_gate import evaluate_risk_gate
+from backend.core.market_session.service import MarketSessionService
 from backend.core.strategy.supertrend import (
     SupertrendParams,
     compute_supertrend,
 )
+from backend.models.market import TradingSession
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,10 @@ class SupertrendAutoConfig:
     max_total_position_ratio: Decimal = Decimal("0.80")
     max_per_position_ratio: Decimal = Decimal("0.10")
     params: SupertrendParams = field(default_factory=SupertrendParams)
+    # 장시간 가드 — True 면 정규장(REGULAR, 09:00~15:20 KST, 주말·휴장일 제외)
+    #   에서만 매매 사이클 실행. 그 외 시간엔 사이클 skip(주문/시세호출 안 함).
+    #   시장가 자동주문 전략이므로 시간외(지정가만 가능) 세션은 진입 자체를 막는다.
+    market_hours_only: bool = True
 
 
 class SupertrendAutoTrader:
@@ -79,6 +85,7 @@ class SupertrendAutoTrader:
         universe_provider: Callable[[], Awaitable[Sequence[tuple[str, str]]]],
         notifier: Optional[Any] = None,
         config: Optional[SupertrendAutoConfig] = None,
+        session_service: Optional[Any] = None,
     ) -> None:
         self._candles = candle_fetcher
         self._account = account_fetcher
@@ -87,6 +94,8 @@ class SupertrendAutoTrader:
         self._universe_provider = universe_provider
         self._notifier = notifier
         self.config = config or SupertrendAutoConfig()
+        # 장시간 판단기 (주입 가능 — 테스트는 가짜 주입). None 이면 기본 서비스.
+        self._session = session_service or MarketSessionService()
         self._running = False
 
     # ── 라이프사이클 ──────────────────────────────────────────────────────────
@@ -114,6 +123,16 @@ class SupertrendAutoTrader:
     async def run_cycle(self) -> dict:
         """청산 평가 → 진입 평가 1회. 반환: {entered:[...], exited:[...]} (관측/테스트용)."""
         result = {"entered": [], "exited": []}
+
+        # ── 장시간 가드 — 정규장(REGULAR)에서만 매매 ────────────────────────
+        # 시장가 자동주문이므로 장외/시간외(지정가만)·주말·휴장일엔 사이클 skip.
+        # (시세·주문 호출 자체를 막아 장외 rc=20 거부·불필요 API 호출 방지.)
+        if self.config.market_hours_only:
+            session = self._session.get_session()
+            if session != TradingSession.REGULAR:
+                logger.debug("슈퍼트렌드 자동매매 skip — 비정규장 세션(%s)",
+                             getattr(session, "value", session))
+                return result
 
         # 손익률 (LiveOrderGate 매수 차단 게이트 입력) — 계좌 평가손익률을 사용.
         #   native fetch_daily_pnl 은 손익'액'만 제공(률 없음)이라, 잔고 조회의

@@ -15,7 +15,15 @@ from backend.core.supertrend_auto_trader import (
     SupertrendAutoTrader,
 )
 from backend.core.gateway.kiwoom_native_account import AccountBalance, AccountDeposit
-from backend.models.market import OHLCV, MarketType
+from backend.models.market import OHLCV, MarketType, TradingSession
+
+
+class _FakeSession:
+    """장시간 판단기 가짜 — 지정한 세션을 반환(테스트 시각 비의존)."""
+    def __init__(self, session=TradingSession.REGULAR):
+        self._s = session
+    def get_session(self, now=None):
+        return self._s
 
 
 # ── 캔들 생성 (compute_supertrend 신호 유도) ─────────────────────────────────
@@ -109,7 +117,8 @@ class _FakePosStore:
         })()
 
 
-def _trader(candles_map, *, universe, gate=None, account=None, pos=None, config=None):
+def _trader(candles_map, *, universe, gate=None, account=None, pos=None, config=None,
+            session=None):
     async def _uni():
         return universe
     return SupertrendAutoTrader(
@@ -119,6 +128,7 @@ def _trader(candles_map, *, universe, gate=None, account=None, pos=None, config=
         pos_store=pos or _FakePosStore(),
         universe_provider=_uni,
         config=config or SupertrendAutoConfig(),
+        session_service=session or _FakeSession(TradingSession.REGULAR),
     )
 
 
@@ -240,3 +250,47 @@ async def test_buy_failure_isolated():
     r = await t.run_cycle()   # 예외 없이 완주
     assert r["entered"] == []
     assert pos.get("005930") is None  # 실패 시 포지션 미등록
+
+
+# ── 11) 장시간 가드: 비정규장(CLOSED) → 진입/청산 모두 skip ───────────────────
+@pytest.mark.asyncio
+async def test_market_hours_guard_skips_when_closed():
+    gate = _FakeGate()
+    pos = _FakePosStore()
+    pos._inject("005930", strategy="supertrend", qty=11)  # 보유 SELL 신호분
+    t = _trader({"005930": _SELL, "000660": _BUY}, universe=[("000660", "SK하이닉스")],
+                gate=gate, pos=pos, session=_FakeSession(TradingSession.CLOSED))
+    r = await t.run_cycle()
+    assert gate.buys == [] and gate.sells == []
+    assert r["entered"] == [] and r["exited"] == []
+
+
+# ── 12) 장시간 가드: 시간외(KRX_AFTER, 시장가 불가) → skip ────────────────────
+@pytest.mark.asyncio
+async def test_market_hours_guard_skips_after_hours():
+    gate = _FakeGate()
+    t = _trader({"005930": _BUY}, universe=[("005930", "삼성전자")],
+                gate=gate, session=_FakeSession(TradingSession.KRX_AFTER))
+    await t.run_cycle()
+    assert gate.buys == []
+
+
+# ── 13) 가드 OFF(market_hours_only=False) → 세션 무관 매매 ────────────────────
+@pytest.mark.asyncio
+async def test_market_hours_guard_disabled_allows_any_session():
+    gate = _FakeGate()
+    cfg = SupertrendAutoConfig(market_hours_only=False)
+    t = _trader({"005930": _BUY}, universe=[("005930", "삼성전자")],
+                gate=gate, config=cfg, session=_FakeSession(TradingSession.CLOSED))
+    await t.run_cycle()
+    assert len(gate.buys) == 1
+
+
+# ── 14) REGULAR 세션 → 정상 매매 (가드 통과) ─────────────────────────────────
+@pytest.mark.asyncio
+async def test_market_hours_guard_allows_regular():
+    gate = _FakeGate()
+    t = _trader({"005930": _BUY}, universe=[("005930", "삼성전자")],
+                gate=gate, session=_FakeSession(TradingSession.REGULAR))
+    await t.run_cycle()
+    assert len(gate.buys) == 1
