@@ -35,6 +35,13 @@ _DAILY_SCAN_INTERVAL_SEC = 3600  # 당일 스캔 주기 (1시간)
 _SUPERTREND_INTERVAL_SEC = 300   # 슈퍼트렌드 5분봉 진입/청산 평가 주기 (5분)
 _SUPERTREND_UNIVERSE_MAX = 80    # 슈퍼트렌드 스캔 유니버스 종목 상한
 
+# ── 슈퍼트렌드 주문 배선 (2026-06-01) ──────────────────────────────────────────
+# signal-only → 실주문 승격. 사용자 확정: 진입+청산 양쪽, 모드 무관, 예수금 80%÷10종목.
+_SUPERTREND_AUTO_TRADE = True    # False 면 기존 signal-only(알림만)로 즉시 회귀
+_SUPERTREND_MAX_POSITIONS = 10   # 슈퍼트렌드 동시 보유 상한
+_SUPERTREND_ALLOC_PCT = 0.08     # 종목당 가용예수금 배분 (예수금 80% ÷ 10종목 = 8%)
+_SUPERTREND_MIN_SCORE = 0.0      # 진입 최소 신호점수 (0 = 모든 신호 허용)
+
 
 def _record_balance_snapshot(balance: Any, today: date, position_count: int = 0) -> None:
     """balance_history.json에 오늘 잔고 스냅샷 추가 (당일 중복 시 덮어쓰기).
@@ -80,6 +87,10 @@ class TradingOrchestrator:
         self._position_mgr: Optional[Any] = None  # PositionManager
         self._alert: Optional[Any] = None  # AlertService
         self._report: Optional[Any] = None  # ReportService
+        # 진입 주문의 strategy_id 를 체결 콜백까지 전달하기 위한 symbol→strategy_id 맵.
+        #   place_order/OrderResult 에 strategy_id 가 없어(_on_order_filled 가 유실),
+        #   슈퍼트렌드 청산 식별(strategy_id startswith "supertrend")이 깨지는 것을 방지.
+        self._pending_strategy_ids: Dict[str, str] = {}
 
     # ── 라이프사이클 ──────────────────────────────────────────────────────────
 
@@ -410,6 +421,9 @@ class TradingOrchestrator:
                             await self._alert.on_signal(s)
                         except Exception:
                             pass
+                # 진입 주문 배선 — 점수 내림차순(스캐너가 이미 정렬)으로 매수 송출.
+                if _SUPERTREND_AUTO_TRADE:
+                    await self._supertrend_enter(gateway, entry_signals)
         except Exception as e:
             logger.error("슈퍼트렌드 진입 스캔 실패: %s", e)
 
@@ -417,14 +431,22 @@ class TradingOrchestrator:
         if not self._position_mgr:
             return
         try:
-            positions = list(self._position_mgr.get_positions().values())
+            positions_map = self._position_mgr.get_positions()
             watcher = SupertrendExitWatcher(gateway)
-            exit_signals = await watcher.check(positions)
+            exit_signals = await watcher.check(list(positions_map.values()))
             if exit_signals:
-                logger.warning("슈퍼트렌드 청산 시그널 %d건 (signal-only): %s",
+                logger.warning("슈퍼트렌드 청산 시그널 %d건: %s",
                                len(exit_signals), [e.symbol for e in exit_signals])
-                if self._alert:
-                    for ex in exit_signals:
+                for ex in exit_signals:
+                    pos = positions_map.get(ex.symbol)
+                    if _SUPERTREND_AUTO_TRADE and pos is not None and self._executor:
+                        # SELL 시그널 → 전량 시장가 청산 (기존 _execute_exit 재사용).
+                        #   reason 의 ':' 앞이 alert exit_type 으로 쓰이므로 prefix 부여.
+                        await self._execute_exit(
+                            ex.symbol, pos, 1.0, f"reverse_signal: {ex.reason}",
+                        )
+                    elif self._alert:
+                        # AUTO_TRADE off 또는 미보유 — signal-only 알림(기존 동작).
                         try:
                             await self._alert.on_exit(
                                 symbol=ex.symbol, name=ex.name, price=ex.price,
@@ -435,6 +457,90 @@ class TradingOrchestrator:
                             pass
         except Exception as e:
             logger.error("슈퍼트렌드 청산 평가 실패: %s", e)
+
+    async def _supertrend_enter(self, gateway: Any, entry_signals: List[Any]) -> None:
+        """슈퍼트렌드 진입 신호 → 매수 주문 배선 (2026-06-01).
+
+        규칙 (사용자 확정):
+          - 점수 내림차순(스캐너 정렬 유지)으로 평가, 미보유 종목만 진입.
+          - 슈퍼트렌드 보유분이 _SUPERTREND_MAX_POSITIONS(10) 이상이면 신규 진입 중단.
+          - 종목당 수량 = floor(가용예수금 × _SUPERTREND_ALLOC_PCT(8%) / 진입가).
+          - 주문은 RiskEngine.approve 통과 후 송출(OrderExecutor.submit). 체결 시
+            strategy_id 가 포지션에 부여되도록 _pending_strategy_ids 에 먼저 기록.
+        signal-only 회귀: _SUPERTREND_AUTO_TRADE=False 면 본 메서드는 호출되지 않음.
+        """
+        import math
+        if not self._executor or not self._position_mgr:
+            return
+        balance = self._position_mgr.get_balance()
+        if balance is None:
+            logger.warning("슈퍼트렌드 진입 보류 — 잔고 미동기화")
+            return
+        positions = self._position_mgr.get_positions()
+        # 현재 슈퍼트렌드 전략으로 보유 중인 종목 수
+        held_supertrend = sum(
+            1 for p in positions.values()
+            if (p.strategy_id or "").lower().startswith("supertrend")
+        )
+        available_cash = float(getattr(balance, "available_cash", 0) or 0)
+        risk_engine = app_state.risk_engine
+
+        placed = 0
+        for s in entry_signals:
+            if held_supertrend + placed >= _SUPERTREND_MAX_POSITIONS:
+                logger.info("슈퍼트렌드 진입 상한(%d) 도달 — 추가 진입 중단",
+                            _SUPERTREND_MAX_POSITIONS)
+                break
+            if s.score < _SUPERTREND_MIN_SCORE:
+                continue
+            if self._position_mgr.has_position(s.symbol):
+                continue  # 이미 보유 — 중복 진입 방지
+            if s.symbol in self._pending_strategy_ids:
+                continue  # 직전 사이클 진입 주문 미체결 — 중복 송출 방지
+            price = float(s.price or 0)
+            if price <= 0:
+                continue
+            alloc = available_cash * _SUPERTREND_ALLOC_PCT
+            qty = math.floor(alloc / price)
+            if qty < 1:
+                logger.info("슈퍼트렌드 %s 진입 스킵 — 배분금(%.0f) < 1주가(%.0f)",
+                            s.symbol, alloc, price)
+                continue
+            try:
+                from backend.models.position import Order, OrderSide, OrderType
+                order = Order(
+                    symbol=s.symbol,
+                    side=OrderSide.BUY,
+                    order_type=OrderType.MARKET,
+                    quantity=float(qty),
+                    price=price,
+                    market_type=s.market_type,
+                    strategy_id=s.strategy_id,  # "supertrend_v1"
+                    risk_approved=False,
+                )
+                # 체결 콜백이 strategy_id 를 포지션에 부여하도록 사전 기록.
+                self._pending_strategy_ids[s.symbol] = s.strategy_id
+                result = await self._executor.submit(
+                    order, gateway,
+                    risk_engine=risk_engine,
+                    positions=positions,
+                    balance=balance,
+                )
+                if result is None:
+                    # 리스크 거부 또는 실패 — 예약 strategy_id 회수.
+                    self._pending_strategy_ids.pop(s.symbol, None)
+                    continue
+                placed += 1
+                logger.info("슈퍼트렌드 진입 주문 체결: %s qty=%d @%.0f (%.1f점)",
+                            s.symbol, qty, price, s.score)
+                # 진입 알림은 스캔 블록(_supertrend_cycle)에서 이미 전체 신호에 1회 발송함.
+                #   여기서 다시 on_signal 하면 체결 종목만 중복 알림 → 발송하지 않음.
+            except Exception as e:
+                self._pending_strategy_ids.pop(s.symbol, None)
+                logger.error("슈퍼트렌드 진입 주문 실패: %s — %s", s.symbol, e)
+        if placed:
+            logger.info("슈퍼트렌드 진입 주문 %d건 송출 (보유 %d → %d)",
+                        placed, held_supertrend, held_supertrend + placed)
 
     @staticmethod
     def _build_native_oauth() -> Optional[Any]:
@@ -611,7 +717,19 @@ class TradingOrchestrator:
     async def _on_order_filled(self, result: Any) -> None:
         """주문 체결 콜백"""
         if self._position_mgr:
-            self._position_mgr.on_order_filled(result)
+            # strategy_id 전파 — 진입 주문 시 보관해 둔 값을 체결 포지션에 부여.
+            #   (OrderResult 에 strategy_id 가 없어 유실되던 버그 보정. 슈퍼트렌드 등
+            #    전략별 청산 watcher 가 strategy_id 로 보유분을 식별하는 데 필수.)
+            sid = self._pending_strategy_ids.pop(result.symbol, "") if result else ""
+            name = ""
+            try:
+                from backend.models.position import OrderSide as _OS
+                if result.side == _OS.BUY:
+                    self._position_mgr.on_order_filled(result, name=name, strategy_id=sid)
+                else:
+                    self._position_mgr.on_order_filled(result)
+            except Exception:
+                self._position_mgr.on_order_filled(result)
             # AppState 동기화
             app_state.positions = {
                 k: v.model_dump(mode="json")
