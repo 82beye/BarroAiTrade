@@ -35,9 +35,17 @@ _DAILY_SCAN_INTERVAL_SEC = 3600  # 당일 스캔 주기 (1시간)
 _SUPERTREND_INTERVAL_SEC = 300   # 슈퍼트렌드 5분봉 진입/청산 평가 주기 (5분)
 _SUPERTREND_UNIVERSE_MAX = 80    # 슈퍼트렌드 스캔 유니버스 종목 상한
 
-# ── 슈퍼트렌드 주문 배선 (2026-06-01) ──────────────────────────────────────────
-# signal-only → 실주문 승격. 사용자 확정: 진입+청산 양쪽, 모드 무관, 예수금 80%÷10종목.
-_SUPERTREND_AUTO_TRADE = True    # False 면 기존 signal-only(알림만)로 즉시 회귀
+# ── 슈퍼트렌드 주문 배선 (2026-06-01) — ⚠️ LEGACY / 비활성 ─────────────────────
+# 이 orchestrator 경로의 자동주문 배선은 운영 봇(scripts/run_telegram_bot.py)이
+# 사용하지 않는 헛배선이다. 실 운영 슈퍼트렌드 자동매매는
+# backend/core/supertrend_auto_trader.py (SupertrendAutoTrader) 로 일원화됨(2026-06-01).
+#
+# orchestrator 는 API 경로(backend/api/routes/trading.py → orchestrator.start)로 여전히
+# 살아있으므로, 본 배선이 활성(True)이면 텔레그램 봇 자동매매와 같은 신호로 '중복 매수'
+# 위험이 있다. 따라서 False 로 고정해 signal-only(알림만)로 회귀시킨다.
+#   - 비활성 시 _supertrend_enter() 및 _supertrend_cycle 청산 자동주문 분기가 호출되지 않음.
+#   - 추출된 배선 코드 스냅샷: backend/legacy/supertrend_orchestrator_wiring.py.bak
+_SUPERTREND_AUTO_TRADE = False   # ⚠️ LEGACY 비활성 — 자동매매는 supertrend_auto_trader 로 일원화
 _SUPERTREND_MAX_POSITIONS = 10   # 슈퍼트렌드 동시 보유 상한
 _SUPERTREND_ALLOC_PCT = 0.08     # 종목당 가용예수금 배분 (예수금 80% ÷ 10종목 = 8%)
 _SUPERTREND_MIN_SCORE = 0.0      # 진입 최소 신호점수 (0 = 모든 신호 허용)

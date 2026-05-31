@@ -181,6 +181,9 @@ async def test_on_order_filled_propagates_strategy_id():
 async def test_cycle_exit_calls_execute_exit(monkeypatch):
     import backend.core.scanner as scn
     from backend.core.state import app_state
+    # 2026-06-01: orchestrator 자동주문은 LEGACY 비활성(_SUPERTREND_AUTO_TRADE=False).
+    #   본 테스트는 '활성 시 청산이 _execute_exit 를 호출하는가'를 검증하므로 True 강제.
+    monkeypatch.setattr(orch_mod, "_SUPERTREND_AUTO_TRADE", True)
     app_state.watchlist = ["005930"]  # oauth=None 시 watchlist fallback 유니버스
     orch = TradingOrchestrator()
     orch._executor = _FakeExecutor()
