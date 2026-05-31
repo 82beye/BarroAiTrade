@@ -26,7 +26,8 @@ def _candles(prices: List[float]) -> List[OHLCV]:
     ]
 
 
-_UPTREND_FLIP = [10000 - i * 50 for i in range(40)] + [8100 + i * 80 for i in range(20)]
+# 최근 봉에 BUY 시그널(trend -1→1 전환) 발생 — 진입 트리거 케이스.
+_BUY_RECENT = [10000 - i * 50 for i in range(57)] + [7200 + i * 350 for i in range(3)]
 # 최근 봉에 SELL 시그널(trend 1→-1 전환) 발생 — 청산 트리거 케이스.
 _SELL_RECENT = [10000 + i * 50 for i in range(56)] + [12800 - i * 300 for i in range(4)]
 
@@ -66,12 +67,12 @@ def _run(coro):
 
 
 def test_cycle_entry_scan_populates_app_state():
-    """유니버스(watchlist fallback) 상승전환 → app_state.supertrend_signals 채워짐."""
+    """유니버스(watchlist fallback) BUY 시그널 → app_state.supertrend_signals 채워짐."""
     app_state.watchlist = ["005930"]
     app_state.supertrend_signals = []
     orch = TradingOrchestrator()
     orch._position_mgr = _FakePositionMgr([])
-    gw = _FakeGateway(_candles(_UPTREND_FLIP))
+    gw = _FakeGateway(_candles(_BUY_RECENT))
     _run(orch._supertrend_cycle(gw, oauth=None))
     assert len(app_state.supertrend_signals) == 1
     assert app_state.supertrend_signals[0]["symbol"] == "005930"
@@ -96,7 +97,7 @@ def test_cycle_empty_universe_noop():
     app_state.supertrend_signals = []
     orch = TradingOrchestrator()
     orch._position_mgr = _FakePositionMgr([])
-    gw = _FakeGateway(_candles(_UPTREND_FLIP))
+    gw = _FakeGateway(_candles(_BUY_RECENT))
     _run(orch._supertrend_cycle(gw, oauth=None))
     assert app_state.supertrend_signals == []
 

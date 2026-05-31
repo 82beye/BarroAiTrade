@@ -53,19 +53,36 @@ def _candles(prices: List[float]) -> List[OHLCV]:
     return out
 
 
-# 하락 40봉 후 급반등 20봉 → 상승 추세전환 시나리오
-_UPTREND_FLIP = [10000 - i * 50 for i in range(40)] + [8100 + i * 80 for i in range(20)]
+# 하락 57봉 후 급반등 3봉 → **최근 봉(1봉 전)에 BUY 시그널** 발생 → 진입 대상.
+_BUY_RECENT = [10000 - i * 50 for i in range(57)] + [7200 + i * 350 for i in range(3)]
+# 하락 40봉 후 반등 20봉 → BUY 는 16봉 전(오래됨), 상승추세 "지속" 중.
+#   trend==1 이지만 BUY 시그널은 한참 전 → entry_lookback 기준 **미진입**.
+#   "상승추세 동안 매봉 매수"가 아니라 "BUY 전환 이벤트 1회"만 트리거함을 검증.
+_UPTREND_STALE = [10000 - i * 50 for i in range(40)] + [8100 + i * 80 for i in range(20)]
 # 지속 하락 → buySignal 없음
 _DOWNTREND = [10000 - i * 30 for i in range(60)]
 
 
-def test_scanner_emits_signal_on_uptrend_flip():
-    gw = _FakeGateway(_candles(_UPTREND_FLIP))
+def test_scanner_emits_signal_on_buy_signal():
+    """최근 봉에 BUY 시그널(trend -1→1 전환) 발생 → 진입."""
+    gw = _FakeGateway(_candles(_BUY_RECENT))
     scanner = SupertrendScanner(gw)
     signals = asyncio.run(scanner.scan(["005930"]))
     assert len(signals) == 1
     assert signals[0].signal_type == "supertrend"
     assert signals[0].strategy_id == "supertrend_v1"
+
+
+def test_scanner_no_signal_when_buy_is_stale():
+    """상승추세 지속이지만 BUY 시그널은 오래 전(16봉 전) → 미진입.
+
+    '상승추세 동안 매봉 매수'가 아니라 'BUY 전환 이벤트 1회'만 트리거함을 검증
+    (청산이 SELL 전환 봉에서만 발동하는 것과 대칭).
+    """
+    gw = _FakeGateway(_candles(_UPTREND_STALE))
+    scanner = SupertrendScanner(gw)
+    signals = asyncio.run(scanner.scan(["005930"]))
+    assert signals == []
 
 
 def test_scanner_no_signal_on_downtrend():
@@ -83,7 +100,7 @@ def test_scanner_skips_empty_candles():
 
 
 def test_scanner_sorts_by_score_desc():
-    gw = _FakeGateway(_candles(_UPTREND_FLIP))
+    gw = _FakeGateway(_candles(_BUY_RECENT))
     scanner = SupertrendScanner(gw)
     signals = asyncio.run(scanner.scan(["005930", "000660", "035720"]))
     scores = [s.score for s in signals]

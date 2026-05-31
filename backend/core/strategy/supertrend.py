@@ -165,14 +165,15 @@ class SupertrendParams:
     source: str = "hl2"           # 밴드 중심선 (Pine src=hl2)
     min_candles: int = 30         # ATR(10) 안정화 최소 봉수
 
-    # 진입 freshness 게이트:
-    #   None = 현재 상승추세(trend==1)면 진입 (추세추종 long-state screener, default).
-    #   N(int) = 마지막 N봉 내 상승 추세전환(buySignal) 발생 시에만 진입(flip-only).
-    entry_lookback: Optional[int] = None
+    # 진입 트리거 — 슈퍼트렌드 **buy 시그널**(trend -1→1 전환 봉) 발생 시에만 진입.
+    #   마지막 N봉 내 buySignal 이 있어야 진입. 5분봉 폴링 타이밍 흔들림 흡수용 N=2 default.
+    #   "상승추세 동안 매 사이클 매수"가 아니라 "BUY 전환 이벤트 1회"가 되도록 함 (청산과 대칭).
+    #   None 으로 두면 현재 상승추세(trend==1) 지속 중 매봉 진입 (추세추종 스크리너 모드).
+    entry_lookback: Optional[int] = 2
 
     # 청산 트리거 — 슈퍼트렌드 **sell 시그널**(trend 1→-1 전환 봉) 발생 시에만 청산.
     #   마지막 N봉 내 sellSignal 이 있어야 청산. 5분봉 폴링 타이밍 흔들림 흡수용 N=2 default.
-    #   "하락추세 동안 매 사이클 청산"이 아니라 "전환 이벤트 1회"가 되도록 함.
+    #   "하락추세 동안 매 사이클 청산"이 아니라 "전환 이벤트 1회"가 되도록 함 (진입과 대칭).
     exit_lookback: int = 2
 
     # 변동성 필터 (운영 override) — ATR% < min_atr_pct 면 진입 거부. 0 이면 비활성.
@@ -218,12 +219,14 @@ class SupertrendStrategy(Strategy):
         res = compute_supertrend(
             candles, period=p.atr_period, multiplier=p.multiplier, source=p.source,
         )
-        # 현재 상승추세여야 진입 (trend==1). flip-only 진입은 entry_lookback 로 옵션화.
+        # 현재 상승추세여야 진입 (trend==1) — buy 직후 추세 유지 확인용 안전판.
         if not res.trend or res.trend[-1] != 1:
             return None
+        # 진입 트리거: 최근 entry_lookback 봉 내 BUY 시그널(전환 봉)이 있어야 진입.
+        #   None 이면 추세추종 스크리너 모드(상승추세 지속 중 매봉 진입).
         if p.entry_lookback is not None:
             lb = max(1, p.entry_lookback)
-            if not any(res.buy_signals[-lb:]):
+            if not res.buy_signals or not any(res.buy_signals[-lb:]):
                 return None
 
         c = candles[-1]
