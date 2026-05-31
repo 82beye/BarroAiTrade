@@ -312,10 +312,14 @@ class TradingOrchestrator:
                             # BAR-OPS-09 Phase 2/3: 변동성 필터 운영 경로 적용 — ATR% < 3.5% 차단 (저변동·고가주).
                             # BAR-OPS-09 Phase 8e/8f: 진입 시간 게이트 — 14:00 이후 운영 신규 진입 차단 (장 후반 청산 여유 부족 손실 방지).
                             # 2026-05-29: gold_zone 1m+0.035 일관화(제안1) 원복 — 격자 백테스트상 근거 없음(1m+0.035=신호 전멸). gold default 유지.
+                            # 2026-05-31: 슈퍼트렌드 전용 검증 모드 — 사용자 요청으로 SignalScanner
+                            #   전 전략(sf_zone/f_zone/gold_zone) 일시 비활성, _supertrend_loop 만 운용.
+                            #   슈퍼트렌드 검증 완료 후 아래 enabled_strategies override 한 줄을 제거해 복원.
                             scanner = SignalScanner(
                                 gateway,
                                 f_zone_params=FZoneParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
                                 blue_line_params=BlueLineParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
+                                enabled_strategies={"sf_zone": False, "f_zone": False, "gold_zone": False},
                             )
                             signals = await scanner.scan(app_state.watchlist)
                             last_scan_time = now
