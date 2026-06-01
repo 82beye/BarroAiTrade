@@ -66,6 +66,30 @@ async def _run(args) -> int:
         print("보유 종목 없음.")
         return 0
 
+    # ── 전략 제외 게이트 — supertrend 등 시그널 전용 전략 보유분은 강제청산/평가에서 제외 ──
+    # 슈퍼트렌드는 5분봉 SELL 전환 시그널 발생 시에만 청산하는 추세추종 전략이라, 장마감
+    # 강제청산(--tp -100 등)이 시그널 없이 매도하면 안 된다(2026-06-01 버그 발견). 해당
+    # 보유분은 active_positions.json 의 strategy 태그로 식별해 평가 대상에서 제외한다.
+    # AccountBalance 는 frozen dataclass 라 balance.holdings 를 재할당할 수 없으므로,
+    # 로컬 변수 holdings 로 필터링하여 이후 평가·DCA·매도 전 경로에서 사용한다.
+    holdings = list(balance.holdings)
+    _excl = {s.strip() for s in (args.exclude_strategy or "").split(",")
+             if s.strip() and s.strip().lower() != "none"}
+    if _excl:
+        _expos = ActivePositionStore(args.pos_log).load_all()
+        _excl_syms = {
+            sym for sym, p in _expos.items()
+            if any((getattr(p, "strategy", "") or "").startswith(e) for e in _excl)
+        }
+        if _excl_syms:
+            skipped = [h.symbol for h in holdings if h.symbol in _excl_syms]
+            holdings = [h for h in holdings if h.symbol not in _excl_syms]
+            print(f"[제외] 전략({','.join(sorted(_excl))}) 보유분 {len(skipped)}종목 강제청산/평가 제외: "
+                  f"{', '.join(skipped)}")
+            if not holdings:
+                print("제외 후 평가 대상 종목 없음.")
+                return 0
+
     # PolicyConfig 자동 로드 (BAR-OPS-32) — CLI default 인 경우만 override
     cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
     tp = args.tp if args.tp != 5.0 else cfg.take_profit_pct
@@ -90,7 +114,7 @@ async def _run(args) -> int:
     active_positions = pos_store.load_all()
     contexts: dict[str, PositionContext] = {}
     if not force_mode:
-        for h in balance.holdings:
+        for h in holdings:
             pos = active_positions.get(h.symbol)
             if pos:
                 # peak 수익률 갱신
@@ -106,7 +130,7 @@ async def _run(args) -> int:
                     strategy=pos.strategy,
                 )
 
-    decisions = evaluate_all(balance.holdings, policy, contexts)
+    decisions = evaluate_all(holdings, policy, contexts)
     mode_label = "적응형" if contexts else "기본"
     print(
         f"== 보유 종목 평가 ({len(decisions)} 종목, TP={tp}%, SL={sl}%, "
@@ -136,7 +160,7 @@ async def _run(args) -> int:
     if args.auto_sell:
         active_positions = pos_store.load_all()
         dca_executed = 0
-        for h in balance.holdings:
+        for h in holdings:
             # SL 대상 종목은 DCA 스킵
             if h.symbol in sl_symbols:
                 continue
@@ -242,6 +266,12 @@ def main() -> None:
                     help="일일 거래수 한도 (기본 50)")
     ap.add_argument("--telegram", action="store_true",
                     help="Telegram 알림 (TELEGRAM_BOT_TOKEN/CHAT_ID 필요)")
+    ap.add_argument(
+        "--exclude-strategy", default="supertrend",
+        help="강제청산/평가에서 제외할 전략(콤마구분). 기본 'supertrend' — 슈퍼트렌드는 "
+             "SELL 전환 시그널 시에만 청산하는 추세추종 전략이라 장마감 강제청산 대상이 "
+             "아님. 'none' 또는 '' 지정 시 제외 없음(전 종목 평가).",
+    )
     args = ap.parse_args()
     sys.exit(asyncio.run(_run(args)))
 
