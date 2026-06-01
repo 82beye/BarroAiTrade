@@ -46,12 +46,18 @@ from backend.core.risk.live_order_gate import (
 from backend.core.backtester.market_regime import (
     MarketRegime, classify_regime, regime_weights,
 )
+from backend.core.supertrend_auto_trader import (
+    SupertrendAutoTrader, SupertrendAutoConfig,
+)
 
 KST = timezone(timedelta(hours=9))
 MARKET_OPEN = time(9, 5)       # 시초가 안정 후 매수 시작 (08:58→09:05)
 MARKET_CLOSE = time(15, 20)
-BUY_START = time(9, 5)         # 매수는 09:05 이후만
+BUY_START = time(9, 5)         # 매수는 09:05 이후만 (일반 전략: f_zone/sf_zone/gold_zone)
 SELL_START = time(9, 1)        # 매도 평가는 09:01부터
+# 슈퍼트렌드(시그널 전략)는 09:00 정규장 개장부터 진입 — 09:05/09:30 매수시간 규칙의 예외.
+#   --supertrend 활성 시 데몬 루프를 09:00 부터 가동(일반 전략은 BUY_START 09:05 자체 게이트로 보호).
+SUPERTREND_OPEN = time(9, 0)
 MIN_HOLD_MINUTES = 15          # 매수 후 최소 보유 (P7 5/20: 10→15, 노이즈 SL 회피)
 MAX_BUY_PER_CYCLE = 2          # 사이클당 최대 매수 2종목
 BUY_REENTRY_COOLDOWN_MIN = 30  # P6 (2026-05-20): 매수 후 동일 종목 재진입 금지 (30분)
@@ -753,6 +759,86 @@ async def _scan_and_buy(
     return executed
 
 
+# ── 슈퍼트렌드(시그널 전략) 자동매매 — 09:00 개장부터 예외 진입 ────────────────
+# 일반 전략(f_zone/sf_zone/gold_zone)은 BUY_START(09:05) 게이트로 보호되지만,
+# 슈퍼트렌드는 "특정 매매 시그널(BUY 전환) 발생 시 즉시" 진입하는 시그널 전략이라
+# 09:00 정규장 개장부터 진입을 허용한다(사용자 요청, 2026-06-01).
+#
+# 검증된 SupertrendAutoTrader(backend/core/supertrend_auto_trader.py)를 데몬과 동일한
+# 실거래 인프라(LeaderPicker universe / LiveOrderGate / ActivePositionStore /
+# AccountFetcher)로 인스턴스화해 매 사이클 run_cycle() 1회 실행. 진입+청산 모두 포함.
+#   - universe: 데몬과 동일한 KiwoomNativeLeaderPicker(당일 주도주 top-N) 결과를 사용.
+#   - 청산: strategy="supertrend" 포지션의 5분봉 SELL 전환 시 자동 매도(자체 처리).
+#   - 안전: market_hours_only=True(정규장 가드), dry_run 은 args.dry_run 그대로 전파.
+_supertrend_trader: "SupertrendAutoTrader | None" = None
+
+
+def _get_supertrend_trader(args, oauth, notifier) -> "SupertrendAutoTrader":
+    """SupertrendAutoTrader 싱글턴 — 데몬 인프라로 1회 구성 후 재사용."""
+    global _supertrend_trader
+    if _supertrend_trader is not None:
+        return _supertrend_trader
+
+    candle_fetcher = KiwoomNativeCandleFetcher(oauth=oauth)
+    account_fetcher = KiwoomNativeAccountFetcher(oauth=oauth)
+    executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
+    gate = LiveOrderGate(
+        executor=executor, audit_path=args.audit_log,
+        policy=GatePolicy(daily_max_orders=50),
+        notifier=notifier,
+    )
+    pos_store = ActivePositionStore(args.pos_log)
+    # _scan_and_buy 와 동일한 검증된 LeaderPicker 구성 (min_score 포함).
+    _st_cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
+    picker = KiwoomNativeLeaderPicker(
+        oauth=oauth, min_flu_rate=args.min_flu, min_score=_st_cfg.min_score,
+    )
+
+    async def _universe_provider() -> list[tuple[str, str]]:
+        """데몬과 동일한 당일 주도주 top-N 을 (symbol, name) 으로 반환."""
+        try:
+            leaders = await picker.pick(top_n=args.supertrend_top)
+            return [(c.symbol, c.name) for c in leaders]
+        except Exception as e:  # noqa: BLE001
+            print(f"  [ST-UNIVERSE-ERR] {type(e).__name__}: {e}")
+            return []
+
+    _supertrend_trader = SupertrendAutoTrader(
+        candle_fetcher=candle_fetcher,
+        account_fetcher=account_fetcher,
+        order_gate=gate,
+        pos_store=pos_store,
+        universe_provider=_universe_provider,
+        # notifier 미주입 — SupertrendAutoTrader._notify 는 send(level,title,body) 3-arg
+        # 시그니처를 기대하나 데몬 TelegramNotifier.send 는 1-arg(message)라 불일치.
+        # 체결 가시성은 _run_supertrend_cycle 의 console 출력 + order_audit.csv 로 확보.
+        # (LiveOrderGate 는 notifier=notifier 유지 → blocked 알림은 정상 발송.)
+        notifier=None,
+        config=SupertrendAutoConfig(
+            max_positions=args.supertrend_max_pos,
+            universe_max=args.supertrend_top,
+            market_hours_only=True,  # 정규장(09:00~15:20) 에서만 — 09:00 개장 즉시 진입
+        ),
+    )
+    return _supertrend_trader
+
+
+async def _run_supertrend_cycle(args, oauth, notifier) -> dict:
+    """슈퍼트렌드 진입+청산 1 사이클. 반환 {entered:[...], exited:[...]}."""
+    trader = _get_supertrend_trader(args, oauth, notifier)
+    result = await trader.run_cycle()
+    ts = _now_kst().strftime("%H:%M:%S")
+    for e in result.get("entered", []):
+        tag = "DRY_RUN" if e.get("dry_run") else "ORDERED"
+        print(f"  [{ts}][ST-{tag}] {e['symbol']} qty={e['qty']} @{e.get('price', 0):,.0f} "
+              f"strategy=supertrend order_no={e.get('order_no', '')}")
+    for x in result.get("exited", []):
+        tag = "DRY_RUN" if x.get("dry_run") else "SOLD"
+        print(f"  [{ts}][ST-{tag}] {x['symbol']} qty={x['qty']} (SELL 전환) "
+              f"order_no={x.get('order_no', '')}")
+    return result
+
+
 async def _save_balance_snapshot(oauth) -> None:
     """잔고 스냅샷을 balance_history.json에 추가 (일 1회)."""
     import json
@@ -808,8 +894,20 @@ async def _daemon(args):
     total_bought = 0
     total_sold = 0
 
+    # 슈퍼트렌드 활성 시 데몬 가동 개시를 09:00(개장)로 앞당김 — 09:00~09:05 사이에도
+    # supertrend 시그널 진입이 가능하게 한다. 일반 전략은 _scan_and_buy 내부 BUY_START
+    # (09:05) 게이트가 그대로 작동하므로 09:05 이전엔 일반 매수가 나가지 않는다.
+    daemon_open = SUPERTREND_OPEN if args.supertrend else MARKET_OPEN
+
+    def _daemon_hours() -> bool:
+        return daemon_open <= _now_kst().time() <= MARKET_CLOSE
+
+    if args.supertrend:
+        print(f"  [슈퍼트렌드] 활성 — 09:00 개장부터 BUY 전환 시그널 진입 "
+              f"(top={args.supertrend_top}, max_pos={args.supertrend_max_pos})")
+
     # 장 시작 전이면 대기
-    while not _in_market_hours():
+    while not _daemon_hours():
         now = _now_kst()
         print(f"  [{now.strftime('%H:%M:%S')}] 장 시작 대기중...")
         await asyncio.sleep(60)
@@ -819,7 +917,7 @@ async def _daemon(args):
     # 장 시작 잔고 스냅샷
     await _save_balance_snapshot(oauth)
 
-    while _in_market_hours():
+    while _daemon_hours():
         ts = _now_kst().strftime("%H:%M:%S")
 
         # 1) 매도 평가 (우선)
@@ -831,7 +929,7 @@ async def _daemon(args):
         except Exception as e:
             print(f"  [{ts}][SELL-ERROR] {type(e).__name__}: {e}")
 
-        # 2) 매수 스캔
+        # 2) 매수 스캔 (일반 전략 f_zone/sf_zone/gold_zone — 내부 BUY_START 09:05 게이트)
         try:
             buy_count = await _scan_and_buy(args, oauth, session_bought, recent_buys)
             if buy_count > 0:
@@ -840,8 +938,21 @@ async def _daemon(args):
         except Exception as e:
             print(f"  [{ts}][BUY-ERROR] {type(e).__name__}: {e}")
 
+        # 3) 슈퍼트렌드(시그널 전략) — 09:00 개장부터 BUY 전환 시그널 진입/청산
+        if args.supertrend:
+            try:
+                st_result = await _run_supertrend_cycle(args, oauth, notifier)
+                st_in = len(st_result.get("entered", []))
+                st_out = len(st_result.get("exited", []))
+                if st_in or st_out:
+                    total_bought += st_in
+                    total_sold += st_out
+                    print(f"  [{ts}] 슈퍼트렌드 진입 {st_in}건 / 청산 {st_out}건")
+            except Exception as e:
+                print(f"  [{ts}][ST-ERROR] {type(e).__name__}: {e}")
+
         # 다음 사이클까지 대기
-        if _in_market_hours():
+        if _daemon_hours():
             await asyncio.sleep(args.interval)
 
     # 장 마감 잔고 스냅샷
@@ -876,6 +987,20 @@ def main():
         "--dca-strategy-gate", action="store_true",
         help="고도화 #8: gold(되돌림/바닥) 전략 포지션의 DCA(물타기) 비활성 — 약전략 "
              "추세하락 평단 물타기 손실 확대 방지. 기본 off(동작 불변).",
+    )
+    # ── 슈퍼트렌드(시그널 전략) — 09:00 개장부터 예외 진입 ────────────────────
+    ap.add_argument(
+        "--supertrend", action="store_true",
+        help="슈퍼트렌드 시그널 전략 자동매매 활성 — 09:00 개장 즉시 BUY 전환 시그널 "
+             "발생 시 진입(09:05/09:30 매수시간 규칙 예외). 미지정 시 off(기존 동작 불변).",
+    )
+    ap.add_argument(
+        "--supertrend-top", type=int, default=20,
+        help="슈퍼트렌드 진입 스캔 유니버스(당일 주도주 top-N). 기본 20.",
+    )
+    ap.add_argument(
+        "--supertrend-max-pos", type=int, default=10,
+        help="슈퍼트렌드 동시 보유 종목 상한. 기본 10.",
     )
     args = ap.parse_args()
 
