@@ -64,7 +64,7 @@ def classify_regime(
     - 집계: 평균
     - 분류:
       BULL    if avg_return ≥ +5% and avg_bull_pct ≥ 55%
-      BEARISH if avg_return ≤ -5% or  avg_bull_pct ≤ 40%
+      BEARISH if avg_return ≤ -5% or (avg_bull_pct ≤ 40% and avg_return < +5%)
       SIDEWAYS else
     """
     if not candles_by_symbol:
@@ -91,7 +91,12 @@ def classify_regime(
 
     if avg_return >= 0.05 and avg_bull >= 0.55:
         return MarketRegime.BULL
-    if avg_return <= -0.05 or avg_bull <= 0.40:
+    # BEARISH: 평균수익률이 명확히 음(≤-5%)이거나, 양봉비율이 낮으면서(≤40%) 수익률도
+    #   강하지 않을(<+5%) 때만. 2026-06-01 정정 — 종전 'avg_bull≤40% OR' 단독 조건이,
+    #   소수의 큰 양봉 + 다수의 작은 음봉으로 급등한 종목(예: NAVER 30일 +40%인데 양봉비율
+    #   27%)을 BEARISH 로 오분류 → 강세장에서 매수 차단. 수익률이 확실히 양(+5%↑)이면
+    #   양봉비율이 낮아도 BEARISH 가 아니다(추세는 상승).
+    if avg_return <= -0.05 or (avg_bull <= 0.40 and avg_return < 0.05):
         return MarketRegime.BEARISH
     return MarketRegime.SIDEWAYS
 
