@@ -69,9 +69,16 @@ def _now_kst() -> datetime:
 
 
 def _compute_daily_pnl_pct(current_total: float) -> Decimal:
-    """전일 잔고 대비 당일 손익률(%) 계산.
+    """전일 마감 잔고 대비 당일 손익률(%) 계산.
 
-    balance_history.json 에서 어제 날짜의 total 을 읽어 비교.
+    balance_history.json 에서 직전 거래일 마감 잔고를 읽어 current_total 과 비교.
+
+    기준은 직전 항목의 **cash**(마감 현금) 우선. 마감 시점엔 보유 종목이 청산되어
+    전액 현금화되므로 cash 가 그날의 청산 후 자산총액 = 다음날 시작 자산이다.
+    종전엔 'total'(장중 평가액 포함값)을 기준으로 써서, 전일 장중 보유분이 청산되어
+    현금화된 것을 손실로 오인 → 가짜 일일손실(예: -8.45%)로 KillSwitch 오발동했다.
+    (2026-06-01 fix) cash 누락된 옛 항목은 total 로 폴백.
+
     데이터 없거나 파싱 실패 시 Decimal("0.0") 반환 (fail-open).
     """
     import json as _json
@@ -81,16 +88,20 @@ def _compute_daily_pnl_pct(current_total: float) -> Decimal:
     try:
         history = _json.loads(path.read_text(encoding="utf-8"))
         today_str = _now_kst().strftime("%Y-%m-%d")
-        yesterday_entry = next(
-            (e for e in reversed(history) if e.get("date") != today_str and e.get("total", 0) > 0),
+        # 직전 거래일 항목 (오늘 제외, 양수 기준값). 주말 갭이 있어도 가장 최근 거래일.
+        prev_entry = next(
+            (e for e in reversed(history)
+             if e.get("date") != today_str
+             and (e.get("cash", 0) > 0 or e.get("total", 0) > 0)),
             None,
         )
-        if yesterday_entry is None:
+        if prev_entry is None:
             return Decimal("0.0")
-        prev_total = float(yesterday_entry["total"])
-        if prev_total <= 0:
+        # cash(마감 현금) 우선 — 청산 후 자산총액. 누락 시 total 폴백.
+        prev_base = float(prev_entry.get("cash") or prev_entry.get("total") or 0)
+        if prev_base <= 0:
             return Decimal("0.0")
-        pnl_pct = (current_total - prev_total) / prev_total * 100.0
+        pnl_pct = (current_total - prev_base) / prev_base * 100.0
         return Decimal(str(round(pnl_pct, 4)))
     except Exception:
         return Decimal("0.0")
