@@ -904,7 +904,13 @@ async def _daemon(args):
 
     if args.supertrend:
         print(f"  [슈퍼트렌드] 활성 — 09:00 개장부터 BUY 전환 시그널 진입 "
-              f"(top={args.supertrend_top}, max_pos={args.supertrend_max_pos})")
+              f"(top={args.supertrend_top}, max_pos={args.supertrend_max_pos}, "
+              f"interval={args.supertrend_interval}s)")
+
+    # 슈퍼트렌드는 5분봉 전략 — 매 데몬 사이클(60s)마다 top-N×5분봉을 조회하면 일반
+    # 전략 호출과 겹쳐 Kiwoom API rate-limit(429)을 유발. 5분봉은 5분마다 1봉만
+    # 갱신되므로 supertrend 평가를 supertrend_interval(기본 300s)마다로 throttle 한다.
+    last_st_run: datetime | None = None
 
     # 장 시작 전이면 대기
     while not _daemon_hours():
@@ -938,18 +944,24 @@ async def _daemon(args):
         except Exception as e:
             print(f"  [{ts}][BUY-ERROR] {type(e).__name__}: {e}")
 
-        # 3) 슈퍼트렌드(시그널 전략) — 09:00 개장부터 BUY 전환 시그널 진입/청산
+        # 3) 슈퍼트렌드(시그널 전략) — 09:00 개장부터 BUY 전환 시그널 진입/청산.
+        #    5분봉 전략이므로 supertrend_interval(기본 300s)마다만 평가 → 429 회피.
         if args.supertrend:
-            try:
-                st_result = await _run_supertrend_cycle(args, oauth, notifier)
-                st_in = len(st_result.get("entered", []))
-                st_out = len(st_result.get("exited", []))
-                if st_in or st_out:
-                    total_bought += st_in
-                    total_sold += st_out
-                    print(f"  [{ts}] 슈퍼트렌드 진입 {st_in}건 / 청산 {st_out}건")
-            except Exception as e:
-                print(f"  [{ts}][ST-ERROR] {type(e).__name__}: {e}")
+            now_kst = _now_kst()
+            due = (last_st_run is None
+                   or (now_kst - last_st_run).total_seconds() >= args.supertrend_interval)
+            if due:
+                last_st_run = now_kst
+                try:
+                    st_result = await _run_supertrend_cycle(args, oauth, notifier)
+                    st_in = len(st_result.get("entered", []))
+                    st_out = len(st_result.get("exited", []))
+                    if st_in or st_out:
+                        total_bought += st_in
+                        total_sold += st_out
+                        print(f"  [{ts}] 슈퍼트렌드 진입 {st_in}건 / 청산 {st_out}건")
+                except Exception as e:
+                    print(f"  [{ts}][ST-ERROR] {type(e).__name__}: {e}")
 
         # 다음 사이클까지 대기
         if _daemon_hours():
@@ -995,12 +1007,18 @@ def main():
              "발생 시 진입(09:05/09:30 매수시간 규칙 예외). 미지정 시 off(기존 동작 불변).",
     )
     ap.add_argument(
-        "--supertrend-top", type=int, default=20,
-        help="슈퍼트렌드 진입 스캔 유니버스(당일 주도주 top-N). 기본 20.",
+        "--supertrend-top", type=int, default=10,
+        help="슈퍼트렌드 진입 스캔 유니버스(당일 주도주 top-N). 기본 10 "
+             "(20→10 축소, API rate-limit 완화).",
     )
     ap.add_argument(
         "--supertrend-max-pos", type=int, default=10,
         help="슈퍼트렌드 동시 보유 종목 상한. 기본 10.",
+    )
+    ap.add_argument(
+        "--supertrend-interval", type=int, default=300,
+        help="슈퍼트렌드 평가 주기(초). 5분봉 전략이라 기본 300(5분) — 매 데몬 "
+             "사이클마다 top-N×5분봉 조회로 인한 Kiwoom 429 rate-limit 회피.",
     )
     args = ap.parse_args()
 
