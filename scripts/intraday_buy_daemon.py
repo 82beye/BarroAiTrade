@@ -845,14 +845,23 @@ async def _run_supertrend_cycle(args, oauth, notifier) -> dict:
     trader = _get_supertrend_trader(args, oauth, notifier)
     result = await trader.run_cycle()
     ts = _now_kst().strftime("%H:%M:%S")
-    for e in result.get("entered", []):
+    entered = result.get("entered", [])
+    exited = result.get("exited", [])
+    for e in entered:
         tag = "DRY_RUN" if e.get("dry_run") else "ORDERED"
         print(f"  [{ts}][ST-{tag}] {e['symbol']} qty={e['qty']} @{e.get('price', 0):,.0f} "
               f"strategy=supertrend order_no={e.get('order_no', '')}")
-    for x in result.get("exited", []):
+    for x in exited:
         tag = "DRY_RUN" if x.get("dry_run") else "SOLD"
         print(f"  [{ts}][ST-{tag}] {x['symbol']} qty={x['qty']} (SELL 전환) "
               f"order_no={x.get('order_no', '')}")
+    # Heartbeat — 진입·청산 0건이어도 사이클이 돌았음을 항상 1줄 남긴다(모니터링 가시성).
+    #   진입 0건의 정상 사유(전 종목 추세 한가운데, 최근 전환봉 없음)와 사이클 멈춤을 구분.
+    held = trader._pos.load_all()
+    st_held = sum(1 for p in held.values()
+                  if (getattr(p, "strategy", "") or "").startswith("supertrend"))
+    print(f"  [{ts}][ST-CYCLE] 평가완료 — 진입 {len(entered)} / 청산 {len(exited)} "
+          f"/ 슈퍼트렌드 보유 {st_held}종목 (universe top={args.supertrend_top})")
     return result
 
 
