@@ -62,6 +62,8 @@ MIN_HOLD_MINUTES = 15          # 매수 후 최소 보유 (P7 5/20: 10→15, 노
 MAX_BUY_PER_CYCLE = 2          # 사이클당 최대 매수 2종목
 BUY_REENTRY_COOLDOWN_MIN = 30  # P6 (2026-05-20): 매수 후 동일 종목 재진입 금지 (30분)
 HARD_SL_PCT = -5.0             # P7 (2026-05-20): cooldown 안 극한 SL 우회 임계
+_MAX_FLU_RATE = 30.0           # 급등 추격매수 차단 등락률 상한(%). 2026-06-01 25→30
+                               #   완화 — 강세장 +29%대 주도주 진입 허용, 상한가만 차단.
 
 
 def _now_kst() -> datetime:
@@ -541,8 +543,12 @@ async def _scan_and_buy(
         already_held | active_symbols | today_sold | session_bought
         | cooldown_buys | audit_buys
     )
+    # 급등 추격매수 방지 필터 — 등락률이 _MAX_FLU_RATE 이상인 종목 제외.
+    # 2026-06-01: 25.0→30.0 완화. 강세장(코스피 급등)에서 +29%대 주도주(LG전자·
+    # 두산로보틱스 등)가 25% 게이트에 막혀 진입 기회를 전부 놓치던 문제. 상한가(+30%)
+    # 직전까지는 진입 허용하되, 상한가 도달분만 차단(추격매수 손실 위험 한계선).
     filtered = [c for c in leaders if c.symbol not in excluded
-                and c.flu_rate < 25.0 and c.cur_price >= 5_000]
+                and c.flu_rate < _MAX_FLU_RATE and c.cur_price >= 5_000]
 
     if not filtered:
         return 0
