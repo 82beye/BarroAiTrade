@@ -51,6 +51,10 @@ class SupertrendAutoConfig:
     min_candles: int = 30              # 지표 안정화 최소 봉수
     tic_scope: str = "5"               # 5분봉
     universe_max: int = 80             # 진입 스캔 유니버스 상한
+    # 최소 진입가격 — 저가주/동전주 제외. 2026-06-02: 252670(종가 79원)이 슬롯금액÷주가로
+    #   qty=38,219주(현금전액급) 폭주 진입 시도 → 동전주는 수량이 폭주하고 변동성·체결
+    #   리스크가 커 진입 후보에서 제외. price < min_price 면 candidates 에 안 담는다.
+    min_price: Decimal = Decimal("1000")
     # 자금배분 (evaluate_risk_gate 기본과 동일: 80%÷10 = 8%/종목)
     max_total_position_ratio: Decimal = Decimal("0.80")
     max_per_position_ratio: Decimal = Decimal("0.10")
@@ -207,6 +211,11 @@ class SupertrendAutoTrader:
                         continue
                 price = Decimal(str(float(bars[-1].close)))
                 if price <= 0:
+                    continue
+                # 저가주/동전주 제외 — min_price 미만은 수량 폭주·체결 리스크로 진입 차단.
+                if price < self.config.min_price:
+                    logger.debug("슈퍼트렌드 진입 제외(저가주): %s @%s < min_price %s",
+                                 symbol, price, self.config.min_price)
                     continue
                 candidates.append((symbol, name, price))
             except Exception as e:
