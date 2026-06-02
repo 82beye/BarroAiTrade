@@ -71,7 +71,12 @@ def _now_kst() -> datetime:
 
 
 def _compute_daily_pnl_pct(current_total: float) -> Decimal:
-    """전일 마감 총자산 대비 당일 손익률(%) 계산.
+    """[DEPRECATED 2026-06-02] balance_history.json 스냅샷 기반 일일손익률 — 더 이상
+    일일손실 게이트 입력으로 쓰지 않는다(호출처 제거). 스냅샷 오염으로 가짜 손실
+    KillSwitch 오발동이 사흘 연속(5/29·6/1·6/2) 발생해, 게이트 입력을 브로커 실시간
+    balance.total_pnl_rate 로 일원화함. 본 함수는 참고용으로만 보존(미사용).
+
+    전일 마감 총자산 대비 당일 손익률(%) 계산.
 
     balance_history.json 에서 직전 거래일 마감 잔고를 읽어 current_total 과 비교.
 
@@ -713,9 +718,16 @@ async def _scan_and_buy(
     if not buyable:
         return 0
 
-    # BAR-166: daily_pnl_pct 계산 — 전일 대비 당일 손익률(%).
-    current_total = float(deposit.cash) + float(balance.total_eval)
-    daily_pnl_pct = _compute_daily_pnl_pct(current_total)
+    # 일일손실 게이트 입력 — 브로커 실시간 계좌 평가수익률(total_pnl_rate)을 사용.
+    # 2026-06-02 근본수정: 종전 balance_history.json(파일 스냅샷) 기반
+    #   _compute_daily_pnl_pct 는 마감 스냅샷이 미청산 평가/주말갭/강제청산 타이밍으로
+    #   오염되면 가짜 손실(-8.45%·-26.24% 등)로 KillSwitch 를 오발동시켜 사흘 연속
+    #   (5/29·6/1·6/2) 매수 전면차단 사고를 냈다. 파일 의존을 끊고, 잔고 조회의
+    #   total_pnl_rate(계좌 전체 평가수익률 %)로 일원화한다. SupertrendAutoTrader
+    #   (_account_pnl_pct)가 이미 쓰는 방식과 동일 — 두 매매 경로 게이트 입력 통일.
+    #   '누적 평가수익률'이라 엄밀한 당일손익과는 다르나, 손실 시 매수 차단이라는
+    #   안전 방향엔 부합하며 파일 오염 리스크가 없다(보수적·결정적).
+    daily_pnl_pct = Decimal(str(getattr(balance, "total_pnl_rate", 0) or 0))
 
     # 주문 실행
     notifier = TelegramNotifier.from_env() if args.telegram else None
