@@ -71,15 +71,22 @@ def _now_kst() -> datetime:
 
 
 def _compute_daily_pnl_pct(current_total: float) -> Decimal:
-    """전일 마감 잔고 대비 당일 손익률(%) 계산.
+    """전일 마감 총자산 대비 당일 손익률(%) 계산.
 
     balance_history.json 에서 직전 거래일 마감 잔고를 읽어 current_total 과 비교.
 
-    기준은 직전 항목의 **cash**(마감 현금) 우선. 마감 시점엔 보유 종목이 청산되어
-    전액 현금화되므로 cash 가 그날의 청산 후 자산총액 = 다음날 시작 자산이다.
-    종전엔 'total'(장중 평가액 포함값)을 기준으로 써서, 전일 장중 보유분이 청산되어
-    현금화된 것을 손실로 오인 → 가짜 일일손실(예: -8.45%)로 KillSwitch 오발동했다.
-    (2026-06-01 fix) cash 누락된 옛 항목은 total 로 폴백.
+    기준은 직전 항목의 **total**(현금+평가 총자산). 호출부 current_total 이
+    `deposit.cash + balance.total_eval`(오늘 현금+평가=총자산)이므로, 비교 기준도
+    반드시 같은 '총자산'이어야 대칭이 맞는다(2026-06-02 fix).
+
+    이력:
+    - (2026-06-01) total→cash 변경: 당시 전일 장중 평가가 청산돼 현금화된 것을
+      손실로 오인하는 문제 회피 목적이었으나, current_total 은 평가 포함 총자산이라
+      prev=cash 와 기준 불일치(사과 vs 오렌지) → 전일 평가액만큼 가짜 손실
+      (-26% 등)이 발생했다.
+    - (2026-06-02) total 로 환원해 대칭 복원. 전일 장중 평가 오염 문제는 supertrend
+      가 강제청산 제외(540724e)되어 마감 스냅샷 평가액이 정상 보유분이므로 해소.
+      total 누락된 옛 항목은 cash 로 폴백.
 
     데이터 없거나 파싱 실패 시 Decimal("0.0") 반환 (fail-open).
     """
@@ -94,13 +101,13 @@ def _compute_daily_pnl_pct(current_total: float) -> Decimal:
         prev_entry = next(
             (e for e in reversed(history)
              if e.get("date") != today_str
-             and (e.get("cash", 0) > 0 or e.get("total", 0) > 0)),
+             and (e.get("total", 0) > 0 or e.get("cash", 0) > 0)),
             None,
         )
         if prev_entry is None:
             return Decimal("0.0")
-        # cash(마감 현금) 우선 — 청산 후 자산총액. 누락 시 total 폴백.
-        prev_base = float(prev_entry.get("cash") or prev_entry.get("total") or 0)
+        # total(총자산=현금+평가) 우선 — current_total 과 동일 기준. 누락 시 cash 폴백.
+        prev_base = float(prev_entry.get("total") or prev_entry.get("cash") or 0)
         if prev_base <= 0:
             return Decimal("0.0")
         pnl_pct = (current_total - prev_base) / prev_base * 100.0
