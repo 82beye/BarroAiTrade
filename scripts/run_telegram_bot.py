@@ -590,6 +590,12 @@ def _build_supertrend_auto_trader(notifier):
         enabled=True,
         interval_sec=int(os.environ.get("SUPERTREND_AUTO_INTERVAL_SEC", "300")),
         max_positions=int(os.environ.get("SUPERTREND_AUTO_MAX_POS", "10")),
+        # 6/2 복기 개선 3건 (recon_2026-06-02) — env 로 조정 가능, 기본값=개선 적용.
+        entry_start_time=os.environ.get("SUPERTREND_AUTO_ENTRY_START", "09:30"),
+        min_adx=float(os.environ.get("SUPERTREND_AUTO_MIN_ADX", "25")),
+        min_flip_atr_mult=float(os.environ.get("SUPERTREND_AUTO_MIN_FLIP", "1.0")),
+        max_order_qty=int(os.environ.get("SUPERTREND_AUTO_MAX_ORDER_QTY", "5000")),
+        max_order_value=float(os.environ.get("SUPERTREND_AUTO_MAX_ORDER_VALUE", "5000000")),
     )
     return SupertrendAutoTrader(
         candle_fetcher=candle_fetcher,

@@ -117,6 +117,15 @@ class _FakePosStore:
         })()
 
 
+def _base_config(**kw):
+    """순수 진입 로직 테스트용 기본 config — 6/2 개선(장초반차단/whipsaw/하드캡) 비활성.
+    개선 기능은 각 전용 테스트에서 명시적으로 켜서 검증한다."""
+    defaults = dict(entry_start_time="", min_adx=0.0, min_flip_atr_mult=0.0,
+                    max_order_qty=0, max_order_value=0.0)
+    defaults.update(kw)
+    return SupertrendAutoConfig(**defaults)
+
+
 def _trader(candles_map, *, universe, gate=None, account=None, pos=None, config=None,
             session=None):
     async def _uni():
@@ -127,7 +136,7 @@ def _trader(candles_map, *, universe, gate=None, account=None, pos=None, config=
         order_gate=gate or _FakeGate(),
         pos_store=pos or _FakePosStore(),
         universe_provider=_uni,
-        config=config or SupertrendAutoConfig(),
+        config=config or _base_config(),
         session_service=session or _FakeSession(TradingSession.REGULAR),
     )
 
@@ -174,7 +183,7 @@ async def test_respects_max_positions():
     gate = _FakeGate()
     pos = _FakePosStore()
     pos._inject("000001"); pos._inject("000002")  # 이미 2종목
-    cfg = SupertrendAutoConfig(max_positions=2)
+    cfg = _base_config(max_positions=2)
     t = _trader({"005930": _BUY}, universe=[("005930", "삼성전자")],
                 gate=gate, pos=pos, config=cfg)
     await t.run_cycle()
@@ -224,7 +233,7 @@ async def test_sizing_uses_8pct_per_symbol():
 @pytest.mark.asyncio
 async def test_disabled_does_nothing():
     gate = _FakeGate()
-    cfg = SupertrendAutoConfig(enabled=False)
+    cfg = _base_config(enabled=False)
     t = _trader({"005930": _BUY}, universe=[("005930", "삼성전자")], gate=gate, config=cfg)
     # run_cycle 직접 호출은 enabled 무관(루프 게이트는 run_forever) — 여기선 run_forever 1틱 모사 대신
     # enabled 게이트가 run_forever 에 있으므로 run_cycle 자체는 동작. 대신 토글 필드만 확인.
@@ -279,7 +288,7 @@ async def test_market_hours_guard_skips_after_hours():
 @pytest.mark.asyncio
 async def test_market_hours_guard_disabled_allows_any_session():
     gate = _FakeGate()
-    cfg = SupertrendAutoConfig(market_hours_only=False)
+    cfg = _base_config(market_hours_only=False)
     t = _trader({"005930": _BUY}, universe=[("005930", "삼성전자")],
                 gate=gate, config=cfg, session=_FakeSession(TradingSession.CLOSED))
     await t.run_cycle()
@@ -294,3 +303,95 @@ async def test_market_hours_guard_allows_regular():
                 gate=gate, session=_FakeSession(TradingSession.REGULAR))
     await t.run_cycle()
     assert len(gate.buys) == 1
+
+
+# ══ 6/2 복기 개선 3건 (recon_2026-06-02) ══════════════════════════════════════
+
+# ── [개선1] 장초반 진입 차단 (_entry_time_open) ──────────────────────────────
+def test_entry_start_time_empty_always_open():
+    """entry_start_time 빈값 → 항상 진입 허용(True)."""
+    assert _trader({}, universe=[], config=_base_config(entry_start_time=""))._entry_time_open() is True
+
+
+def test_entry_start_time_cutoff_evaluates():
+    """entry_start_time 설정 시 _entry_time_open 이 bool 반환(현재 시각 기준 비교)."""
+    t = _trader({}, universe=[], config=_base_config(entry_start_time="09:30"))
+    assert isinstance(t._entry_time_open(), bool)
+
+
+@pytest.mark.asyncio
+async def test_entry_start_time_empty_allows():
+    """entry_start_time 빈값이면 시각 무관 진입 허용."""
+    gate = _FakeGate()
+    t = _trader({"005930": _BUY}, universe=[("005930","삼성전자")],
+                gate=gate, config=_base_config(entry_start_time=""))
+    await t.run_cycle()
+    assert len(gate.buys) == 1
+
+
+# ── [개선2] whipsaw 필터 (_whipsaw_pass) ─────────────────────────────────────
+@pytest.mark.asyncio
+async def test_whipsaw_filter_blocks_weak_with_high_adx_req():
+    """min_adx 과대(99) → 합성 약추세 BUY 거부."""
+    gate = _FakeGate()
+    t = _trader({"005930": _BUY}, universe=[("005930","삼성전자")],
+                gate=gate, config=_base_config(min_adx=99.0, min_flip_atr_mult=0.0))
+    await t.run_cycle()
+    assert gate.buys == []   # ADX 99 미달 → 진입 0
+
+
+@pytest.mark.asyncio
+async def test_whipsaw_filter_off_allows():
+    """필터 0(비활성) → 진입 허용 (기존 무필터 동작)."""
+    gate = _FakeGate()
+    t = _trader({"005930": _BUY}, universe=[("005930","삼성전자")],
+                gate=gate, config=_base_config(min_adx=0.0, min_flip_atr_mult=0.0))
+    await t.run_cycle()
+    assert len(gate.buys) == 1
+
+
+@pytest.mark.asyncio
+async def test_whipsaw_flip_gate_blocks_excessive_mult():
+    """FLIP 과대(100·ATR) → 약한 전환 거부."""
+    gate = _FakeGate()
+    t = _trader({"005930": _BUY}, universe=[("005930","삼성전자")],
+                gate=gate, config=_base_config(min_adx=0.0, min_flip_atr_mult=100.0))
+    await t.run_cycle()
+    assert gate.buys == []
+
+
+# ── [개선3] 수량 하드캡 (_cap_qty) ───────────────────────────────────────────
+def test_cap_qty_by_quantity():
+    t = _trader({}, universe=[], config=_base_config(max_order_qty=100, max_order_value=0.0))
+    assert t._cap_qty(38219, 5000.0, "252670") == 100   # 수량캡
+
+
+def test_cap_qty_by_value():
+    t = _trader({}, universe=[], config=_base_config(max_order_qty=0, max_order_value=1_000_000.0))
+    # 100만 / 5000 = 200주 상한
+    assert t._cap_qty(38219, 5000.0, "252670") == 200
+
+
+def test_cap_qty_no_cap_when_zero():
+    t = _trader({}, universe=[], config=_base_config(max_order_qty=0, max_order_value=0.0))
+    assert t._cap_qty(38219, 5000.0, "252670") == 38219  # 캡 없음
+
+
+def test_cap_qty_within_limit_unchanged():
+    t = _trader({}, universe=[], config=_base_config(max_order_qty=5000, max_order_value=5_000_000.0))
+    assert t._cap_qty(10, 70000.0, "005930") == 10  # 한도 내 → 그대로
+
+
+@pytest.mark.asyncio
+async def test_cap_qty_applied_in_cycle():
+    """진입 사이클에서 저가종목 거대수량이 하드캡으로 클램프되어 주문됨."""
+    gate = _FakeGate()
+    # 저가 ETF 모사: 예수금 큼 + 저가 → recommended_qty 거대
+    acct = _FakeAccount(cash=100_000_000.0)
+    # _BUY 마지막 종가는 7900 근처 → 8%×1억/7900 ≈ 1013주, 캡 500 적용
+    t = _trader({"005930": _BUY}, universe=[("005930","저가주")],
+                gate=gate, account=acct,
+                config=_base_config(max_order_qty=500, max_order_value=0.0))
+    await t.run_cycle()
+    assert len(gate.buys) == 1
+    assert gate.buys[0][1] == 500   # 하드캡 적용

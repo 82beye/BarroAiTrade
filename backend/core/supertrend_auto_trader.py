@@ -34,6 +34,7 @@ from backend.core.risk.balance_gate import evaluate_risk_gate
 from backend.core.market_session.service import MarketSessionService
 from backend.core.strategy.supertrend import (
     SupertrendParams,
+    compute_adx,
     compute_supertrend,
 )
 from backend.models.market import TradingSession
@@ -63,6 +64,24 @@ class SupertrendAutoConfig:
     #   에서만 매매 사이클 실행. 그 외 시간엔 사이클 skip(주문/시세호출 안 함).
     #   시장가 자동주문 전략이므로 시간외(지정가만 가능) 세션은 진입 자체를 막는다.
     market_hours_only: bool = True
+
+    # ── 6/2 복기 개선 3건 (2026-06-03, recon_2026-06-02) ──────────────────────
+    # [개선1] 장초반 진입 차단 — 개장 직후 변동성 구간(09:00~entry_start_time)은
+    #   ATR 밴드 불안정·거짓 전환 빈발(6/2 466100 -7.18% 등). 이 시각 이전엔 진입 보류.
+    #   KST HH:MM. None 이면 비활성. 청산은 시각 무관(보유 리스크 관리 우선).
+    entry_start_time: str = "09:30"
+
+    # [개선2] whipsaw 필터 — 진입 시 ADX(추세강도) + FLIP(전환 이탈폭) 게이트 적용.
+    #   백테스트상 ADX≥25/FLIP≥1.0 이 PF 1.76→2.00, 승률 35→44% 로 개선.
+    #   6/2 자동매매는 무필터(기본 0)라 거짓 전환을 다 매매 → 적자. 운영 기본 ON.
+    min_adx: float = 25.0          # ADX(14) < 이 값이면 진입 거부 (0=비활성)
+    adx_period: int = 14
+    min_flip_atr_mult: float = 1.0  # 전환봉이 직전 dn밴드(저항)를 ATR×이배 이상 돌파해야 진입 (0=비활성)
+
+    # [개선3] 주문 수량 하드캡 — 저가 종목 사이징 폭주 방지(6/2 252670 38,219주 RuntimeError).
+    #   단일주문 절대 상한: 수량·금액 둘 중 작은 쪽으로 클램프. 0 이면 해당 캡 비활성.
+    max_order_qty: int = 5000          # 단일주문 최대 수량
+    max_order_value: float = 5_000_000.0  # 단일주문 최대 금액(원) — qty×price 상한
 
 
 class SupertrendAutoTrader:
@@ -179,6 +198,13 @@ class SupertrendAutoTrader:
             except Exception as e:
                 logger.error("슈퍼트렌드 청산 실패: %s — %s", symbol, type(e).__name__)
 
+        # ── [개선1] 장초반 진입 차단 — 개장 직후 변동성 구간 진입 보류 ──────
+        # 청산은 위에서 이미 수행(보유 리스크 관리 우선), 진입만 차단한다.
+        if not self._entry_time_open():
+            logger.debug("슈퍼트렌드 진입 보류 — 장초반(< %s) 변동성 구간",
+                         self.config.entry_start_time)
+            return result
+
         # ── 진입: 유니버스 BUY 전환 (미보유만, 상한 준수) ────────────────────
         # 청산 후 갱신된 보유 수 기준
         held_after = self._pos.load_all()
@@ -209,6 +235,9 @@ class SupertrendAutoTrader:
                     n = max(1, lbe)
                     if not res.buy_signals or not any(res.buy_signals[-n:]):
                         continue
+                # ── [개선2] whipsaw 필터 — ADX 추세강도 + FLIP 전환 이탈폭 ──
+                if not self._whipsaw_pass(bars, res, symbol):
+                    continue
                 price = Decimal(str(float(bars[-1].close)))
                 if price <= 0:
                     continue
@@ -242,15 +271,19 @@ class SupertrendAutoTrader:
                 break
             if rec.blocked or rec.recommended_qty <= 0:
                 continue
+            # ── [개선3] 주문 수량 하드캡 — 저가종목 사이징 폭주 방지 ──────────
+            qty = self._cap_qty(rec.recommended_qty, float(rec.cur_price), rec.symbol)
+            if qty <= 0:
+                continue
             try:
                 r = await self._gate.place_buy(
-                    symbol=rec.symbol, qty=rec.recommended_qty,
+                    symbol=rec.symbol, qty=qty,
                     daily_pnl_pct=daily_pnl_pct, strategy_id=_STRATEGY_ID,
                 )
                 self._pos.create_from_order(
                     symbol=rec.symbol, name=rec.name, strategy=_STRATEGY_ID,
                     entry_price=float(rec.cur_price),
-                    total_recommended_qty=rec.recommended_qty,
+                    total_recommended_qty=qty,
                     order_no=getattr(r, "order_no", ""),
                 )
                 placed += 1
@@ -259,13 +292,82 @@ class SupertrendAutoTrader:
                                           "order_no": getattr(r, "order_no", ""),
                                           "dry_run": getattr(r, "dry_run", False)})
                 logger.info("슈퍼트렌드 자동진입: %s qty=%d @%.0f",
-                            rec.symbol, rec.recommended_qty, float(rec.cur_price))
+                            rec.symbol, qty, float(rec.cur_price))
                 await self._notify("슈퍼트렌드 자동매수",
-                                   f"{rec.symbol} {rec.name} {rec.recommended_qty}주 @{int(rec.cur_price):,}")
+                                   f"{rec.symbol} {rec.name} {qty}주 @{int(rec.cur_price):,}")
             except Exception as e:
                 logger.error("슈퍼트렌드 진입 주문 실패: %s — %s", rec.symbol, type(e).__name__)
 
         return result
+
+    # ── 6/2 복기 개선 헬퍼 ────────────────────────────────────────────────────
+    def _entry_time_open(self) -> bool:
+        """[개선1] 현재 KST 시각이 entry_start_time 이후면 True(진입 허용).
+
+        entry_start_time None/빈값이면 항상 허용. 세션 판단기(KST) 기준 시각 사용.
+        """
+        cutoff = (self.config.entry_start_time or "").strip()
+        if not cutoff:
+            return True
+        try:
+            from datetime import datetime, timezone, timedelta
+            now = datetime.now(timezone(timedelta(hours=9))).time()
+            hh, mm = cutoff.split(":")
+            from datetime import time as dtime
+            return now >= dtime(int(hh), int(mm))
+        except Exception:
+            return True  # 파싱 실패 시 보수적으로 허용(기존 동작)
+
+    def _whipsaw_pass(self, bars, res, symbol: str) -> bool:
+        """[개선2] ADX 추세강도 + FLIP 전환 이탈폭 게이트. 통과 시 True.
+
+        - ADX(adx_period) < min_adx → 횡보로 보고 거부.
+        - 최근 BUY 전환 봉이 '방금 돌파한 저항(직전 dn밴드)'을 ATR×min_flip_atr_mult
+          이상 넘지 못하면 약한 전환(휩쏘)으로 거부. (supertrend.py 정정 정의와 동일)
+        둘 다 0 이면 해당 게이트 비활성(기존 무필터 동작).
+        """
+        c = self.config
+        # (1) ADX
+        if c.min_adx > 0:
+            adx = compute_adx(bars, period=c.adx_period)
+            adx_now = adx[-1] if adx else 0.0
+            if adx_now < c.min_adx:
+                logger.debug("%s: ADX %.1f < %.1f — 진입거부(횡보)", symbol, adx_now, c.min_adx)
+                return False
+        # (2) FLIP — 최근 BUY 전환봉의 저항(직전 dn밴드) 대비 이탈폭
+        if c.min_flip_atr_mult > 0:
+            if True in res.buy_signals:
+                flip_bar = len(res.buy_signals) - 1 - res.buy_signals[::-1].index(True)
+                atr_ref = res.atr[flip_bar]
+                resist = res.dn[flip_bar - 1] if flip_bar >= 1 else res.supertrend[flip_bar]
+                breakout = float(bars[flip_bar].close) - resist
+            else:
+                atr_ref = res.atr[-1]
+                breakout = float(bars[-1].close) - res.supertrend[-1]
+            if atr_ref <= 0 or breakout < c.min_flip_atr_mult * atr_ref:
+                logger.debug("%s: 전환이탈폭 %.1f < %.2f·ATR — 진입거부(약한전환)",
+                             symbol, breakout, c.min_flip_atr_mult)
+                return False
+        return True
+
+    def _cap_qty(self, qty: int, price: float, symbol: str) -> int:
+        """[개선3] 단일주문 수량·금액 하드캡. 캡 초과 시 클램프 후 로그.
+
+        저가 종목(예: 인버스 ETF)에서 '예수금÷저가=거대수량' 폭주를 방지
+        (6/2 252670 38,219주 RuntimeError 인시던트). 0 캡은 비활성.
+        """
+        c = self.config
+        capped = qty
+        if c.max_order_qty > 0 and capped > c.max_order_qty:
+            capped = c.max_order_qty
+        if c.max_order_value > 0 and price > 0:
+            qty_by_value = int(c.max_order_value // price)
+            if capped > qty_by_value:
+                capped = qty_by_value
+        if capped < qty:
+            logger.warning("슈퍼트렌드 수량 하드캡: %s %d→%d주 (@%.0f, 캡 qty=%d/value=%.0f)",
+                           symbol, qty, capped, price, c.max_order_qty, c.max_order_value)
+        return max(capped, 0)
 
     # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────
     async def _fetch_bars(self, symbol: str):
