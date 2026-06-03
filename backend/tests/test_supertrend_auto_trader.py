@@ -42,6 +42,9 @@ _BUY = [10000 - i * 50 for i in range(57)] + [7200 + i * 350 for i in range(3)]
 _SELL = [10000 + i * 50 for i in range(56)] + [12800 - i * 300 for i in range(4)]
 # 잔잔한 상승 지속 (전환 없음)
 _FLAT_UP = [10000 + i * 5 for i in range(60)]
+# 완만 상승 + 규칙적 소폭 눌림 → trend +1 유지(ST SELL 없음) & HTF(10m) RSI ≈ 63.5(중간대).
+#   RSI 조기청산을 슈퍼트렌드 SELL 과 분리 검증하기 위한 시리즈(level floor 로 dead 유도).
+_CHOPPY_UP = [int(10000 + i * 22 - (140 if i % 4 == 3 else 0)) for i in range(60)]
 
 
 # ── 가짜 협력자 ──────────────────────────────────────────────────────────────
@@ -395,3 +398,127 @@ async def test_cap_qty_applied_in_cycle():
     await t.run_cycle()
     assert len(gate.buys) == 1
     assert gate.buys[0][1] == 500   # 하드캡 적용
+
+
+# ── [BAR-OPS-10] 멀티 타임프레임 RSI 확인 필터 ───────────────────────────────
+@pytest.mark.asyncio
+async def test_rsi_gate_off_allows_entry():
+    """rsi_enabled=False(기본) → RSI 게이트 no-op, _BUY 정상 진입(기존 회귀 보존)."""
+    gate = _FakeGate()
+    t = _trader({"005930": _BUY}, universe=[("005930", "삼성전자")], gate=gate,
+                config=_base_config(rsi_enabled=False))
+    await t.run_cycle()
+    assert len(gate.buys) == 1
+
+
+@pytest.mark.asyncio
+async def test_rsi_gate_level_high_floor_blocks_entry():
+    """rsi_enabled + level 모드 floor=99 → RSI<99 이라 미확정 → 진입 거부."""
+    gate = _FakeGate()
+    t = _trader({"005930": _BUY}, universe=[("005930", "삼성전자")], gate=gate,
+                config=_base_config(rsi_enabled=True, rsi_mode="level",
+                                    rsi_min_level=99.0, rsi_max_level=100.0))
+    await t.run_cycle()
+    assert gate.buys == []   # RSI 확인 실패 → 진입 0
+
+
+@pytest.mark.asyncio
+async def test_rsi_gate_level_low_floor_allows_entry():
+    """rsi_enabled + level 모드 floor=0 → RSI 항상 [0,100] → 확인 통과 → 진입."""
+    gate = _FakeGate()
+    t = _trader({"005930": _BUY}, universe=[("005930", "삼성전자")], gate=gate,
+                config=_base_config(rsi_enabled=True, rsi_mode="level",
+                                    rsi_min_level=0.0, rsi_max_level=100.0))
+    await t.run_cycle()
+    assert len(gate.buys) == 1
+
+
+@pytest.mark.asyncio
+async def test_rsi_gate_centerline_blocks_downtrend_rebound():
+    """긴 하락 후 막판 반등(_BUY) → HTF RSI 아직 <50 → centerline 골든 미발생 → 거부."""
+    gate = _FakeGate()
+    t = _trader({"005930": _BUY}, universe=[("005930", "삼성전자")], gate=gate,
+                config=_base_config(rsi_enabled=True, rsi_mode="centerline",
+                                    rsi_cross_lookback=2))
+    await t.run_cycle()
+    assert gate.buys == []   # 상위 TF RSI 미확정(약세 잔존) → 진입 거부
+
+
+@pytest.mark.asyncio
+async def test_rsi_exit_or_trigger_forces_sell():
+    """보유 중 슈퍼트렌드 SELL 없어도 RSI 레짐붕괴면 OR 조기청산.
+
+    _CHOPPY_UP: trend +1 유지(ST SELL 없음) & HTF RSI ≈ 63.5. level floor=70 →
+    RSI(63.5)<70 → dead → RSI-only 조기청산. (ST SELL 과 분리 검증)
+    """
+    gate = _FakeGate()
+    pos = _FakePosStore()
+    pos._inject("005930", strategy="supertrend", qty=11)
+    t = _trader({"005930": _CHOPPY_UP}, universe=[], gate=gate, pos=pos,
+                config=_base_config(rsi_enabled=True, rsi_exit_enabled=True,
+                                    rsi_mode="level", rsi_min_level=70.0))
+    r = await t.run_cycle()
+    assert len(gate.sells) == 1
+    assert gate.sells[0][0] == "005930"
+    assert r["exited"][0]["symbol"] == "005930"
+    assert pos.get("005930") is None   # 청산 후 포지션 제거
+
+
+@pytest.mark.asyncio
+async def test_rsi_exit_disabled_no_sell_without_st_signal():
+    """rsi_exit_enabled=False → ST SELL 없는 보유는 RSI 무관하게 청산 안 함(동일 시리즈)."""
+    gate = _FakeGate()
+    pos = _FakePosStore()
+    pos._inject("005930", strategy="supertrend", qty=11)
+    t = _trader({"005930": _CHOPPY_UP}, universe=[], gate=gate, pos=pos,
+                config=_base_config(rsi_enabled=True, rsi_exit_enabled=False,
+                                    rsi_mode="level", rsi_min_level=70.0))
+    await t.run_cycle()
+    assert gate.sells == []   # OR 트리거 비활성 → 보유 유지
+
+
+@pytest.mark.asyncio
+async def test_rsi_exit_not_dead_no_sell():
+    """rsi_exit_enabled=True 라도 RSI 가 floor 위(미-dead)면 청산 안 함(_CHOPPY_UP, floor=50)."""
+    gate = _FakeGate()
+    pos = _FakePosStore()
+    pos._inject("005930", strategy="supertrend", qty=11)
+    t = _trader({"005930": _CHOPPY_UP}, universe=[], gate=gate, pos=pos,
+                config=_base_config(rsi_enabled=True, rsi_exit_enabled=True,
+                                    rsi_mode="level", rsi_min_level=50.0))
+    await t.run_cycle()
+    assert gate.sells == []   # RSI(63.5) ≥ 50 → dead 아님 → 보유 유지
+
+
+@pytest.mark.asyncio
+async def test_rsi_no_second_fetch_minute():
+    """rsi_enabled 라도 HTF 는 5분봉 bars 리샘플 → fetch_minute 종목당 1회(추가 fetch 금지)."""
+    calls: dict[str, int] = {}
+
+    class _CountingCandles(_FakeCandles):
+        async def fetch_minute(self, symbol, tic_scope="5"):
+            calls[symbol] = calls.get(symbol, 0) + 1
+            return await super().fetch_minute(symbol, tic_scope=tic_scope)
+
+    gate = _FakeGate()
+    pos = _FakePosStore()
+    pos._inject("000660", strategy="supertrend", qty=11)   # 보유(청산 평가 대상)
+    fetcher = _CountingCandles({"005930": _BUY, "000660": _FLAT_UP})
+
+    async def _uni():
+        return [("005930", "삼성전자")]
+
+    t = SupertrendAutoTrader(
+        candle_fetcher=fetcher,
+        account_fetcher=_FakeAccount(),
+        order_gate=gate,
+        pos_store=pos,
+        universe_provider=_uni,
+        config=_base_config(rsi_enabled=True, rsi_exit_enabled=True,
+                            rsi_mode="level", rsi_min_level=0.0),
+        session_service=_FakeSession(TradingSession.REGULAR),
+    )
+    await t.run_cycle()
+    # 보유 000660(청산 평가) + 후보 005930(진입 평가) 각각 정확히 1회만 fetch.
+    assert calls.get("000660") == 1
+    assert calls.get("005930") == 1

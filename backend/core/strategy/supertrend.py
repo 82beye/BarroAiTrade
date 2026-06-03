@@ -241,6 +241,27 @@ class SupertrendParams:
     #     예: 0.5 → 종가가 밴드를 +0.5·ATR 이상 넘어선 강한 전환만. 0 이면 비활성.
     min_flip_atr_mult: float = 0.0
 
+    # ── 멀티 타임프레임 RSI 확인 필터 (BAR-OPS-10, 2026-06-03) ────────────────
+    # 네이버 차트 관찰: 상위 타임프레임(예 10분) RSI 골든크로스 ≈ 5분봉 슈퍼트렌드 BUY,
+    # 데드크로스 ≈ SELL. 상위 TF RSI 를 5분봉 진입의 '확인(regime)' 필터로 써 휩쏘를
+    # 줄인다. rsi_enabled=False 면 전부 no-op(기존 회귀 보존).
+    #   - 진입: BUY 전환 + 최근 lookback HTF봉 내 RSI 골든크로스(signal_cross/centerline)
+    #           또는 RSI≥min_level(level). 미확정이면 진입 거부.
+    #   - 청산: rsi_exit_enabled=True 면 RSI 데드크로스/레짐붕괴를 추가 OR 청산 트리거로.
+    # 기본 후보값 = 백테스트(2026-06-03 RSI_TF_SWEEP) 데이터-최선: 10m · centerline · p14.
+    #   sweep 결과 수익률 1위는 NO_RSI 베이스라인이라 활성은 OFF(아래) — RSI 는 거래수↓·
+    #   위험조정수익↑(Sharpe·MDD 개선)를 원할 때만 opt-in 하는 품질 필터. 모드는 사용자가 본
+    #   골든/데드크로스(signal_cross)보다 RSI 50 기준선 돌파(centerline)가 안정적이었음.
+    rsi_enabled: bool = False
+    rsi_timeframe_mult: int = 2        # 5분봉 기준 배수 (1=5m, 2=10m, 3=15m, 6=30m)
+    rsi_period: int = 14
+    rsi_signal_period: int = 9         # 시그널선 SMA 기간 (signal_cross 모드)
+    rsi_mode: str = "centerline"       # signal_cross | centerline | level (sweep: centerline 최선)
+    rsi_cross_lookback: int = 2        # 최근 N HTF봉 내 크로스 이벤트 (level 모드 무시)
+    rsi_min_level: float = 50.0        # level 모드 진입 하한 / 데드(레짐붕괴) 기준
+    rsi_max_level: float = 100.0       # level 모드 과매수 상한(이 위면 진입 안 함)
+    rsi_exit_enabled: bool = False     # RSI 데드크로스/레짐붕괴를 추가 OR 청산 트리거로
+
     # 진입 시간 게이트 (운영 override) — last candle.time() >= cutoff 면 차단. None 비활성.
     entry_time_cutoff: Optional[dtime] = None
 
@@ -329,6 +350,20 @@ class SupertrendStrategy(Strategy):
                              ctx.symbol, breakout, p.min_flip_atr_mult, atr_ref)
                 return None
 
+        # ── 휩쏘 필터 (3): 멀티 타임프레임 RSI 확인 게이트 (BAR-OPS-10) ────────
+        # 상위 타임프레임 RSI 골든크로스(또는 레짐)로 5분봉 BUY 전환을 '확인'. 미확정 거부.
+        if p.rsi_enabled:
+            from backend.core.strategy.indicators import htf_rsi_confirms_long
+            if not htf_rsi_confirms_long(
+                candles, i=len(candles) - 1, tf_mult=p.rsi_timeframe_mult,
+                period=p.rsi_period, signal_period=p.rsi_signal_period,
+                mode=p.rsi_mode, lookback=p.rsi_cross_lookback,
+                min_level=p.rsi_min_level, max_level=p.rsi_max_level,
+            ):
+                logger.debug("%s: HTF(%d×5m) RSI 미확정 — supertrend 진입 거부",
+                             ctx.symbol, p.rsi_timeframe_mult)
+                return None
+
         c = candles[-1]
         price = float(c.close)
         st_line = res.supertrend[-1]
@@ -381,6 +416,9 @@ class SupertrendStrategy(Strategy):
         "이미 하락추세인 동안 매 사이클 청산"이 아니라 **전환 이벤트 1회**가 트리거.
         최근 exit_lookback 봉 내 sellSignal 이 있어야 청산(폴링 타이밍 흔들림 흡수).
         데이터 부족 시 None (강제청산 안 함 — 가격 SL 이 안전망).
+
+        BAR-OPS-10: rsi_exit_enabled=True 면 슈퍼트렌드 SELL **또는** 상위 TF RSI
+        데드크로스/레짐붕괴(OR) 로 조기청산. RSI-only 청산은 exit_type="rsi_break".
         """
         p = self.params
         candles = ctx.candles
@@ -393,30 +431,50 @@ class SupertrendStrategy(Strategy):
         res = compute_supertrend(
             candles, period=p.atr_period, multiplier=p.multiplier, source=p.source,
         )
-        if not res.sell_signals:
-            return None
-        # 최근 N봉 내 sell 시그널(전환 봉)이 있어야 청산. 없으면 보유 유지.
+        # 슈퍼트렌드 SELL 전환 (최근 N봉 내) — 기존 트리거.
         lb = max(1, p.exit_lookback)
-        if not any(res.sell_signals[-lb:]):
+        st_exit = bool(res.sell_signals) and any(res.sell_signals[-lb:])
+
+        # RSI 데드크로스/레짐붕괴 (OR 조기청산) — rsi_exit_enabled 일 때만.
+        rsi_exit = False
+        if p.rsi_exit_enabled:
+            from backend.core.strategy.indicators import htf_rsi_confirms_exit
+            rsi_exit = htf_rsi_confirms_exit(
+                candles, i=len(candles) - 1, tf_mult=p.rsi_timeframe_mult,
+                period=p.rsi_period, signal_period=p.rsi_signal_period,
+                mode=p.rsi_mode, lookback=p.rsi_cross_lookback,
+                min_level=p.rsi_min_level, max_level=p.rsi_max_level,
+            )
+
+        if not (st_exit or rsi_exit):
             return None
 
         entry = float(position.avg_price)
         cur = float(current_price)
         pnl_pct = (cur - entry) / entry * 100 if entry > 0 else 0.0
-        st_line = res.supertrend[-1]
+        st_line = res.supertrend[-1] if res.supertrend else cur
 
-        # 전환 신선도 (몇 봉 전 sell 시그널인지) — 진단용
-        flip_bar = len(res.sell_signals) - 1 - res.sell_signals[::-1].index(True)
-        bars_since = (len(candles) - 1) - flip_bar
+        if st_exit:
+            # 전환 신선도 (몇 봉 전 sell 시그널인지) — 진단용
+            flip_bar = len(res.sell_signals) - 1 - res.sell_signals[::-1].index(True)
+            bars_since = (len(candles) - 1) - flip_bar
+            exit_type = "reverse_signal"
+            reason = (f"[슈퍼트렌드] SELL 시그널 발생 ({bars_since}봉 전 전환) — "
+                      f"ST {st_line:.0f} 하향 이탈 → 포지션 정리")
+        else:
+            # ExitSignal.exit_type 은 Literal — RSI 조기청산도 reverse_signal(모멘텀 반전)로
+            # 분류하고, 원인은 reason 문구로 구분(rsi_break).
+            exit_type = "reverse_signal"
+            reason = (f"[슈퍼트렌드][rsi_break] HTF({p.rsi_timeframe_mult}×5m) RSI 데드크로스 "
+                      f"조기청산 — ST {st_line:.0f} | RSI 약세 전환")
 
         return ExitSignal(
             symbol=position.symbol,
             name=position.name or position.symbol,
-            exit_type="reverse_signal",
+            exit_type=exit_type,
             price=cur,
             pnl_pct=pnl_pct,
-            reason=(f"[슈퍼트렌드] SELL 시그널 발생 ({bars_since}봉 전 전환) — "
-                    f"ST {st_line:.0f} 하향 이탈 → 포지션 정리"),
+            reason=reason,
             market_type=position.market_type,
             timestamp=datetime.now(),
         )

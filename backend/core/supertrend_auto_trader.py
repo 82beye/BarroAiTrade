@@ -83,6 +83,25 @@ class SupertrendAutoConfig:
     max_order_qty: int = 5000          # 단일주문 최대 수량
     max_order_value: float = 5_000_000.0  # 단일주문 최대 금액(원) — qty×price 상한
 
+    # ── 멀티 타임프레임 RSI 확인 필터 (BAR-OPS-10, 2026-06-03) ────────────────
+    # 상위 타임프레임(예 10분) RSI 골든크로스로 5분봉 진입을 확인, 데드크로스로 조기청산.
+    # HTF RSI 는 이미 가져온 5분봉 bars 에서 **리샘플**로 도출(추가 fetch_minute 없음 —
+    # 80종목×5분주기 API 부하 2배 회피). 값은 self.config 에서 직접 읽음(ADX/FLIP 선례 동일).
+    #
+    # config-gated OFF (2026-06-03): 백테스트 sweep(RSI_TF_SWEEP.md) 결과 수익률 1위는
+    #   NO_RSI 베이스라인(ADX+FLIP) — RSI 필터는 총수익을 못 넘음. '수익률 우선' KPI 상 기본 OFF.
+    #   기본값은 데이터-최선 후보(10m·centerline·p14): 거래수↓·위험조정수익↑(Sharpe·MDD 개선)를
+    #   원할 때만 운영 머신에서 rsi_enabled=True 로 opt-in(+필요시 rsi_exit_enabled). signal_cross 선택가능.
+    rsi_enabled: bool = False           # 마스터 스위치 (False → 전부 no-op)
+    rsi_timeframe_mult: int = 2         # 5분봉 기준 배수 (1=5m, 2=10m, 3=15m, 6=30m)
+    rsi_period: int = 14
+    rsi_signal_period: int = 9
+    rsi_mode: str = "centerline"        # signal_cross | centerline | level (sweep: centerline 최선)
+    rsi_cross_lookback: int = 2         # 최근 N HTF봉 내 크로스 이벤트 (level 무시)
+    rsi_min_level: float = 50.0
+    rsi_max_level: float = 100.0
+    rsi_exit_enabled: bool = False      # RSI 데드크로스/레짐붕괴 추가 OR 청산 트리거
+
 
 class SupertrendAutoTrader:
     """슈퍼트렌드 5분봉 자동매매 (진입+청산).
@@ -180,7 +199,20 @@ class SupertrendAutoTrader:
                     source=self.config.params.source,
                 )
                 lb = max(1, self.config.params.exit_lookback)
-                if not res.sell_signals or not any(res.sell_signals[-lb:]):
+                st_exit = bool(res.sell_signals) and any(res.sell_signals[-lb:])
+                # BAR-OPS-10: RSI 데드크로스/레짐붕괴 조기청산 (OR) — bars 리샘플, 추가 fetch 없음.
+                rsi_exit = False
+                if self.config.rsi_exit_enabled:
+                    from backend.core.strategy.indicators import htf_rsi_confirms_exit
+                    rsi_exit = htf_rsi_confirms_exit(
+                        bars, i=len(bars) - 1, tf_mult=self.config.rsi_timeframe_mult,
+                        period=self.config.rsi_period,
+                        signal_period=self.config.rsi_signal_period,
+                        mode=self.config.rsi_mode, lookback=self.config.rsi_cross_lookback,
+                        min_level=self.config.rsi_min_level,
+                        max_level=self.config.rsi_max_level,
+                    )
+                if not (st_exit or rsi_exit):
                     continue
                 qty = int(getattr(pos, "total_recommended_qty", 0)) or self._filled_qty(pos)
                 if qty <= 0:
@@ -319,12 +351,13 @@ class SupertrendAutoTrader:
             return True  # 파싱 실패 시 보수적으로 허용(기존 동작)
 
     def _whipsaw_pass(self, bars, res, symbol: str) -> bool:
-        """[개선2] ADX 추세강도 + FLIP 전환 이탈폭 게이트. 통과 시 True.
+        """[개선2/BAR-OPS-10] ADX + FLIP + 멀티 TF RSI 게이트. 모두 통과 시 True.
 
         - ADX(adx_period) < min_adx → 횡보로 보고 거부.
         - 최근 BUY 전환 봉이 '방금 돌파한 저항(직전 dn밴드)'을 ATR×min_flip_atr_mult
           이상 넘지 못하면 약한 전환(휩쏘)으로 거부. (supertrend.py 정정 정의와 동일)
-        둘 다 0 이면 해당 게이트 비활성(기존 무필터 동작).
+        - rsi_enabled 면 상위 TF RSI 골든크로스/레짐 미확정 시 거부(bars 리샘플, 추가 fetch X).
+        각 게이트는 0/False 면 비활성(기존 무필터 동작).
         """
         c = self.config
         # (1) ADX
@@ -347,6 +380,17 @@ class SupertrendAutoTrader:
             if atr_ref <= 0 or breakout < c.min_flip_atr_mult * atr_ref:
                 logger.debug("%s: 전환이탈폭 %.1f < %.2f·ATR — 진입거부(약한전환)",
                              symbol, breakout, c.min_flip_atr_mult)
+                return False
+        # (3) 멀티 타임프레임 RSI 확인 — bars(5분봉) 리샘플로 HTF 도출(추가 fetch 없음).
+        if c.rsi_enabled:
+            from backend.core.strategy.indicators import htf_rsi_confirms_long
+            if not htf_rsi_confirms_long(
+                bars, i=len(bars) - 1, tf_mult=c.rsi_timeframe_mult,
+                period=c.rsi_period, signal_period=c.rsi_signal_period,
+                mode=c.rsi_mode, lookback=c.rsi_cross_lookback,
+                min_level=c.rsi_min_level, max_level=c.rsi_max_level,
+            ):
+                logger.debug("%s: HTF(%d×5m) RSI 미확정 — 진입거부", symbol, c.rsi_timeframe_mult)
                 return False
         return True
 
