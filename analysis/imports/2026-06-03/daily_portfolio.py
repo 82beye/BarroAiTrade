@@ -157,7 +157,76 @@ def main() -> int:
     print(f"[psim-daily] 최종(단리): {final_pct:+.2f}% · 손익 {final_won:+,.0f}원 · "
           f"잔고 {cap+final_won:,.0f}원 · 거래 {len(taken)}건")
     _chart(rows, start, end, final_pct, final_won, cap, len(taken))
+    _write_report(rows, start, end, cap, final_pct, final_won, len(taken), skipped)
     return 0
+
+
+def _write_report(rows, start, end, cap, final_pct, final_won, n, skipped):
+    """일자별 표(일자|당일증감|당일증감액|누적|누적금액|보유) md/html 리포트."""
+    hdr = ["일자", "당일증감", "당일증감액", "누적", "누적금액", "보유"]
+
+    def _row(r):
+        d, chg, cum, held, chg_won, cum_won, bal_won = r
+        m6 = " (6월)" if d.month == 6 else ""
+        return [f"{d}{m6}", f"{chg:+.2f}%", f"{chg_won:+,.0f}원",
+                f"{cum:+.2f}%", f"{cum_won:+,.0f}원", str(held)]
+    body = [_row(r) for r in rows]
+    intro = [
+        "- 전략: 슈퍼트렌드 신호 + RSI 교합 확인(AND). RSI 단독 매매 없음. (손절 미적용)",
+        f"- 포트폴리오: 종목당 {PER_ALLOC*100:.0f}% 균등(={cap*PER_ALLOC:,.0f}원)·최대 {MAX_POS}종목·단리. "
+        f"진입/청산=다음봉 open, 비용 왕복 {COST*100:.2f}%.",
+        f"- 자본금: **{cap:,.0f}원** · 기간: {start}~{end} · 체결 {n}건(슬롯skip {skipped}).",
+        f"- 계좌% = 100 + 실현손익누계 + 보유종목 평가손익(그날 종가 MTM). 금액 = % × 자본금(선형).",
+    ]
+    summ = (f"최종 계좌잔고 **{cap+final_won:,.0f}원** · 누적손익 **{final_won:+,.0f}원 ({final_pct:+.2f}%)**")
+
+    # md
+    M = ["---", "tags: [simulation, supertrend, rsi-filter, portfolio, daily]", "date: 2026-06-03",
+         f"period: {start}/{end}", "type: simulation-analysis", "---", "",
+         f"# 일자별 계좌 잔고 증감 — 슈퍼트렌드+RSI확인 · {PER_ALLOC*100:.0f}% 균등 포트폴리오", ""]
+    M += intro + ["", f"> 💰 {summ}", "", "![[daily_portfolio_krw_2026-05_06.png]]", "",
+                  "## 일자별 손익", ""]
+    M.append("| " + " | ".join(hdr) + " |")
+    M.append("|" + "|".join(["---"] * len(hdr)) + "|")
+    M += ["| " + " | ".join(x) + " |" for x in body]
+    M += ["", "> 본 문서는 **시뮬레이션 분석**이며 실거래 송출이 아닙니다. 단리·8% 균등 기준(손절 미적용)."]
+    (OUT_DIR / "daily_portfolio_2026-05_06.md").write_text("\n".join(M), encoding="utf-8")
+
+    # html
+    style = ('body{font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;'
+             'color:#1a1a2e;line-height:1.7;max-width:900px;margin:0 auto;padding:40px 24px 80px}'
+             'h1{font-size:1.7rem;border-bottom:3px solid #0a5fb4;padding-bottom:.4em}'
+             'h2{font-size:1.3rem;margin-top:1.8em;border-bottom:1px solid #e2e6ee;padding-bottom:.3em}'
+             'blockquote{margin:1.1em 0;padding:.8em 1.1em;background:#eef6ff;border-left:4px solid #0a5fb4;'
+             'border-radius:0 8px 8px 0}strong{color:#0b2545}'
+             'table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.9rem}'
+             'thead th{background:#0a5fb4;color:#fff;padding:.5em .7em;text-align:right}'
+             'thead th:first-child{text-align:left}tbody td{padding:.45em .7em;border-top:1px solid #e2e6ee;text-align:right}'
+             'tbody td:first-child{text-align:left}tbody tr:nth-child(even){background:#f6f8fc}'
+             'img{max-width:100%;border:1px solid #e2e6ee;border-radius:10px}ul{padding-left:1.4em}')
+    def _td(x, neg_color=True):
+        c = ""
+        if neg_color and ("-" in x and "원" in x or x.startswith("-")):
+            c = ' style="color:#d62728"'
+        elif neg_color and x.startswith("+"):
+            c = ' style="color:#1a7d34"'
+        return f"<td{c}>{x}</td>"
+    rows_html = ""
+    for x in body:
+        rows_html += "<tr><td>" + x[0] + "</td>" + "".join(_td(v) for v in x[1:]) + "</tr>"
+    H = ['<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">',
+         '<meta name="viewport" content="width=device-width,initial-scale=1">',
+         f"<title>일자별 계좌 잔고 증감 {start}~{end}</title><style>{style}</style></head><body>",
+         f"<h1>일자별 계좌 잔고 증감 — 슈퍼트렌드+RSI확인 · {PER_ALLOC*100:.0f}% 균등 포트폴리오</h1>",
+         "<ul>" + "".join(f"<li>{s.lstrip('- ')}</li>" for s in intro) + "</ul>",
+         f"<blockquote>💰 {summ}</blockquote>",
+         '<img src="daily_portfolio_krw_2026-05_06.png" alt="daily">',
+         "<h2>일자별 손익</h2>",
+         "<table><thead><tr>" + "".join(f"<th>{h}</th>" for h in hdr) + "</tr></thead><tbody>",
+         rows_html, "</tbody></table>",
+         "<blockquote>본 문서는 시뮬레이션 분석이며 실거래 송출이 아닙니다.</blockquote></body></html>"]
+    (OUT_DIR / "daily_portfolio_2026-05_06.html").write_text("".join(H), encoding="utf-8")
+    print(f"[psim-daily] 리포트 {OUT_DIR/'daily_portfolio_2026-05_06.md'} (+ .html)")
 
 
 def _chart(rows, start, end, final_pct, final_won, cap, n):
