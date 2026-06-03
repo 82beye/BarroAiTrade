@@ -101,6 +101,10 @@ class SupertrendAutoConfig:
     rsi_max_level: float = 100.0
     rsi_exit_enabled: bool = False      # 청산 시 RSI 데드크로스 '확인'(AND) 요구 (단독 청산 아님)
 
+    # ATR 트레일링 청산(샹들리에) — 진입 후 고점종가 − trail_atr_mult×ATR 를 종가가 이탈하면
+    #   신호 무관 청산(가격기반 리스크 스톱, 신호와 OR). 0=비활성. 권장 4.0(최악손실 캡, 수익 일부 희생).
+    trail_atr_mult: float = 0.0
+
 
 class SupertrendAutoTrader:
     """슈퍼트렌드 5분봉 자동매매 (진입+청산).
@@ -198,24 +202,27 @@ class SupertrendAutoTrader:
                     source=self.config.params.source,
                 )
                 lb = max(1, self.config.params.exit_lookback)
-                # 청산 = 슈퍼트렌드 SELL(기준·필수). RSI 단독 청산 없음.
-                st_exit = bool(res.sell_signals) and any(res.sell_signals[-lb:])
-                if not st_exit:
-                    continue
-                # BAR-OPS-10: rsi_exit_enabled 면 ST SELL 을 최근 RSI 데드크로스가 '확인'(AND)해야 청산.
-                #   bars(5분봉) 리샘플 — 추가 fetch 없음. 미확인이면 보유 유지.
-                if self.config.rsi_exit_enabled:
-                    from backend.core.strategy.indicators import htf_rsi_confirms_exit
-                    if not htf_rsi_confirms_exit(
-                        bars, i=len(bars) - 1, tf_mult=self.config.rsi_timeframe_mult,
-                        period=self.config.rsi_period,
-                        signal_period=self.config.rsi_signal_period,
-                        mode=self.config.rsi_mode, lookback=self.config.rsi_cross_lookback,
-                        min_level=self.config.rsi_min_level,
-                        max_level=self.config.rsi_max_level,
-                    ):
-                        logger.debug("%s: ST SELL 발생했으나 RSI 데드크로스 미확인 — 청산 보류", symbol)
+                # ── ATR 트레일링 청산(샹들리에) — 가격기반 리스크 스톱, 신호와 OR(최우선) ──
+                #   진입 후 고점종가 − trail_atr_mult×ATR 를 현재 종가가 이탈하면 즉시 청산.
+                trailed = self._trail_hit(pos, bars, res)
+                if not trailed:
+                    # 청산 = 슈퍼트렌드 SELL(기준·필수). RSI 단독 청산 없음.
+                    st_exit = bool(res.sell_signals) and any(res.sell_signals[-lb:])
+                    if not st_exit:
                         continue
+                    # rsi_exit_enabled 면 ST SELL 을 최근 RSI 데드크로스가 '확인'(AND)해야 청산.
+                    if self.config.rsi_exit_enabled:
+                        from backend.core.strategy.indicators import htf_rsi_confirms_exit
+                        if not htf_rsi_confirms_exit(
+                            bars, i=len(bars) - 1, tf_mult=self.config.rsi_timeframe_mult,
+                            period=self.config.rsi_period,
+                            signal_period=self.config.rsi_signal_period,
+                            mode=self.config.rsi_mode, lookback=self.config.rsi_cross_lookback,
+                            min_level=self.config.rsi_min_level,
+                            max_level=self.config.rsi_max_level,
+                        ):
+                            logger.debug("%s: ST SELL 발생했으나 RSI 데드크로스 미확인 — 청산 보류", symbol)
+                            continue
                 qty = int(getattr(pos, "total_recommended_qty", 0)) or self._filled_qty(pos)
                 if qty <= 0:
                     continue
@@ -224,11 +231,12 @@ class SupertrendAutoTrader:
                     daily_pnl_pct=daily_pnl_pct, strategy_id=_STRATEGY_ID,
                 )
                 self._pos.remove(symbol)
-                result["exited"].append({"symbol": symbol, "qty": qty,
+                _xreason = "트레일청산" if trailed else "SELL 전환"
+                result["exited"].append({"symbol": symbol, "qty": qty, "reason": _xreason,
                                          "order_no": getattr(r, "order_no", ""),
                                          "dry_run": getattr(r, "dry_run", False)})
-                logger.warning("슈퍼트렌드 자동청산: %s qty=%d (SELL 전환)", symbol, qty)
-                await self._notify("슈퍼트렌드 자동매도", f"{symbol} {qty}주 청산 (SELL 시그널)")
+                logger.warning("슈퍼트렌드 자동청산: %s qty=%d (%s)", symbol, qty, _xreason)
+                await self._notify("슈퍼트렌드 자동매도", f"{symbol} {qty}주 청산 ({_xreason})")
             except Exception as e:
                 logger.error("슈퍼트렌드 청산 실패: %s — %s", symbol, type(e).__name__)
 
@@ -395,6 +403,36 @@ class SupertrendAutoTrader:
                 logger.debug("%s: HTF(%d×5m) RSI 미확정 — 진입거부", symbol, c.rsi_timeframe_mult)
                 return False
         return True
+
+    def _trail_hit(self, pos: Any, bars, res) -> bool:
+        """ATR 트레일링 청산(샹들리에) 판정. 진입 후 고점종가 − trail_atr_mult×ATR 를
+        현재 종가가 이탈하면 True. 비활성(0)/데이터부족 시 False.
+
+        peak = 진입(entry_time) 이후 종가 최고. entry_time 비교 불가 시 가용 bars 전체로 폴백.
+        가격기반 리스크 스톱이라 신호(SELL/RSI)와 무관하게 OR 로 작동.
+        """
+        k = self.config.trail_atr_mult
+        if k <= 0 or not res.atr:
+            return False
+        entry_px = float(getattr(pos, "entry_price", 0) or 0)
+        if entry_px <= 0:
+            return False
+        et = getattr(pos, "entry_time", None)
+        closes = []
+        for b in bars:
+            try:
+                if et is None or b.timestamp >= et:
+                    closes.append(float(b.close))
+            except TypeError:
+                closes.append(float(b.close))   # tz mismatch 등 → 전체 폴백
+        if not closes:
+            closes = [float(b.close) for b in bars]
+        peak = max(closes)
+        atr_now = res.atr[-1]
+        if atr_now <= 0:
+            return False
+        trail_stop = peak - k * atr_now
+        return float(bars[-1].close) <= trail_stop
 
     def _cap_qty(self, qty: int, price: float, symbol: str) -> int:
         """[개선3] 단일주문 수량·금액 하드캡. 캡 초과 시 클램프 후 로그.

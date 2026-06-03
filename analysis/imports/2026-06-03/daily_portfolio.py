@@ -35,6 +35,7 @@ WARMUP = 150
 PER_ALLOC = 0.08
 MAX_POS = 10
 BUY_COST = 0.00015
+TRAIL_ATR = 0.0      # ATR 트레일링 청산 배수(0=비활성). --trail 로 설정(권장 4.0). 종가기준 샹들리에.
 RSI = Variant("rsi", True, 2, 14, "signal_cross", True)   # 수정 로직: 교합 + AND
 OUT_DIR = ROOT / "docs" / "04-report" / "sim"
 NAMES = {"012200": "계양전기"}
@@ -60,6 +61,7 @@ def walk(pre: SymbolPrecompute, start: date, end: date) -> List[Trip]:
     holding = False
     e_fill = 0
     e_px = 0.0
+    peakc = 0.0
     for i in win:
         if i >= len(c) - 1:
             break
@@ -67,8 +69,17 @@ def walk(pre: SymbolPrecompute, start: date, end: date) -> List[Trip]:
             if c[i].timestamp.time() >= ENTRY_TIME and pre.entry_ok(RSI, i, apply_min_price=True):
                 e_fill = i + 1
                 e_px = float(c[e_fill].open)
+                peakc = float(c[e_fill].close)
                 holding = True
         else:
+            # ATR 트레일링(샹들리에, 종가기준, 우선) — 고점종가 −k×ATR 이탈 시 다음봉 시가 청산.
+            peakc = max(peakc, float(c[i].close))
+            if TRAIL_ATR > 0 and pre.atr[i] > 0 and float(c[i].close) <= peakc - TRAIL_ATR * pre.atr[i]:
+                xp = float(c[i + 1].open)
+                trips.append(Trip(c[0].symbol, c[e_fill].timestamp, e_px,
+                                  c[i + 1].timestamp, xp, ((xp - e_px) / e_px - COST) * 100))
+                holding = False
+                continue
             if pre.exit_ok(RSI, i):
                 xp = float(c[i + 1].open)
                 trips.append(Trip(c[0].symbol, c[e_fill].timestamp, e_px,
@@ -88,8 +99,11 @@ def main() -> int:
     ap.add_argument("--end", default="20260602")
     ap.add_argument("--max-symbols", type=int, default=0)
     ap.add_argument("--capital", type=float, default=38_000_000.0, help="초기 자본금(원)")
+    ap.add_argument("--trail", type=float, default=0.0, help="ATR 트레일링 청산 배수(0=비활성, 권장 4.0)")
     args = ap.parse_args()
     cap = args.capital
+    global TRAIL_ATR
+    TRAIL_ATR = args.trail
     start = datetime.strptime(args.start, "%Y%m%d").date()
     end = datetime.strptime(args.end, "%Y%m%d").date()
     cache = Path(str(DEFAULT_CACHE))
@@ -163,6 +177,8 @@ def main() -> int:
 
 def _write_report(rows, start, end, cap, final_pct, final_won, n, skipped):
     """일자별 표(일자|당일증감|당일증감액|누적|누적금액|보유) md/html 리포트."""
+    _sfx = f"_trail{TRAIL_ATR:g}" if TRAIL_ATR > 0 else ""
+    _tt = f"+트레일{TRAIL_ATR:g}×ATR" if TRAIL_ATR > 0 else ""
     hdr = ["일자", "당일증감", "당일증감액", "누적", "누적금액", "보유"]
 
     def _row(r):
@@ -172,7 +188,10 @@ def _write_report(rows, start, end, cap, final_pct, final_won, n, skipped):
                 f"{cum:+.2f}%", f"{cum_won:+,.0f}원", str(held)]
     body = [_row(r) for r in rows]
     intro = [
-        "- 전략: 슈퍼트렌드 신호 + RSI 교합 확인(AND). RSI 단독 매매 없음. (손절 미적용)",
+        ("- 전략: 슈퍼트렌드 신호 + RSI 교합 확인(AND)"
+         + (f" + ATR 트레일링 청산({TRAIL_ATR:g}×ATR, 종가기준 샹들리에)" if TRAIL_ATR > 0
+            else ". 손절/트레일 미적용")
+         + (". RSI 단독 매매 없음." if TRAIL_ATR > 0 else "")),
         f"- 포트폴리오: 종목당 {PER_ALLOC*100:.0f}% 균등(={cap*PER_ALLOC:,.0f}원)·최대 {MAX_POS}종목·단리. "
         f"진입/청산=다음봉 open, 비용 왕복 {COST*100:.2f}%.",
         f"- 자본금: **{cap:,.0f}원** · 기간: {start}~{end} · 체결 {n}건(슬롯skip {skipped}).",
@@ -183,14 +202,15 @@ def _write_report(rows, start, end, cap, final_pct, final_won, n, skipped):
     # md
     M = ["---", "tags: [simulation, supertrend, rsi-filter, portfolio, daily]", "date: 2026-06-03",
          f"period: {start}/{end}", "type: simulation-analysis", "---", "",
-         f"# 일자별 계좌 잔고 증감 — 슈퍼트렌드+RSI확인 · {PER_ALLOC*100:.0f}% 균등 포트폴리오", ""]
-    M += intro + ["", f"> 💰 {summ}", "", "![[daily_portfolio_krw_2026-05_06.png]]", "",
+         f"# 일자별 계좌 잔고 증감 — 슈퍼트렌드+RSI확인{_tt} · {PER_ALLOC*100:.0f}% 균등 포트폴리오", ""]
+    M += intro + ["", f"> 💰 {summ}", "", f"![[daily_portfolio_krw_2026-05_06{_sfx}.png]]", "",
                   "## 일자별 손익", ""]
     M.append("| " + " | ".join(hdr) + " |")
     M.append("|" + "|".join(["---"] * len(hdr)) + "|")
     M += ["| " + " | ".join(x) + " |" for x in body]
-    M += ["", "> 본 문서는 **시뮬레이션 분석**이며 실거래 송출이 아닙니다. 단리·8% 균등 기준(손절 미적용)."]
-    (OUT_DIR / "daily_portfolio_2026-05_06.md").write_text("\n".join(M), encoding="utf-8")
+    M += ["", "> 본 문서는 **시뮬레이션 분석**이며 실거래 송출이 아닙니다. 단리·8% 균등 기준"
+          + (f"(ATR 트레일링 {TRAIL_ATR:g}×, 종가기준·다음봉 시가체결)." if TRAIL_ATR > 0 else "(손절/트레일 미적용).")]
+    (OUT_DIR / f"daily_portfolio_2026-05_06{_sfx}.md").write_text("\n".join(M), encoding="utf-8")
 
     # html
     style = ('body{font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;'
@@ -217,16 +237,16 @@ def _write_report(rows, start, end, cap, final_pct, final_won, n, skipped):
     H = ['<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">',
          '<meta name="viewport" content="width=device-width,initial-scale=1">',
          f"<title>일자별 계좌 잔고 증감 {start}~{end}</title><style>{style}</style></head><body>",
-         f"<h1>일자별 계좌 잔고 증감 — 슈퍼트렌드+RSI확인 · {PER_ALLOC*100:.0f}% 균등 포트폴리오</h1>",
+         f"<h1>일자별 계좌 잔고 증감 — 슈퍼트렌드+RSI확인{_tt} · {PER_ALLOC*100:.0f}% 균등 포트폴리오</h1>",
          "<ul>" + "".join(f"<li>{s.lstrip('- ')}</li>" for s in intro) + "</ul>",
          f"<blockquote>💰 {summ}</blockquote>",
-         '<img src="daily_portfolio_krw_2026-05_06.png" alt="daily">',
+         f'<img src="daily_portfolio_krw_2026-05_06{_sfx}.png" alt="daily">',
          "<h2>일자별 손익</h2>",
          "<table><thead><tr>" + "".join(f"<th>{h}</th>" for h in hdr) + "</tr></thead><tbody>",
          rows_html, "</tbody></table>",
          "<blockquote>본 문서는 시뮬레이션 분석이며 실거래 송출이 아닙니다.</blockquote></body></html>"]
-    (OUT_DIR / "daily_portfolio_2026-05_06.html").write_text("".join(H), encoding="utf-8")
-    print(f"[psim-daily] 리포트 {OUT_DIR/'daily_portfolio_2026-05_06.md'} (+ .html)")
+    (OUT_DIR / f"daily_portfolio_2026-05_06{_sfx}.html").write_text("".join(H), encoding="utf-8")
+    print(f"[psim-daily] 리포트 {OUT_DIR/('daily_portfolio_2026-05_06'+_sfx)}.md (+ .html)")
 
 
 def _chart(rows, start, end, final_pct, final_won, cap, n):
@@ -257,7 +277,8 @@ def _chart(rows, start, end, final_pct, final_won, cap, n):
             for ax in (ax1, ax2):
                 ax.axvline(xs[i], color="#d62728", ls="--", lw=1, alpha=0.7)
             ax1.text(xs[i], max(bal), " 6월", color="#d62728", fontsize=9, va="top")
-    ax1.set_title(f"일자별 계좌 잔고 추이 — 슈퍼트렌드+RSI확인 · 8% 균등(최대10종목) · {start}~{end}\n"
+    _tt = f"+트레일{TRAIL_ATR:g}×ATR" if TRAIL_ATR > 0 else ""
+    ax1.set_title(f"일자별 계좌 잔고 추이 — 슈퍼트렌드+RSI확인{_tt} · 8% 균등(최대10종목) · {start}~{end}\n"
                   f"초기 {cap/1e4:,.0f}만원 → 최종 {(cap+final_won)/1e4:,.0f}만원 "
                   f"(손익 {final_won:+,.0f}원, {final_pct:+.2f}%, 체결 {n}건)", fontsize=11)
     ax1.set_ylabel("계좌 잔고")
@@ -272,7 +293,8 @@ def _chart(rows, start, end, final_pct, final_won, cap, n):
     ax2.grid(True, alpha=0.3)
     fig.autofmt_xdate()
     fig.tight_layout()
-    p = OUT_DIR / "daily_portfolio_krw_2026-05_06.png"
+    _sfx = f"_trail{TRAIL_ATR:g}" if TRAIL_ATR > 0 else ""
+    p = OUT_DIR / f"daily_portfolio_krw_2026-05_06{_sfx}.png"
     fig.savefig(p, dpi=130)
     plt.close(fig)
     print(f"[psim-daily] 차트 {p}")

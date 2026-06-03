@@ -260,6 +260,12 @@ class SupertrendParams:
     rsi_max_level: float = 100.0       # level 모드 과매수 상한
     rsi_exit_enabled: bool = False     # 청산 시 RSI 데드크로스 '확인'(AND) 요구 (단독 청산 아님)
 
+    # ATR 트레일링 청산(샹들리에, BAR-OPS-10) — 진입 후 '고점 종가 − trail_atr_mult×ATR' 를
+    #   종가가 이탈하면 신호 무관 청산. 고정 손절(추세 러너 조기절단)과 달리 고점에서 트레일하므로
+    #   큰 추세는 살리고 급락/되돌림만 방어. 0=비활성. 백테스트 권장 4.0(최악손실 −25%→−11.5% 캡,
+    #   단 총수익 일부 희생). RSI 단독청산과 무관한 '리스크 스톱'(가격기반)이라 신호와 OR.
+    trail_atr_mult: float = 0.0
+
     # 진입 시간 게이트 (운영 override) — last candle.time() >= cutoff 면 차단. None 비활성.
     entry_time_cutoff: Optional[dtime] = None
 

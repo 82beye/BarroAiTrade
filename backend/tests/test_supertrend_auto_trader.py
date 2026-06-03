@@ -502,6 +502,46 @@ async def test_exit_st_sell_only_when_rsi_exit_disabled():
 
 
 @pytest.mark.asyncio
+async def test_trail_exit_fires_and_takes_priority():
+    """ATR 트레일링: 고점종가 대비 k×ATR 이탈 시 청산(reason=트레일청산), 신호보다 우선."""
+    gate = _FakeGate()
+    pos = _FakePosStore()
+    pos._inject("005930", strategy="supertrend", qty=11)
+    # _SELL: 12,800 고점 후 급락 → 트레일 2×ATR 이탈
+    t = _trader({"005930": _SELL}, universe=[], gate=gate, pos=pos,
+                config=_base_config(trail_atr_mult=2.0))
+    r = await t.run_cycle()
+    assert len(gate.sells) == 1
+    assert r["exited"][0]["reason"] == "트레일청산"
+    assert pos.get("005930") is None
+
+
+@pytest.mark.asyncio
+async def test_trail_disabled_uses_signal_exit():
+    """trail_atr_mult=0 → 트레일 비활성, ST SELL 신호로 청산(reason=SELL 전환)."""
+    gate = _FakeGate()
+    pos = _FakePosStore()
+    pos._inject("005930", strategy="supertrend", qty=11)
+    t = _trader({"005930": _SELL}, universe=[], gate=gate, pos=pos,
+                config=_base_config(trail_atr_mult=0.0))
+    r = await t.run_cycle()
+    assert len(gate.sells) == 1
+    assert r["exited"][0]["reason"] == "SELL 전환"
+
+
+@pytest.mark.asyncio
+async def test_trail_no_exit_when_near_peak():
+    """고점 근처 보유(되돌림 없음) + ST SELL 없음 → 트레일 미발동, 청산 안 함."""
+    gate = _FakeGate()
+    pos = _FakePosStore()
+    pos._inject("005930", strategy="supertrend", qty=11)
+    t = _trader({"005930": _FLAT_UP}, universe=[], gate=gate, pos=pos,
+                config=_base_config(trail_atr_mult=2.0))
+    await t.run_cycle()
+    assert gate.sells == []   # 종가가 고점 근처 → 트레일 미발동, ST SELL도 없음
+
+
+@pytest.mark.asyncio
 async def test_rsi_no_second_fetch_minute():
     """rsi_enabled 라도 HTF 는 5분봉 bars 리샘플 → fetch_minute 종목당 1회(추가 fetch 금지)."""
     calls: dict[str, int] = {}

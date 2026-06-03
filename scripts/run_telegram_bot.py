@@ -608,6 +608,9 @@ def _build_supertrend_auto_trader(notifier):
         rsi_mode=os.environ.get("SUPERTREND_AUTO_RSI_MODE", "signal_cross"),     # signal_cross|centerline|level
         rsi_cross_lookback=int(os.environ.get("SUPERTREND_AUTO_RSI_LOOKBACK", "3")),
         rsi_exit_enabled=_rsi_on and _env_truthy("SUPERTREND_AUTO_RSI_EXIT", "1"),
+        # ATR 트레일링 청산(샹들리에) — 기본 0(OFF). 활성: SUPERTREND_AUTO_TRAIL_ATR=4
+        #   (백테스트 권장 4×ATR: 최악 단일손실 캡, 단 총수익 일부 희생 — opt-in).
+        trail_atr_mult=float(os.environ.get("SUPERTREND_AUTO_TRAIL_ATR", "0")),
     )
     return SupertrendAutoTrader(
         candle_fetcher=candle_fetcher,
@@ -668,6 +671,8 @@ def main() -> None:
                   f"| 청산확인(AND)={dry.rsi_exit_enabled} (진입=ST BUY+RSI골든, 청산=ST SELL+RSI데드)")
         else:
             print("   🔎 RSI 확인 필터 OFF (baseline: ADX+FLIP). 켜려면 SUPERTREND_AUTO_RSI=1")
+        if dry.trail_atr_mult > 0:
+            print(f"   🛡 ATR 트레일링 청산 ON — 고점종가 −{dry.trail_atr_mult:g}×ATR 이탈 시 청산(리스크 스톱)")
 
     async def _run_all() -> None:
         tasks = [asyncio.create_task(bot.run(), name="telegram_bot")]
