@@ -71,7 +71,7 @@ ATR_PERIOD, MULT, SOURCE = 10, 3.0, "hl2"
 MIN_ADX, ADX_PERIOD, MIN_FLIP = 25.0, 14, 1.0     # 운영 baseline 게이트
 ENTRY_LB, EXIT_LB = 2, 2
 RSI_SIGNAL_PERIOD = 9
-RSI_LOOKBACK = 2
+RSI_LOOKBACK = 3
 RSI_MIN_LEVEL, RSI_MAX_LEVEL = 50.0, 100.0
 MIN_PRICE = 1000.0
 TF_TABLE = {"5m": 1, "10m": 2, "15m": 3, "30m": 6}
@@ -275,12 +275,13 @@ class SymbolPrecompute:
         return True
 
     def exit_ok(self, v: Variant, i: int) -> bool:
+        # 청산은 슈퍼트렌드 SELL 이 '기준'(필수). RSI 단독 청산 없음.
         st_exit = any(self.sell[max(0, i - EXIT_LB + 1):i + 1])
-        if st_exit:
-            return True
-        if v.exit_enabled and self._rsi_event(v, i, "exit"):
-            return True
-        return False
+        if not st_exit:
+            return False
+        if v.exit_enabled:                       # ST SELL 을 RSI 데드크로스가 '확인'(AND)
+            return self._rsi_event(v, i, "exit")
+        return True
 
 
 # ── 워크포워드 (단일 포지션 long-only, 라운드트립) ───────────────────────────
