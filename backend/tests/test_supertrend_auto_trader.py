@@ -445,49 +445,60 @@ async def test_rsi_gate_centerline_blocks_downtrend_rebound():
 
 
 @pytest.mark.asyncio
-async def test_rsi_exit_or_trigger_forces_sell():
-    """보유 중 슈퍼트렌드 SELL 없어도 RSI 레짐붕괴면 OR 조기청산.
+async def test_rsi_exit_requires_st_sell_rsi_alone_no_sell():
+    """[수정 핵심] RSI 단독으로는 청산 안 됨 — 슈퍼트렌드 SELL 이 '기준'(필수).
 
-    _CHOPPY_UP: trend +1 유지(ST SELL 없음) & HTF RSI ≈ 63.5. level floor=70 →
-    RSI(63.5)<70 → dead → RSI-only 조기청산. (ST SELL 과 분리 검증)
+    _CHOPPY_UP: ST SELL 없음. rsi_exit_enabled + level floor=99(RSI<99=dead)여도
+    ST SELL 이 없으므로 청산 불가. (046970 05-07 RSI단독 청산 버그의 회귀 테스트)
     """
     gate = _FakeGate()
     pos = _FakePosStore()
     pos._inject("005930", strategy="supertrend", qty=11)
     t = _trader({"005930": _CHOPPY_UP}, universe=[], gate=gate, pos=pos,
                 config=_base_config(rsi_enabled=True, rsi_exit_enabled=True,
-                                    rsi_mode="level", rsi_min_level=70.0))
+                                    rsi_mode="level", rsi_min_level=99.0))
+    await t.run_cycle()
+    assert gate.sells == []   # ST SELL 없음 → RSI 단독 청산 불가
+
+
+@pytest.mark.asyncio
+async def test_rsi_exit_confirms_st_sell_sells():
+    """ST SELL + RSI 데드 확인(AND) → 청산. (_SELL: ST SELL 발생, level floor=99 → RSI<99=확인)"""
+    gate = _FakeGate()
+    pos = _FakePosStore()
+    pos._inject("005930", strategy="supertrend", qty=11)
+    t = _trader({"005930": _SELL}, universe=[], gate=gate, pos=pos,
+                config=_base_config(rsi_enabled=True, rsi_exit_enabled=True,
+                                    rsi_mode="level", rsi_min_level=99.0))
     r = await t.run_cycle()
     assert len(gate.sells) == 1
     assert gate.sells[0][0] == "005930"
-    assert r["exited"][0]["symbol"] == "005930"
-    assert pos.get("005930") is None   # 청산 후 포지션 제거
+    assert pos.get("005930") is None
 
 
 @pytest.mark.asyncio
-async def test_rsi_exit_disabled_no_sell_without_st_signal():
-    """rsi_exit_enabled=False → ST SELL 없는 보유는 RSI 무관하게 청산 안 함(동일 시리즈)."""
+async def test_rsi_exit_blocks_unconfirmed_st_sell():
+    """ST SELL 있어도 RSI 데드 미확인이면 청산 보류(AND). (_SELL + level floor=0 → RSI<0 불가)"""
     gate = _FakeGate()
     pos = _FakePosStore()
     pos._inject("005930", strategy="supertrend", qty=11)
-    t = _trader({"005930": _CHOPPY_UP}, universe=[], gate=gate, pos=pos,
-                config=_base_config(rsi_enabled=True, rsi_exit_enabled=False,
-                                    rsi_mode="level", rsi_min_level=70.0))
-    await t.run_cycle()
-    assert gate.sells == []   # OR 트리거 비활성 → 보유 유지
-
-
-@pytest.mark.asyncio
-async def test_rsi_exit_not_dead_no_sell():
-    """rsi_exit_enabled=True 라도 RSI 가 floor 위(미-dead)면 청산 안 함(_CHOPPY_UP, floor=50)."""
-    gate = _FakeGate()
-    pos = _FakePosStore()
-    pos._inject("005930", strategy="supertrend", qty=11)
-    t = _trader({"005930": _CHOPPY_UP}, universe=[], gate=gate, pos=pos,
+    t = _trader({"005930": _SELL}, universe=[], gate=gate, pos=pos,
                 config=_base_config(rsi_enabled=True, rsi_exit_enabled=True,
-                                    rsi_mode="level", rsi_min_level=50.0))
+                                    rsi_mode="level", rsi_min_level=0.0))
     await t.run_cycle()
-    assert gate.sells == []   # RSI(63.5) ≥ 50 → dead 아님 → 보유 유지
+    assert gate.sells == []   # ST SELL 있으나 RSI 확인 실패 → 보유 유지
+
+
+@pytest.mark.asyncio
+async def test_exit_st_sell_only_when_rsi_exit_disabled():
+    """rsi_exit_enabled=False → ST SELL 만으로 청산(RSI 확인 불요)."""
+    gate = _FakeGate()
+    pos = _FakePosStore()
+    pos._inject("005930", strategy="supertrend", qty=11)
+    t = _trader({"005930": _SELL}, universe=[], gate=gate, pos=pos,
+                config=_base_config(rsi_enabled=True, rsi_exit_enabled=False))
+    await t.run_cycle()
+    assert len(gate.sells) == 1   # ST SELL → 청산
 
 
 @pytest.mark.asyncio

@@ -88,19 +88,18 @@ class SupertrendAutoConfig:
     # HTF RSI 는 이미 가져온 5분봉 bars 에서 **리샘플**로 도출(추가 fetch_minute 없음 —
     # 80종목×5분주기 API 부하 2배 회피). 값은 self.config 에서 직접 읽음(ADX/FLIP 선례 동일).
     #
-    # config-gated OFF (2026-06-03): 백테스트 sweep(RSI_TF_SWEEP.md) 결과 수익률 1위는
-    #   NO_RSI 베이스라인(ADX+FLIP) — RSI 필터는 총수익을 못 넘음. '수익률 우선' KPI 상 기본 OFF.
-    #   기본값은 데이터-최선 후보(10m·centerline·p14): 거래수↓·위험조정수익↑(Sharpe·MDD 개선)를
-    #   원할 때만 운영 머신에서 rsi_enabled=True 로 opt-in(+필요시 rsi_exit_enabled). signal_cross 선택가능.
+    # 설계(사용자 의도): 슈퍼트렌드 신호가 '기준', RSI 골든/데드크로스(signal_cross=교합)가
+    #   '확인(AND)'. 진입=ST BUY + 최근 RSI 골든크로스, 청산=ST SELL + 최근 RSI 데드크로스.
+    #   RSI 단독 진입/청산 없음. config-gated OFF — 운영 머신에서 opt-in 시 작동.
     rsi_enabled: bool = False           # 마스터 스위치 (False → 전부 no-op)
     rsi_timeframe_mult: int = 2         # 5분봉 기준 배수 (1=5m, 2=10m, 3=15m, 6=30m)
     rsi_period: int = 14
     rsi_signal_period: int = 9
-    rsi_mode: str = "centerline"        # signal_cross | centerline | level (sweep: centerline 최선)
-    rsi_cross_lookback: int = 2         # 최근 N HTF봉 내 크로스 이벤트 (level 무시)
+    rsi_mode: str = "signal_cross"      # signal_cross(교합·기본) | centerline | level
+    rsi_cross_lookback: int = 3         # ST 신호 기준 최근 N HTF봉 내 RSI 크로스 확인창
     rsi_min_level: float = 50.0
     rsi_max_level: float = 100.0
-    rsi_exit_enabled: bool = False      # RSI 데드크로스/레짐붕괴 추가 OR 청산 트리거
+    rsi_exit_enabled: bool = False      # 청산 시 RSI 데드크로스 '확인'(AND) 요구 (단독 청산 아님)
 
 
 class SupertrendAutoTrader:
@@ -199,21 +198,24 @@ class SupertrendAutoTrader:
                     source=self.config.params.source,
                 )
                 lb = max(1, self.config.params.exit_lookback)
+                # 청산 = 슈퍼트렌드 SELL(기준·필수). RSI 단독 청산 없음.
                 st_exit = bool(res.sell_signals) and any(res.sell_signals[-lb:])
-                # BAR-OPS-10: RSI 데드크로스/레짐붕괴 조기청산 (OR) — bars 리샘플, 추가 fetch 없음.
-                rsi_exit = False
+                if not st_exit:
+                    continue
+                # BAR-OPS-10: rsi_exit_enabled 면 ST SELL 을 최근 RSI 데드크로스가 '확인'(AND)해야 청산.
+                #   bars(5분봉) 리샘플 — 추가 fetch 없음. 미확인이면 보유 유지.
                 if self.config.rsi_exit_enabled:
                     from backend.core.strategy.indicators import htf_rsi_confirms_exit
-                    rsi_exit = htf_rsi_confirms_exit(
+                    if not htf_rsi_confirms_exit(
                         bars, i=len(bars) - 1, tf_mult=self.config.rsi_timeframe_mult,
                         period=self.config.rsi_period,
                         signal_period=self.config.rsi_signal_period,
                         mode=self.config.rsi_mode, lookback=self.config.rsi_cross_lookback,
                         min_level=self.config.rsi_min_level,
                         max_level=self.config.rsi_max_level,
-                    )
-                if not (st_exit or rsi_exit):
-                    continue
+                    ):
+                        logger.debug("%s: ST SELL 발생했으나 RSI 데드크로스 미확인 — 청산 보류", symbol)
+                        continue
                 qty = int(getattr(pos, "total_recommended_qty", 0)) or self._filled_qty(pos)
                 if qty <= 0:
                     continue
