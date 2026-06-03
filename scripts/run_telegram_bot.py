@@ -586,6 +586,7 @@ def _build_supertrend_auto_trader(notifier):
         leaders = await picker.pick(top_n=n)
         return [(c.symbol, c.name) for c in leaders]
 
+    _rsi_on = _env_truthy("SUPERTREND_AUTO_RSI")
     cfg = SupertrendAutoConfig(
         enabled=True,
         interval_sec=int(os.environ.get("SUPERTREND_AUTO_INTERVAL_SEC", "300")),
@@ -596,6 +597,17 @@ def _build_supertrend_auto_trader(notifier):
         min_flip_atr_mult=float(os.environ.get("SUPERTREND_AUTO_MIN_FLIP", "1.0")),
         max_order_qty=int(os.environ.get("SUPERTREND_AUTO_MAX_ORDER_QTY", "5000")),
         max_order_value=float(os.environ.get("SUPERTREND_AUTO_MAX_ORDER_VALUE", "5000000")),
+        # ── RSI 확인 필터 (BAR-OPS-10) — 기본 OFF(opt-in). 검증: SUPERTREND_AUTO_RSI=1 ──
+        #   진입=ST BUY + 최근 RSI 골든크로스 확인(AND), 청산=ST SELL + RSI 데드크로스 확인(AND).
+        #   RSI 단독 매매 없음. dry_run 으로 entered/exited 관찰 후 라이브 판단.
+        #   rsi_exit_enabled 는 RSI 활성 시에만 적용(RSI off 면 베이스라인 청산 그대로).
+        rsi_enabled=_rsi_on,
+        rsi_timeframe_mult=int(os.environ.get("SUPERTREND_AUTO_RSI_TF", "2")),   # 1=5m,2=10m,3=15m,6=30m
+        rsi_period=int(os.environ.get("SUPERTREND_AUTO_RSI_PERIOD", "14")),
+        rsi_signal_period=int(os.environ.get("SUPERTREND_AUTO_RSI_SIGNAL", "9")),
+        rsi_mode=os.environ.get("SUPERTREND_AUTO_RSI_MODE", "signal_cross"),     # signal_cross|centerline|level
+        rsi_cross_lookback=int(os.environ.get("SUPERTREND_AUTO_RSI_LOOKBACK", "3")),
+        rsi_exit_enabled=_rsi_on and _env_truthy("SUPERTREND_AUTO_RSI_EXIT", "1"),
     )
     return SupertrendAutoTrader(
         candle_fetcher=candle_fetcher,
@@ -650,6 +662,12 @@ def main() -> None:
         dry = auto_trader.config  # 로그용
         print(f"   ⚡ 슈퍼트렌드 자동매매 ON (interval={dry.interval_sec}s, "
               f"max_pos={dry.max_positions}, dry_run={os.environ.get('SUPERTREND_AUTO_DRYRUN','1')})")
+        if dry.rsi_enabled:
+            _tf = {1: "5m", 2: "10m", 3: "15m", 6: "30m"}.get(dry.rsi_timeframe_mult, f"{dry.rsi_timeframe_mult}x5m")
+            print(f"   🔎 RSI 확인 필터 ON — {_tf}·{dry.rsi_mode}·p{dry.rsi_period}·lookback{dry.rsi_cross_lookback} "
+                  f"| 청산확인(AND)={dry.rsi_exit_enabled} (진입=ST BUY+RSI골든, 청산=ST SELL+RSI데드)")
+        else:
+            print("   🔎 RSI 확인 필터 OFF (baseline: ADX+FLIP). 켜려면 SUPERTREND_AUTO_RSI=1")
 
     async def _run_all() -> None:
         tasks = [asyncio.create_task(bot.run(), name="telegram_bot")]
