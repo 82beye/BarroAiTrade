@@ -645,3 +645,11 @@ def test_entry_range_gate_rejects_high_position():
     # 게이트 OFF면 둘 다 통과
     tr_off = _trader({}, universe=[], config=_base_config(max_intraday_range_pos=0.0))
     assert tr_off._whipsaw_pass(bars_high, res_h, "005930") is True
+
+
+def test_config_defaults_bar_ops_33():
+    """BAR-OPS-33 supertrend 제약 강화 기본값: min_adx 30·min_flip 1.5·max_positions 10 유지."""
+    c = SupertrendAutoConfig()
+    assert c.min_adx == 30.0
+    assert c.min_flip_atr_mult == 1.5
+    assert c.max_positions == 10  # 사이징 역효과 회피 — 게이트/priority로 드래그 축소

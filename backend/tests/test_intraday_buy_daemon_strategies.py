@@ -16,7 +16,8 @@ from scripts.intraday_buy_daemon import (
 # ── --strategies 파싱 ────────────────────────────────────────────────────────
 def test_parse_strategies_default():
     assert _parse_strategies("f_zone,sf_zone,gold_zone") == ["f_zone", "sf_zone", "gold_zone"]
-    assert DEFAULT_ZONE_STRATEGIES == ["f_zone", "sf_zone", "gold_zone"]
+    # BAR-OPS-33: swing_38 라이브 활성화 — 안정성 1위 전략을 기본 zone 에 포함.
+    assert DEFAULT_ZONE_STRATEGIES == ["swing_38", "f_zone", "sf_zone", "gold_zone"]
 
 
 def test_parse_strategies_empty_disables():
@@ -51,3 +52,11 @@ def test_supertrend_off_stays_off():
     # 애초에 --supertrend 미사용이면 env 무관하게 False
     assert _supertrend_yield_to_bot(False, {"SUPERTREND_AUTO_ENABLED": "1"}) is False
     assert _supertrend_yield_to_bot(False, {}) is False
+
+
+# ── BAR-OPS-33: swing_38 자체분할 → 데몬 DCA 비활성 ──────────────────────────
+def test_no_dca_strategies_contains_swing_38():
+    from scripts.intraday_buy_daemon import _NO_DCA_STRATEGIES
+    assert "swing_38" in _NO_DCA_STRATEGIES
+    # gold_zone 은 _MEANREV(조건부)이지 _NO_DCA(무조건)는 아님
+    assert "gold_zone" not in _NO_DCA_STRATEGIES

@@ -570,3 +570,30 @@ class TestBidirectionalSlippage:
                 )
                 assert t.price == buy.price * Decimal("1.03")
                 break
+
+
+# ── BAR-OPS-33: params_override (백테스트 파라미터 sweep) ──────────────────────
+def test_params_override_none_preserves_default():
+    """override 미주입 시 dataclass 기본값 그대로(회귀 무해)."""
+    insts = _build_strategies(["gold_zone", "f_zone"])
+    g = next(s for s in insts if s.STRATEGY_ID.startswith("gold"))
+    assert g.params.min_score == 5.0  # BAR-OPS-33 default
+
+
+def test_params_override_replaces_field():
+    """override 주입 시 해당 필드만 치환."""
+    insts = _build_strategies(
+        ["gold_zone"], params_override={"gold_zone": {"min_score": 7.0}}
+    )
+    assert insts[0].params.min_score == 7.0
+    # 다른 필드는 보존(min_atr_pct 는 _build_strategies 가 0.035 설정)
+    assert float(insts[0].params.min_atr_pct) == 0.035
+
+
+def test_params_override_unknown_strategy_ignored():
+    """override 에 없는 전략은 영향 없음."""
+    insts = _build_strategies(
+        ["f_zone"], params_override={"gold_zone": {"min_score": 9.0}}
+    )
+    # f_zone 은 override 대상 아님 → 기본 동작
+    assert insts[0].params.ma_support_tolerance == 0.01

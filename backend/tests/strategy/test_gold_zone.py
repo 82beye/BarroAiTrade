@@ -273,12 +273,12 @@ class TestGoldZoneEntryTimeGate:
 class TestGoldZonePhaseD23:
     """BAR-OPS-09 Phase D2.3 (2026-05-28, B4 그리드 결과) — min_score 2.5 → 4.0."""
 
-    def test_default_min_score_is_4_0(self):
-        """default min_score=4.0 (B4 시뮬 자본가중 +56% 개선)."""
+    def test_default_min_score_is_5_0(self):
+        """default min_score=5.0 (BAR-OPS-33, 4~6월 sweep: 6월 약세 해소·MDD-3.0·기대값+4.32)."""
         from backend.core.strategy.gold_zone import GoldZoneParams
         p = GoldZoneParams()
-        assert p.min_score == 4.0, (
-            f"default min_score={p.min_score}, expected 4.0 (Phase D2.3)"
+        assert p.min_score == 5.0, (
+            f"default min_score={p.min_score}, expected 5.0 (BAR-OPS-33)"
         )
 
     def test_default_min_conditions_preserved(self):

@@ -48,6 +48,9 @@ _STRATEGY_ID = "supertrend"   # ActivePosition.strategy / audit strategy_id
 class SupertrendAutoConfig:
     enabled: bool = True               # False → 사이클 미실행 (즉시 OFF)
     interval_sec: int = 300            # 5분봉 → 5분 주기
+    # 주의(BAR-OPS-33): max_positions 하향은 balance_gate 사이징(80%/N)상 종목당 비중을
+    #   오히려 키워(8%→10% 캡) 약전략 역효과 → 10 유지. supertrend 드래그 축소는 게이트
+    #   강화(min_adx 30/min_flip 1.5, 거래125→30·MDD반감) + priority 최하위로 달성.
     max_positions: int = 10            # 슈퍼트렌드 동시 보유 상한
     min_candles: int = 30              # 지표 안정화 최소 봉수
     tic_scope: str = "5"               # 5분봉
@@ -74,9 +77,12 @@ class SupertrendAutoConfig:
     # [개선2] whipsaw 필터 — 진입 시 ADX(추세강도) + FLIP(전환 이탈폭) 게이트 적용.
     #   백테스트상 ADX≥25/FLIP≥1.0 이 PF 1.76→2.00, 승률 35→44% 로 개선.
     #   6/2 자동매매는 무필터(기본 0)라 거짓 전환을 다 매매 → 적자. 운영 기본 ON.
-    min_adx: float = 25.0          # ADX(14) < 이 값이면 진입 거부 (0=비활성)
+    # BAR-OPS-33 (2026-06-08): 25→30. 4~6월 제약 sweep — adx≥30·flip≥1.5 시 거래125→30,
+    #   MDD-41→-22, 전체 기대값 -0.08→+0.20 (드래그·휩쏘 최소화). out-of-sample은 여전히
+    #   음수라 약전략 — priority 최하위(SignalScanner STRATEGY_PRIORITY)와 병행해 비중 억제.
+    min_adx: float = 30.0          # ADX(14) < 이 값이면 진입 거부 (0=비활성)
     adx_period: int = 14
-    min_flip_atr_mult: float = 1.0  # 전환봉이 직전 dn밴드(저항)를 ATR×이배 이상 돌파해야 진입 (0=비활성)
+    min_flip_atr_mult: float = 1.5  # 전환봉이 직전 dn밴드(저항)를 ATR×이배 이상 돌파해야 진입 (0=비활성)
 
     # [개선3] 주문 수량 하드캡 — 저가 종목 사이징 폭주 방지(6/2 252670 38,219주 RuntimeError).
     #   단일주문 절대 상한: 수량·금액 둘 중 작은 쪽으로 클램프. 0 이면 해당 캡 비활성.

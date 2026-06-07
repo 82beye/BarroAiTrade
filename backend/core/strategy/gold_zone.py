@@ -52,7 +52,10 @@ class GoldZoneParams:
     #   - score≥4.0 (변경): 자본가중 +0.231% (+56% 개선) ★
     #   - score≥5.5: 자본가중 +0.229% (4.0 와 거의 동일 — 4.0 sweet spot)
     # min_conditions=3 강화는 모든 PnL 악화로 무효 확인 → default 2 유지.
-    min_score: float = 4.0
+    # BAR-OPS-33 (2026-06-08): 4.0 → 5.0. 4~6월 sweep(거래대금150, in 4~5월/out 6월):
+    #   - score≥4.0: 기대값+2.07 MDD-10.5 out(6월) -7.5(약세)
+    #   - score≥5.0: 기대값+4.32 MDD-3.0 승률57% out(6월) +10.6 ★ (6월 약세 해소·과최적 아님)
+    min_score: float = 5.0
 
     # BAR-OPS-09 Phase 4 — 변동성 필터: ATR% < min_atr_pct 시 진입 거부.
     # default 0.0 (필터 비활성) — 기존 baseline 회귀 보존.

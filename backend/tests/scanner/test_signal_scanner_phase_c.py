@@ -101,16 +101,16 @@ class TestSignalScannerDaytradingOnly:
 
     @pytest.mark.asyncio
     async def test_default_enabled_matrix(self):
-        """default — sf/f/gold 활성, blue/crypto/swing_38 비활성."""
+        """default — sf/f/gold/swing_38 활성(BAR-OPS-33), blue/crypto 비활성."""
         gw = MagicMock()
         gw.market_type = MarketType.STOCK
         scanner = SignalScanner(gw)
         assert scanner.is_enabled("sf_zone") is True
         assert scanner.is_enabled("f_zone") is True
         assert scanner.is_enabled("gold_zone") is True
+        assert scanner.is_enabled("swing_38") is True   # BAR-OPS-33 활성화
         assert scanner.is_enabled("blue_line") is False
         assert scanner.is_enabled("crypto_breakout") is False
-        assert scanner.is_enabled("swing_38") is False
 
     @pytest.mark.asyncio
     async def test_gold_zone_registered(self):
@@ -122,14 +122,14 @@ class TestSignalScannerDaytradingOnly:
         assert scanner.gold_zone.STRATEGY_ID == "gold_zone_v1"
 
     @pytest.mark.asyncio
-    async def test_default_swing_38_inactive_skips_daily_fetch(self):
-        """default swing_38=False → 1d fetch skip (1m 만 1회 호출)."""
+    async def test_override_swing_38_inactive_skips_daily_fetch(self):
+        """swing_38=False override → 1d fetch skip (1m 만 호출). BAR-OPS-33: default 는 활성이라 override 로 비활성."""
         gw = MagicMock()
         gw.market_type = MarketType.STOCK
         gw.get_ticker = AsyncMock(return_value=_ticker())
         gw.get_ohlcv = AsyncMock(return_value=_candles(120))
 
-        scanner = SignalScanner(gw)
+        scanner = SignalScanner(gw, enabled_strategies={"swing_38": False})
         await scanner.scan(["TEST"])
 
         # 호출된 timeframe 추출 — 1m 만 있고 1d 없어야 함
@@ -192,4 +192,27 @@ class TestSignalScannerDaytradingOnly:
         assert scanner.is_enabled("gold_zone") is True     # default 유지
         assert scanner.is_enabled("blue_line") is True     # override
         assert scanner.is_enabled("crypto_breakout") is False
-        assert scanner.is_enabled("swing_38") is False
+        assert scanner.is_enabled("swing_38") is True      # default 유지(BAR-OPS-33 활성)
+
+
+# ── BAR-OPS-33: 안정성 priority tiebreaker ───────────────────────────────────
+def test_strategy_priority_order():
+    """STRATEGY_PRIORITY — 안정성 순위(작을수록 우선)."""
+    from backend.core.scanner.signal_scanner import STRATEGY_PRIORITY
+    assert STRATEGY_PRIORITY["swing_38"] < STRATEGY_PRIORITY["gold_zone"]
+    assert STRATEGY_PRIORITY["gold_zone"] < STRATEGY_PRIORITY["f_zone"]
+    assert STRATEGY_PRIORITY["f_zone"] < STRATEGY_PRIORITY["sf_zone"]
+    assert STRATEGY_PRIORITY["sf_zone"] < STRATEGY_PRIORITY["supertrend"]
+
+
+def test_equal_score_tiebreaks_by_priority():
+    """동점수면 priority 높은(작은) 전략이 앞으로 정렬."""
+    from backend.core.scanner.signal_scanner import STRATEGY_PRIORITY
+    from types import SimpleNamespace
+    sigs = [
+        SimpleNamespace(score=8.0, signal_type="supertrend"),
+        SimpleNamespace(score=8.0, signal_type="swing_38"),
+        SimpleNamespace(score=9.0, signal_type="f_zone"),
+    ]
+    sigs.sort(key=lambda s: (-s.score, STRATEGY_PRIORITY.get(s.signal_type, 99)))
+    assert [s.signal_type for s in sigs] == ["f_zone", "swing_38", "supertrend"]

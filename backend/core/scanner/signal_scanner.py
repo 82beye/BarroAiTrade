@@ -43,7 +43,17 @@ _DEFAULT_ENABLED: Dict[str, bool] = {
     "gold_zone": True,         # 6번 단타 활성 (이전엔 SignalScanner 미등록 — D2.1 신규 등록)
     "blue_line": False,        # 3번 비활성
     "crypto_breakout": False,  # 4번 비활성
-    "swing_38": False,         # 5번 비활성 (Phase D2 작업물 보관, multi-day — 단타 외)
+    # BAR-OPS-33 (2026-06-08): swing_38 활성화 — 4~6월 백테스트 안정성 1위
+    #   (승률55%·손익비7.36·기대값+5.34·MDD-7.6). multi-day 청산은 holding_evaluator
+    #   STRATEGY_EXIT_PROFILES["swing_38"](min_hold 3/max_hold 20)이 게이트.
+    "swing_38": True,          # 5번 활성 (BAR-OPS-33)
+}
+
+# BAR-OPS-33: 안정성 순위(4~6월 백테스트) — 슬롯/자본 경합 시 점수 동률이면 상위 전략 우선.
+#   점수 1차 정렬, priority 2차 tiebreaker (작을수록 우선).
+STRATEGY_PRIORITY: Dict[str, int] = {
+    "swing_38": 1, "gold_zone": 2, "f_zone": 3, "sf_zone": 4,
+    "supertrend": 5, "blue_line": 6, "crypto_breakout": 7,
 }
 
 
@@ -115,7 +125,8 @@ class SignalScanner:
             elif result is not None:
                 signals.append(result)
 
-        signals.sort(key=lambda s: s.score, reverse=True)
+        # 점수 1차(내림차순), 안정성 priority 2차(오름차순) tiebreaker — BAR-OPS-33.
+        signals.sort(key=lambda s: (-s.score, STRATEGY_PRIORITY.get(s.signal_type, 99)))
         logger.info("스캔 완료: %d/%d 종목에서 신호 발생", len(signals), len(symbols))
         return signals
 

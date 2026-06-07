@@ -143,11 +143,27 @@ _DEFAULT_EXIT_PLAN = ExitPlan(
 )
 
 
+def _ov_params(params, sid: str, params_override):
+    """params_override[sid] 의 필드로 dataclass params 치환(sweep 용).
+
+    params_override 미주입(None)이거나 해당 sid 키가 없으면 원본 그대로 반환 →
+    기존 동작 100% 보존(BAR-OPS-33 백테스트 파라미터 튜닝 경로, 회귀 무해).
+    """
+    if not params_override:
+        return params
+    fields = params_override.get(sid)
+    if not fields:
+        return params
+    import dataclasses as _dc
+    return _dc.replace(params, **fields)
+
+
 def _build_strategies(
     strategy_ids: Sequence[str],
     scalping_provider: Optional[ScalpingProvider] = None,
     *,
     daily_backtest: bool = False,
+    params_override: Optional[dict] = None,
 ):
     """strategy_id → 인스턴스 lazy import.
 
@@ -158,6 +174,10 @@ def _build_strategies(
 
     daily_backtest=True 이면 INTRADAY_ONLY_STRATEGIES 를 info 로그로 안내한다.
     해당 전략은 제거되지 않으며 0건 결과가 정상임을 문서화한다.
+
+    params_override (BAR-OPS-33): {strategy_id: {field: value}} 형태로 전략별
+    dataclass params 필드를 치환한다. 백테스트 파라미터 sweep 전용 — 미주입 시
+    기존 동작과 동일(dataclasses.replace 로 명시 필드만 덮어씀).
     """
     if daily_backtest:
         for sid in strategy_ids:
@@ -178,7 +198,9 @@ def _build_strategies(
             # BAR-44 baseline 회귀 보존, 여기서만 0.035 활성화).
             # 2026-05-14 백테스트 +186k 효과 검증 — LESSON_S1_NORMALIZATION 참조.
             # BAR-OPS-09 Phase 8e: 진입 시간 게이트 (14:00) — 장 후반 진입 차단.
-            out.append(FZoneStrategy(FZoneParams(min_atr_pct=0.035, entry_time_cutoff=dtime(14, 0))))
+            out.append(FZoneStrategy(_ov_params(
+                FZoneParams(min_atr_pct=0.035, entry_time_cutoff=dtime(14, 0)),
+                "f_zone", params_override)))
         elif sid == "sf_zone":
             from backend.core.strategy.sf_zone import SFZoneStrategy
             from backend.core.strategy.f_zone import FZoneParams
@@ -187,20 +209,20 @@ def _build_strategies(
             # BAR-OPS-09 Phase D2.2 (2026-05-28, B2): entry_time_cutoff=14:00 추가 — f_zone/gold_zone 일관성.
             # 직전엔 sf_zone 시뮬 진입점에 cutoff 누락 (분석 리포트 §4-4 발견).
             # 누적 발동 5건 모두 flu% ≥10.2% — ATR% 도 충분히 높을 가능성, 100% win 보존 기대.
-            out.append(SFZoneStrategy(FZoneParams(
+            out.append(SFZoneStrategy(_ov_params(FZoneParams(
                 min_atr_pct=0.035,
                 entry_time_cutoff=dtime(14, 0),
-            )))
+            ), "sf_zone", params_override)))
         elif sid == "gold_zone":
             from backend.core.strategy.gold_zone import GoldZoneStrategy, GoldZoneParams
 
             # BAR-OPS-09 Phase 4: 변동성 필터 (min_atr_pct=0.035) — LG계열 차단.
             # BAR-OPS-09 Phase 8d: 진입 시간 게이트 (entry_time_cutoff=14:00) — 379800 15:01 같은 위험 진입 차단.
             # default 회귀 보존, 일봉 시뮬은 시간 게이트 효과 미미 (분봉 운영에 영향).
-            out.append(GoldZoneStrategy(GoldZoneParams(
+            out.append(GoldZoneStrategy(_ov_params(GoldZoneParams(
                 min_atr_pct=0.035,
                 entry_time_cutoff=dtime(14, 0),
-            )))
+            ), "gold_zone", params_override)))
         elif sid == "swing_38":
             from backend.core.strategy.swing_38 import Swing38Strategy, Swing38Params
 
@@ -210,14 +232,14 @@ def _build_strategies(
             # BAR-OPS-09 Phase C (2026-05-27): swing 전략 = multi-day (3~8일 보유, 일봉 강제).
             # BAR-OPS-09 Phase D2 (2026-05-28): max_hold_days 8 → 20 (그리드 결합 최적 SL=-15%×D+20).
             # exit_plan 에서 min/max_hold_days 가 ExitEngine 에 전달되어 보유 기간 게이트 작동.
-            out.append(Swing38Strategy(Swing38Params(
+            out.append(Swing38Strategy(_ov_params(Swing38Params(
                 min_atr_pct=0.035,
                 min_score=5.0,
                 entry_time_cutoff=dtime(14, 0),
                 require_daily_candles=True,
                 min_hold_days=3,
                 max_hold_days=20,
-            )))
+            ), "swing_38", params_override)))
         elif sid == "scalping_consensus":
             from backend.core.strategy.scalping_consensus import (
                 ScalpingConsensusStrategy,
@@ -288,8 +310,11 @@ class IntradaySimulator:
         high_price_budget: Decimal = Decimal("2000000"),
         f_zone_atr_exit: bool = False,
         early_exit_tp: bool = False,
+        params_override: Optional[dict] = None,
     ) -> None:
         self._exit = exit_engine or ExitEngine()
+        # BAR-OPS-33: 전략별 dataclass params 필드 치환(백테스트 sweep). {sid: {field: val}}.
+        self._params_override = params_override
         self._warmup = warmup_candles
         self._qty = position_qty
         self._entry_next_open = entry_on_next_open
@@ -324,7 +349,10 @@ class IntradaySimulator:
                 f"need ≥ {self._warmup + 1} candles, got {len(candles)}"
             )
         strategy_ids = strategies or self.DEFAULT_STRATEGIES
-        strategies_obj = _build_strategies(strategy_ids, self._scalping_provider)
+        strategies_obj = _build_strategies(
+            strategy_ids, self._scalping_provider,
+            params_override=self._params_override,
+        )
 
         trades: list[TradeRecord] = []
         pnl_by_strategy: dict[str, Decimal] = {sid: Decimal(0) for sid in strategy_ids}
