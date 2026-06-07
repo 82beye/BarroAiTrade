@@ -101,9 +101,28 @@ class SupertrendAutoConfig:
     rsi_max_level: float = 100.0
     rsi_exit_enabled: bool = False      # 청산 시 RSI 데드크로스 '확인'(AND) 요구 (단독 청산 아님)
 
-    # ATR 트레일링 청산(샹들리에) — 진입 후 고점종가 − trail_atr_mult×ATR 를 종가가 이탈하면
-    #   신호 무관 청산(가격기반 리스크 스톱, 신호와 OR). 0=비활성. 권장 4.0(최악손실 캡, 수익 일부 희생).
-    trail_atr_mult: float = 0.0
+    # ── 손익 귀속 분석(2026-06-08, recon_2026-06_손실원인) 개선 3건 ──────────────
+    # 패배거래 평균 MFE +2.5~3.9%(수익 거쳤다 손실 청산)·청산후 +2.8% 반등(저점매도) →
+    # 손실 1차 원인이 '청산 지연'으로 규명. 진입 불변·청산만 개선 시 -3.55%→-1.16%.
+    # 5~6월(22거래일) 백테스트 검증: 현행 -3.27% → 트레일3.0+익절5%+고점위치≤90% 진입 +2.73%.
+    #
+    # [청산1] ATR 트레일링 청산(샹들리에) — 진입 후 고점종가 − trail_atr_mult×ATR 를 종가가
+    #   이탈하면 신호 무관 청산(가격기반 리스크 스톱, 신호와 OR). 0=비활성.
+    #   2026-06-08: 0.0→3.0 (트레일 단독으로 22일 -3.27%→+0.93% 흑자전환, 수익 보호).
+    trail_atr_mult: float = 3.0
+
+    # [청산2] 익절 — 진입가 대비 +take_profit_pct% 도달 시 전량청산. 0=비활성.
+    #   수익 반납 방지(SELL전환 지각 청산 보완). 2026-06-08 백테스트로 5.0 채택.
+    take_profit_pct: float = 5.0
+
+    # [진입] 고점/상단권 진입 억제 — 일중 고점대비 위치·당일 상승률 게이트.
+    #   090360(진입위치 92%, -10%) 등 모멘텀 소진 고점 매수 차단.
+    #   max_intraday_range_pos: 진입봉 종가가 당일 high-low 중 이 비율 초과 위치면 거부.
+    #     0=비활성. 2026-06-08: 0.90 (top 10% 위치 차단 — 22일 +0.60%→+2.73% 최적).
+    #   max_day_change_pct: 당일 전일종가 대비 상승률이 이 값 초과면 거부.
+    #     0=비활성. 백테스트상 과필터로 악화 → 기본 OFF, 운영 머신 opt-in.
+    max_intraday_range_pos: float = 0.90
+    max_day_change_pct: float = 0.0
 
 
 class SupertrendAutoTrader:
@@ -202,10 +221,12 @@ class SupertrendAutoTrader:
                     source=self.config.params.source,
                 )
                 lb = max(1, self.config.params.exit_lookback)
-                # ── ATR 트레일링 청산(샹들리에) — 가격기반 리스크 스톱, 신호와 OR(최우선) ──
-                #   진입 후 고점종가 − trail_atr_mult×ATR 를 현재 종가가 이탈하면 즉시 청산.
+                # ── 가격기반 리스크 청산 — 신호와 OR(최우선). 진입 불변·청산개선 효과 ──
+                #   [청산1] 트레일(샹들리에): 진입후 고점종가 − k×ATR 이탈 시 청산.
+                #   [청산2] 익절: 진입가 대비 +take_profit_pct% 도달 시 청산(수익 반납 방지).
                 trailed = self._trail_hit(pos, bars, res)
-                if not trailed:
+                tp_hit = self._take_profit_hit(pos, bars) if not trailed else False
+                if not (trailed or tp_hit):
                     # 청산 = 슈퍼트렌드 SELL(기준·필수). RSI 단독 청산 없음.
                     st_exit = bool(res.sell_signals) and any(res.sell_signals[-lb:])
                     if not st_exit:
@@ -231,7 +252,7 @@ class SupertrendAutoTrader:
                     daily_pnl_pct=daily_pnl_pct, strategy_id=_STRATEGY_ID,
                 )
                 self._pos.remove(symbol)
-                _xreason = "트레일청산" if trailed else "SELL 전환"
+                _xreason = "트레일청산" if trailed else ("익절" if tp_hit else "SELL 전환")
                 result["exited"].append({"symbol": symbol, "qty": qty, "reason": _xreason,
                                          "order_no": getattr(r, "order_no", ""),
                                          "dry_run": getattr(r, "dry_run", False)})
@@ -402,6 +423,28 @@ class SupertrendAutoTrader:
             ):
                 logger.debug("%s: HTF(%d×5m) RSI 미확정 — 진입거부", symbol, c.rsi_timeframe_mult)
                 return False
+        # (4) 고점/상단권 진입 억제 — 모멘텀 소진 고점 매수 차단(2026-06-08 손익귀속).
+        if c.max_intraday_range_pos > 0 or c.max_day_change_pct > 0:
+            cur_date = bars[-1].timestamp.date()
+            today = [b for b in bars if b.timestamp.date() == cur_date]
+            if today:
+                dh = max(float(b.high) for b in today)
+                dl = min(float(b.low) for b in today)
+                cur_px = float(bars[-1].close)
+                if c.max_intraday_range_pos > 0 and dh > dl:
+                    pos_in = (cur_px - dl) / (dh - dl)
+                    if pos_in > c.max_intraday_range_pos:
+                        logger.debug("%s: 일중위치 %.0f%% > %.0f%% — 진입거부(고점권)",
+                                     symbol, pos_in * 100, c.max_intraday_range_pos * 100)
+                        return False
+                if c.max_day_change_pct > 0:
+                    prior = [b for b in bars if b.timestamp.date() < cur_date]
+                    if prior:
+                        pc = float(prior[-1].close)
+                        if pc > 0 and (cur_px - pc) / pc * 100.0 > c.max_day_change_pct:
+                            logger.debug("%s: 당일상승 %.1f%% > %.1f%% — 진입거부(급등)",
+                                         symbol, (cur_px - pc) / pc * 100, c.max_day_change_pct)
+                            return False
         return True
 
     def _trail_hit(self, pos: Any, bars, res) -> bool:
@@ -433,6 +476,17 @@ class SupertrendAutoTrader:
             return False
         trail_stop = peak - k * atr_now
         return float(bars[-1].close) <= trail_stop
+
+    def _take_profit_hit(self, pos: Any, bars) -> bool:
+        """익절 판정 — 진입가 대비 현재 종가 수익률 ≥ take_profit_pct. 0=비활성."""
+        tp = self.config.take_profit_pct
+        if tp <= 0:
+            return False
+        entry_px = float(getattr(pos, "entry_price", 0) or 0)
+        if entry_px <= 0 or not bars:
+            return False
+        cur = float(bars[-1].close)
+        return (cur - entry_px) / entry_px * 100.0 >= tp
 
     def _cap_qty(self, qty: int, price: float, symbol: str) -> int:
         """[개선3] 단일주문 수량·금액 하드캡. 캡 초과 시 클램프 후 로그.

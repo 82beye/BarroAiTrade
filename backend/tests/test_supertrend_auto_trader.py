@@ -121,10 +121,13 @@ class _FakePosStore:
 
 
 def _base_config(**kw):
-    """순수 진입 로직 테스트용 기본 config — 6/2 개선(장초반차단/whipsaw/하드캡) 비활성.
+    """순수 진입 로직 테스트용 기본 config — 선택적 게이트 전부 비활성.
+    6/2 개선(장초반차단/whipsaw/하드캡) + 6/8 개선(트레일/익절/고점진입게이트) 모두 OFF.
     개선 기능은 각 전용 테스트에서 명시적으로 켜서 검증한다."""
     defaults = dict(entry_start_time="", min_adx=0.0, min_flip_atr_mult=0.0,
-                    max_order_qty=0, max_order_value=0.0)
+                    max_order_qty=0, max_order_value=0.0,
+                    trail_atr_mult=0.0, take_profit_pct=0.0,
+                    max_intraday_range_pos=0.0, max_day_change_pct=0.0)
     defaults.update(kw)
     return SupertrendAutoConfig(**defaults)
 
@@ -573,3 +576,72 @@ async def test_rsi_no_second_fetch_minute():
     # 보유 000660(청산 평가) + 후보 005930(진입 평가) 각각 정확히 1회만 fetch.
     assert calls.get("000660") == 1
     assert calls.get("005930") == 1
+
+
+# ── 6/8 개선: 익절 / 트레일 기본활성 / 고점진입 게이트 ───────────────────────
+import types as _types
+from backend.core.strategy.supertrend import compute_supertrend
+
+
+def test_config_defaults_6_8():
+    """6/8 손익귀속 개선 기본값: 트레일3.0·익절5%·고점위치≤90%."""
+    c = SupertrendAutoConfig()
+    assert c.trail_atr_mult == 3.0
+    assert c.take_profit_pct == 5.0
+    assert c.max_intraday_range_pos == 0.90
+    assert c.max_day_change_pct == 0.0   # 당일상승 게이트는 기본 OFF
+
+
+def test_take_profit_hit_helper():
+    """_take_profit_hit — 진입가 대비 +5% 도달 시 True, 미달 시 False, 0이면 비활성."""
+    tr = _trader({}, universe=[], config=_base_config(take_profit_pct=5.0))
+    pos = _types.SimpleNamespace(entry_price=10000.0)
+    bars_up = _candles([10000, 10300, 10600])     # 마지막 +6%
+    bars_flat = _candles([10000, 10100, 10200])   # 마지막 +2%
+    assert tr._take_profit_hit(pos, bars_up) is True
+    assert tr._take_profit_hit(pos, bars_flat) is False
+    tr_off = _trader({}, universe=[], config=_base_config(take_profit_pct=0.0))
+    assert tr_off._take_profit_hit(pos, bars_up) is False
+
+
+@pytest.mark.asyncio
+async def test_take_profit_exits_via_run_cycle():
+    """보유 종목이 +5% 초과면 익절 청산(ST SELL 신호 없이도)."""
+    pos = _FakePosStore(); pos._inject("005930", qty=10)   # entry_price 10000
+    gate = _FakeGate()
+    prices = [10000 + i * 40 for i in range(60)]           # 지속 상승 → trend+1, +수%
+    tr = _trader({"005930": prices}, universe=[], gate=gate, pos=pos,
+                 config=_base_config(take_profit_pct=5.0))   # trail off, TP만 ON
+    r = await tr.run_cycle()
+    assert any(e["symbol"] == "005930" and e["reason"] == "익절" for e in r["exited"])
+
+
+def test_trail_hit_with_default_mult():
+    """기본 trail 3.0 — 고점 대비 3×ATR 이탈 시 청산 True, 비활성 시 False."""
+    tr = _trader({}, universe=[], config=SupertrendAutoConfig(
+        entry_start_time="", min_adx=0.0, min_flip_atr_mult=0.0,
+        take_profit_pct=0.0, max_intraday_range_pos=0.0))  # trail=3.0 기본 유지
+    # 상승(고점 형성) 후 급락 시리즈
+    prices = [10000 + i * 60 for i in range(40)] + [12340 - i * 250 for i in range(8)]
+    bars = _candles(prices)
+    res = compute_supertrend(bars, period=10, multiplier=3.0, source="hl2")
+    pos = _types.SimpleNamespace(entry_price=10000.0, entry_time=None)
+    assert tr._trail_hit(pos, bars, res) is True
+    tr_off = _trader({}, universe=[], config=_base_config(trail_atr_mult=0.0))
+    assert tr_off._trail_hit(pos, bars, res) is False
+
+
+def test_entry_range_gate_rejects_high_position():
+    """고점진입 게이트 — 일중 고점권(>90%) 진입 거부, 중하단 통과."""
+    tr = _trader({}, universe=[], config=_base_config(max_intraday_range_pos=0.90))
+    # 단조 상승 → 마지막 종가가 일중 최고권(pos≈100%) → 거부
+    bars_high = _candles([10000 + i * 50 for i in range(40)])
+    res_h = compute_supertrend(bars_high, period=10, multiplier=3.0, source="hl2")
+    assert tr._whipsaw_pass(bars_high, res_h, "005930") is False
+    # 상승 후 되돌림 → 마지막 종가가 일중 중하단(pos<90%) → 통과
+    bars_mid = _candles([10000 + i * 50 for i in range(30)] + [11450 - i * 60 for i in range(10)])
+    res_m = compute_supertrend(bars_mid, period=10, multiplier=3.0, source="hl2")
+    assert tr._whipsaw_pass(bars_mid, res_m, "005930") is True
+    # 게이트 OFF면 둘 다 통과
+    tr_off = _trader({}, universe=[], config=_base_config(max_intraday_range_pos=0.0))
+    assert tr_off._whipsaw_pass(bars_high, res_h, "005930") is True
