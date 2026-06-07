@@ -612,6 +612,11 @@ def _build_supertrend_auto_trader(notifier):
         #   (백테스트 권장 4×ATR: 최악 단일손실 캡, 단 총수익 일부 희생 — opt-in).
         trail_atr_mult=float(os.environ.get("SUPERTREND_AUTO_TRAIL_ATR", "0")),
     )
+    # entry_lookback env 노브 (BAR-OPS-10 2026-06-05) — '이미 상승 중' 종목 진입 위해 확장.
+    #   기본 2봉(방금 전환만). 늘리면 최근 N봉 내 BUY전환이면 진입(추격 리스크↑). 미설정 시 기본 유지.
+    _elb = os.environ.get("SUPERTREND_AUTO_ENTRY_LOOKBACK", "").strip()
+    if _elb:
+        cfg.params.entry_lookback = int(_elb)
     return SupertrendAutoTrader(
         candle_fetcher=candle_fetcher,
         account_fetcher=account_fetcher,
