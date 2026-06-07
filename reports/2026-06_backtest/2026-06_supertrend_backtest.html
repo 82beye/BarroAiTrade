@@ -1,0 +1,43 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>6월 supertrend 다일제 백테스트</title>
+<style>
+body{font-family:'AppleSDGothicNeo','AppleGothic',sans-serif;margin:0;background:#f5f6f8;color:#222}
+.wrap{max-width:1000px;margin:0 auto;padding:32px}
+h1{font-size:24px;border-bottom:3px solid #1565c0;padding-bottom:10px}
+h2{font-size:19px;margin-top:30px;color:#1565c0;border-left:5px solid #1565c0;padding-left:10px}
+.kpi{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
+.card{background:#fff;border-radius:10px;padding:15px 18px;box-shadow:0 1px 4px rgba(0,0,0,.08);flex:1;min-width:150px}
+.card .v{font-size:21px;font-weight:700;margin-top:6px}
+.neg{color:#c62828} .pos{color:#00701a}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);margin:12px 0}
+th,td{padding:8px 10px;text-align:center;border-bottom:1px solid #eee;font-size:13px}
+th{background:#1565c0;color:#fff}
+.lead{background:#e3f2fd;border-left:5px solid #1565c0;padding:14px 18px;border-radius:6px;font-size:15px;margin:14px 0}
+.note{background:#fff8e1;border-left:4px solid #f9a825;padding:9px 14px;border-radius:6px;font-size:13px;margin:7px 0}
+.find{background:#e8f5e9;border-left:4px solid #2e7d32;padding:10px 14px;border-radius:6px;font-size:14px;margin:8px 0}
+ul{line-height:1.8}
+</style></head><body><div class="wrap">
+<h1>6월 다일제 백테스트 — supertrend 유니버스 포트폴리오 (5분봉)</h1>
+<p style="color:#666">생성 2026-06-07 · 거래일 06-01·02·04·05(06-03 휴장) · 2,920종목 · 프로덕션 supertrend/ADX + 연속 포트폴리오 로직</p>
+<div class="lead">📌 6월 supertrend 백테스트는 <b>두 게이트 모두 순손실</b>: 라이브 기본 09:30 <b class="neg">-3.55%</b>(-1,357,800), 09:00 <b class="neg">-6.62%</b>(-2,531,870). 승률 27.3%/21.4% — 국면 의존이 크고 휩쏘 날(06-05)에 손실 집중.</div>
+<div class="kpi">
+ <div class="card"><div>09:30 합계</div><div class="v neg">-3.55%</div><div style="font-size:12px;color:#888">-1,357,800</div></div>
+ <div class="card"><div>09:00 합계</div><div class="v neg">-6.62%</div><div style="font-size:12px;color:#888">-2,531,870</div></div>
+ <div class="card"><div>승률 (09:30/09:00)</div><div class="v">27.3/21.4%</div></div>
+ <div class="card"><div>거래일</div><div class="v">4일</div><div style="font-size:12px;color:#888">06-01~06-05</div></div>
+</div>
+<h2>종합 결과</h2>
+<table><tr><th>게이트</th><th>진입/청산</th><th>승률</th><th>실현</th><th>미실현</th><th>합계</th><th>수익률</th><th>회로차단</th></tr>
+<tr><td><b>09:30 (라이브 기본)</b></td><td>12/11</td><td>27.3%</td><td class="neg">-1,428,900</td><td class="pos">+71,100</td><td class="neg"><b>-1,357,800</b></td><td class="neg">-3.55%</td><td>6틱</td></tr>
+<tr><td>09:00 (민감도)</td><td>29/28</td><td>21.4%</td><td class="neg">-2,643,470</td><td class="pos">+111,600</td><td class="neg">-2,531,870</td><td class="neg">-6.62%</td><td>138틱</td></tr></table>
+<p style="font-size:12px;color:#888">시작 예수금 가정 38,219,687</p>
+<h2>일별 손익 (09:30 vs 09:00)</h2>
+<table><tr><th>거래일</th><th>09:30 진입/청산</th><th>승률</th><th>09:30 실현</th><th>09:00 진입/청산</th><th>승률</th><th>09:00 실현</th></tr><tr><td>06-01</td><td>1/0</td><td>0%</td><td class='pos'>+0</td><td>10/8</td><td>50%</td><td class='pos'>+759,500</td></tr><tr><td>06-02</td><td>2/1</td><td>0%</td><td class='neg'>-247,500</td><td>6/6</td><td>0%</td><td class='neg'>-811,110</td></tr><tr><td>06-04</td><td>5/3</td><td>67%</td><td class='pos'>+97,000</td><td>7/7</td><td>29%</td><td class='neg'>-1,092,680</td></tr><tr><td>06-05</td><td>4/7</td><td>14%</td><td class='neg'>-1,278,400</td><td>6/7</td><td>0%</td><td class='neg'>-1,499,180</td></tr></table>
+<h2>누적 실현 추이</h2>
+<table><tr><th>거래일</th><th>09:30 일실현</th><th>09:30 누적</th><th>09:00 일실현</th><th>09:00 누적</th></tr><tr><td>06-01</td><td class='pos'>+0</td><td class='pos'>+0</td><td class='pos'>+759,500</td><td class='pos'>+759,500</td></tr><tr><td>06-02</td><td class='neg'>-247,500</td><td class='neg'>-247,500</td><td class='neg'>-811,110</td><td class='neg'>-51,610</td></tr><tr><td>06-04</td><td class='pos'>+97,000</td><td class='neg'>-150,500</td><td class='neg'>-1,092,680</td><td class='neg'>-1,144,290</td></tr><tr><td>06-05</td><td class='neg'>-1,278,400</td><td class='neg'>-1,428,900</td><td class='neg'>-1,499,180</td><td class='neg'>-2,643,470</td></tr></table>
+<h2>시뮬레이션 한계</h2>
+<div class='note'><b>유니버스 근사</b> — 라이브 순위 API(거래대금상위 등) 미저장 → 일별 누적 거래대금 상위 80종목 근사. 실제 진입 종목 구성과 다를 수 있음.</div><div class='note'><b>표본 4일</b> — 6월 거래일 06-01·02·04·05(06-03 휴장). 통계적 일반화엔 표본 부족 — 경향 파악용.</div><div class='note'><b>가정</b> — 시작 예수금 38,219,687, 종목당 10%·최대 10·총 80%, 진입가=신호봉 종가. 슬리피지·수수료·세금 미반영(실제 더 악화).</div><div class='note'><b>연속 포트폴리오</b> — 포지션 오버나잇 이월·일일 회로차단(-3%) 리셋·supertrend 단일전략. daytrading 전략 미포함.</div>
+<h2>발견과 진단</h2>
+<div class='find'><b>6월 supertrend 백테스트는 순손실</b> — 09:30 -3.55% / 09:00 -6.62% (4거래일). 승률 27%/21% — 해당 기간 전략이 고전.</div><div class='find'><b>09:30 게이트가 09:00보다 우월</b> — 두 배 가까이 손실 차(-3.55% vs -6.62%). 09:00은 장초반 휩쏘 과매매로 회로차단 138틱. 라이브 기본 09:30의 타당성 다일 실증.</div><div class='find'><b>국면 의존성 극심</b> — 09:30 기준 06-04만 흑자(+97k·승률67%), 06-05가 손실 압도(-1.28M). 09:00은 06-01 +760k 후 잠식 — 날에 따라 결과가 결정.</div><div class='find'><b>회로차단기 작동</b> — 당일 -3% 도달 시 신규매수 차단 — 09:00에서 특히 빈번(138틱), 손실 확산은 방어하나 진입 자체가 과다.</div><div class='find'><b>06-05 = 휩쏘 최악일</b> — 상승전환 즉시 반락. 단일일·다일 모두 최대 손실일. 전략의 톱니장 취약성 노출.</div>
+<h2>권고</h2>
+<ul><li>09:30 장초반 게이트 유지 — 다일 백테스트로 손실 차 재확인.</li><li>국면 필터 도입 — 시장 변동성/추세강도 낮은(톱니) 날 진입 축소, 추세 확정 지연(2봉→3봉) 등.</li><li>표본 확대 — 5월분 5분봉도 있으므로 5~6월 전체로 백테스트해 손익곡선·MDD·국면별 성과 정량화.</li><li>파라미터 튜닝 — ATR mult/lookback/flip 게이트를 다일 그리드서치로 재최적화(과최적화 주의).</li><li>유니버스 정합 — 라이브 순위 스냅샷 일별 저장으로 백테스트 정확도 향상.</li></ul>
+</div></body></html>

@@ -1,0 +1,49 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<title>06-05 시초 가정 시뮬 — supertrend 090360</title>
+<style>
+body{font-family:'AppleSDGothicNeo','AppleGothic',sans-serif;margin:0;background:#f5f6f8;color:#222}
+.wrap{max-width:1000px;margin:0 auto;padding:32px}
+h1{font-size:25px;border-bottom:3px solid #1565c0;padding-bottom:10px}
+h2{font-size:19px;margin-top:32px;color:#1565c0;border-left:5px solid #1565c0;padding-left:10px}
+.kpi{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
+.card{background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);flex:1;min-width:150px}
+.card .v{font-size:22px;font-weight:700;margin-top:6px}
+.neg{color:#c62828} .pos{color:#00701a}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);margin:12px 0}
+th,td{padding:9px 11px;text-align:center;border-bottom:1px solid #eee;font-size:13px}
+th{background:#1565c0;color:#fff}
+.lead{background:#e3f2fd;border-left:5px solid #1565c0;padding:14px 18px;border-radius:6px;font-size:15px;margin:16px 0}
+.warn{background:#ffebee;border-left:4px solid #c62828;padding:12px 16px;border-radius:6px;font-size:14px;margin:12px 0}
+.find{background:#e8f5e9;border-left:4px solid #2e7d32;padding:11px 15px;border-radius:6px;font-size:14px;margin:9px 0}
+.note{background:#fff8e1;border-left:4px solid #f9a825;padding:11px 15px;border-radius:6px;font-size:13.5px;margin:10px 0}
+ul{line-height:1.85}
+</style></head><body><div class="wrap">
+<h1>06-05 시초 가정 시뮬레이션 — supertrend (090360 로보스타)</h1>
+<p style="color:#666">생성 2026-06-07 · 전제: 공유 토큰 캐시 수정 적용, 인증실패 없이 09:30부터 정상 운용 · 실제 5분봉 + 프로덕션 지표코드 + 기본 config</p>
+<div class="lead">📌 <b>시초부터 정상 운용했어도 결과는 거의 동일(또는 더 나쁨).</b> supertrend는 14:00 고점권 @161,900 진입 → 14:55 @145,200 청산으로 <b class="neg">-10.32%</b>. 실제(-9.0%)와 사실상 같다.</div>
+<div class="warn">⚠ <b>06-05 손실의 원인은 인증장애가 아니라 전략 구조(고점 진입)다.</b> 토큰 수정은 인프라 마비(청산·보유관리 불능)는 막지만, 이 종목 손실 자체는 막지 못한다.</div>
+<div class="kpi">
+  <div class="card"><div>시뮬 손익</div><div class="v neg">-10.32%</div><div style="font-size:12px;color:#888">14:00→14:55</div></div>
+  <div class="card"><div>실제 손익(추정)</div><div class="v neg">-9.0%</div><div style="font-size:12px;color:#888">14:03→15:00</div></div>
+  <div class="card"><div>놓친 진입(반사실)</div><div class="v pos">+7.30%</div><div style="font-size:12px;color:#888">11:25→13:15</div></div>
+  <div class="card"><div>일중 변동</div><div class="v">42%</div><div style="font-size:12px;color:#888">고171.6k/저121.1k</div></div>
+</div>
+
+<h2>시뮬 vs 실제</h2>
+<table><tr><th>구분</th><th>진입</th><th>청산</th><th>손익</th></tr>
+<tr><td>시뮬(시초 정상가동)</td><td>14:00 @161,900</td><td>14:55 @145,200 (SELL전환)</td><td class="neg">-10.32%</td></tr>
+<tr><td>실제(인증장애日)</td><td>14:03 @162,800</td><td>15:00 @~148,100</td><td class="neg">-9.0% (추정)</td></tr></table>
+<p style="font-size:13.5px;color:#555">진입 시점·가격이 거의 동일(14:00 vs 14:03 / 161,900 vs 162,800) → 시뮬이 실제를 충실히 재현. 실제 시스템도 인증장애와 무관하게 같은 신호로 같은 고점에 진입.</p>
+
+<h2>06-05 supertrend 신호 타임라인</h2>
+<table><tr><th>시각</th><th>신호</th><th>종가</th><th>비고</th></tr><tr><td>09:00</td><td class='neg'>SELL</td><td>132,900</td><td style='text-align:left'>전일 추세 이월(하락)</td></tr><tr><td>11:25</td><td class='pos'>BUY</td><td>130,200</td><td style='text-align:left'>상승 전환 — but whipsaw 필터 거부(flip 918 < 1×ATR 2548)</td></tr><tr><td>13:15</td><td class='neg'>SELL</td><td>139,700</td><td style='text-align:left'>하락 전환</td></tr><tr><td>14:00</td><td class='pos'>BUY</td><td>161,900</td><td style='text-align:left'>상승 전환 — 필터 통과(flip 8145 ≥ ATR 6444) → 진입</td></tr><tr><td>14:55</td><td class='neg'>SELL</td><td>145,200</td><td style='text-align:left'>하락 전환 → 청산</td></tr></table>
+
+<h2>핵심: whipsaw 필터의 역설</h2>
+<table><tr><th>진입후보</th><th>종가</th><th>ADX</th><th>flip 돌파</th><th>1×ATR</th><th>판정</th></tr><tr><td>11:25</td><td>130,200</td><td>37.1</td><td>918</td><td>2,548</td><td class='neg'>거부(약한전환)</td></tr><tr><td>14:00</td><td>161,900</td><td>38.8</td><td>8,145</td><td>6,444</td><td class='pos'>통과 → 진입</td></tr></table>
+<div class="note">11:25 @130,200 진입은 flip 돌파 918원 &lt; 1×ATR(2,548)로 <b>거부</b>(추세 초기라 ATR 대비 돌파 작음). 14:00 @161,900은 급등 후라 돌파 8,145 ≥ ATR(6,444)로 <b>통과</b> → 고점 진입. <b>반사실: 11:25 진입 시 13:15 청산까지 +7.30%</b> — 필터가 +7.3% 기회를 막고 -10.3% 고점 진입을 허용.</div>
+
+<h2>진단</h2>
+<div class='find'><b>손실 원인 = 전략, not 인증</b> — 시초 정상가동 시뮬도 -10.32%. 인증장애는 청산·보유관리·추가매매를 마비시킨 별개 문제이며, 이 종목 손실 자체는 supertrend의 고점 진입에서 발생.</div><div class='find'><b>whipsaw 필터(flip≥1×ATR) 오작동 구간</b> — 추세 시작 초기의 진짜 진입(11:25)은 절대 돌파폭이 작아 거부되고, 급등 소진 후 고점(14:00)은 돌파폭이 커 통과 — 필터가 의도와 반대로 작동(좋은 진입 제거·나쁜 진입 허용).</div><div class='find'><b>supertrend 지각성</b> — ATR 밴드 추세전환은 큰 급등 뒤에야 +1로 확정 → 모멘텀 소진 고점에 진입하는 구조적 지각. 갭&런 종목에서 특히 불리.</div><div class='find'><b>daytrading 전략 미관여</b> — f_zone·sf_zone·gold_zone·swing_38은 06-05 090360에 신호 0건 — 해당 종목은 supertrend 전용 시그널이었음.</div>
+<h2>권고</h2>
+<ul><li>고점 진입 차단 게이트 — '일중 고점 대비 위치' 또는 '시가/전일종가 대비 상승률 X% 초과 시 진입금지'로 14:00형 고점 매수 억제.</li><li>whipsaw 필터 재설계 — 절대 돌파폭(flip≥k×ATR) 대신 '추세 시작점으로부터의 경과/되돌림' 기준으로 초기 진입(11:25형)을 살리도록 조정.</li><li>SUPERTREND_AUTO_ENTRY_LOOKBACK 활용 — 최근 병합된 recency 노브로 더 이른 전환을 포착하되, 고점 게이트와 병행.</li><li>토큰 수정은 유지(인프라 안정) — 단 본 손실과는 독립. 전략 개선이 별도로 필요.</li><li>분봉 백테스트 정례화 — 5분봉 캐시 확보됐으므로 supertrend를 다종목·다일자로 백테스트해 필터 파라미터 재튜닝.</li></ul>
+</div></body></html>

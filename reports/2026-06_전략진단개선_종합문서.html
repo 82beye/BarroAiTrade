@@ -1,0 +1,164 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BarroAiTrade 자동매매 전략 진단·개선 종합 문서 (2026-06)</title>
+<style>
+:root{--blue:#1565c0;--red:#c62828;--green:#2e7d32;--amber:#f9a825}
+*{box-sizing:border-box}
+body{font-family:'AppleSDGothicNeo','Apple SD Gothic Neo','Malgun Gothic',sans-serif;margin:0;background:#eceff1;color:#222;line-height:1.6}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px 80px}
+header{background:linear-gradient(135deg,#0d47a1,#1565c0);color:#fff;padding:40px 24px;margin-bottom:8px}
+header .inner{max-width:1080px;margin:0 auto}
+header h1{margin:0 0 8px;font-size:27px}
+header p{margin:0;opacity:.9;font-size:14px}
+nav{position:sticky;top:0;background:#fff;border-bottom:2px solid var(--blue);padding:10px 24px;z-index:10;box-shadow:0 1px 6px rgba(0,0,0,.08);font-size:13px}
+nav .inner{max-width:1080px;margin:0 auto;display:flex;gap:6px;flex-wrap:wrap}
+nav a{color:var(--blue);text-decoration:none;padding:4px 9px;border-radius:14px;background:#e3f2fd;white-space:nowrap}
+nav a:hover{background:var(--blue);color:#fff}
+h2{font-size:21px;color:var(--blue);border-left:6px solid var(--blue);padding-left:12px;margin-top:42px}
+h3{font-size:16px;color:#0d47a1;margin-top:24px}
+section{background:#fff;border-radius:12px;padding:22px 26px;margin-top:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th,td{padding:8px 10px;text-align:center;border-bottom:1px solid #eee}
+th{background:var(--blue);color:#fff;position:sticky}
+tbody tr:nth-child(even){background:#fafafa}
+.neg{color:var(--red);font-weight:600}.pos{color:var(--green);font-weight:600}
+.lead{background:#e3f2fd;border-left:5px solid var(--blue);padding:14px 18px;border-radius:8px;margin:14px 0;font-size:15px}
+.warn{background:#ffebee;border-left:5px solid var(--red);padding:13px 18px;border-radius:8px;margin:12px 0}
+.find{background:#e8f5e9;border-left:4px solid var(--green);padding:11px 15px;border-radius:6px;margin:8px 0;font-size:14px}
+.note{background:#fff8e1;border-left:4px solid var(--amber);padding:10px 15px;border-radius:6px;margin:9px 0;font-size:13px}
+.kpi{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0}
+.card{flex:1;min-width:150px;background:#f5f7fa;border-radius:10px;padding:13px 16px;text-align:center}
+.card .v{font-size:22px;font-weight:700;margin-top:4px}
+.card .l{font-size:12px;color:#666}
+.tag{display:inline-block;background:#0d47a1;color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;margin-right:4px}
+ul,ol{line-height:1.85}
+code{background:#eef1f4;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.foot{text-align:center;color:#888;font-size:12px;margin-top:30px}
+</style></head><body>
+<header><div class="inner">
+<h1>BarroAiTrade 자동매매 전략 진단·개선 종합 문서</h1>
+<p>2026년 6월 · 키움 인증장애 복구 → supertrend 손익 진단 → 4~6월 다전략 백테스트 → 5전략 보완(BAR-OPS-31·32·33)</p>
+</div></header>
+<nav><div class="inner">
+<a href="#s0">요약</a><a href="#s1">1. 인증장애·토큰캐시</a><a href="#s2">2. 06-05 복기</a>
+<a href="#s3">3. 시초 시뮬</a><a href="#s4">4. 손익 귀속(매수vs매도)</a><a href="#s5">5. 6월 백테스트</a>
+<a href="#s6">6. 4~6월 5전략 비교</a><a href="#s7">7. 국면별 상관</a><a href="#s8">8. BAR-OPS-33 보완</a>
+<a href="#s9">9. 결론·권고</a>
+</div></nav>
+<div class="wrap">
+
+<section id="s0">
+<h2>요약 (Executive Summary)</h2>
+<div class="lead">6월 키움 토큰 인증장애를 <b>공유 토큰 캐시</b>로 근본 수정(BAR-OPS-31)한 뒤, supertrend 손실의 진짜 원인을 데이터로 규명했다. 결론: <b>손실은 인증장애가 아니라 전략(특히 청산 지연)에서 발생</b>했고, 4~6월 다전략 백테스트 결과 <b>supertrend는 5전략 중 최약체(음의 엣지)</b>, <b>일봉 스윙군(swing_38·gold_zone)이 압도적 우수</b>였다. 이에 따라 청산 보강(BAR-OPS-32)과 안정성 순위 기반 전략 재배치·튜닝(BAR-OPS-33)을 구현했다.</div>
+<div class="kpi">
+<div class="card"><div class="l">토큰 인증실패</div><div class="v pos">근본수정</div><div class="l">공유 캐시(BAR-OPS-31)</div></div>
+<div class="card"><div class="l">6월 supertrend(현행→수정)</div><div class="v">-3.55%→+2.73%</div><div class="l">trail/익절/게이트</div></div>
+<div class="card"><div class="l">4~6월 최우수</div><div class="v pos">swing_38</div><div class="l">기대값+5.34·손익비7.4</div></div>
+<div class="card"><div class="l">4~6월 최약체</div><div class="v neg">supertrend</div><div class="l">기대값-0.08(음수)</div></div>
+</div>
+</section>
+
+<section id="s1">
+<h2>1. 키움 토큰 인증장애 — 원인과 수정 <span class="tag">BAR-OPS-31</span></h2>
+<p>06-05 장중 키움 토큰 인증실패(rc=3: 8001 App Key/Secret 검증실패 · 8005 Token 무효)가 폭발해 종가 데몬이 매수0/매도0으로 종료. 크레덴셜은 정상이었다.</p>
+<div class="warn"><b>근본 원인:</b> 키움 자체 OpenAPI는 <b>appkey당 토큰 1개만 유효</b>(새 발급 시 이전 토큰 무효화)+발급 빈도 제한인데, 7개 진입점(API routes·ST 데몬·intraday 데몬·telegram·ohlcv 스크립트)이 <b>공유 캐시 없이 각자 토큰을 발급</b> → 상호 무효화(8005) 캐스케이드 → 발급 폭주 → 발급 거부(8001). <b>8001은 자격증명 오류가 아니라 발급 거부의 표면 메시지.</b></p></div>
+<div class="find"><b>증거:</b> 06-05 08:35:50.122/.142 — 22ms 간격 동시 2건 발급(멀티 프로세스 경합 직접 증거). 토큰 디스크 캐시 없음.</div>
+<div class="find"><b>수정:</b> <code>KiwoomNativeOAuth</code>에 파일 캐시+파일락(fcntl) 도입 → 전 프로세스가 단일 토큰 공유·재사용. 동시 8 인스턴스 → 발급 1회로 검증. 0600 권한, 거부 토큰 재채택 차단. (전체 테스트 통과, main 머지 완료)</div>
+</section>
+
+<section id="s2">
+<h2>2. 06-05 매매복기 — 090360 로보스타</h2>
+<p>당일 실거래는 supertrend 090360 1회전뿐. 진입 14:03 @162,800(1차 14주), 청산 15:00.</p>
+<table><tr><th>항목</th><th>값</th></tr>
+<tr><td>일봉 06-05</td><td>시 129,900 → 고 171,600(+32%) → 종 148,100, 저 121,100 (변동폭 ~42%)</td></tr>
+<tr><td>진입</td><td>14:03 @162,800 (일중 고점권 92% 위치)</td></tr>
+<tr><td>추정 실현손익</td><td class="neg">-205,800원 (-9.0%, 종가 기준)</td></tr>
+<tr><td>인프라</td><td>청산 직후 토큰 인증실패 10건 → 종가 데몬 마비</td></tr></table>
+<div class="note">진입가는 active_positions_history(filled_price)로 확정, 청산가는 order_audit가 MKT라 일봉 종가 기반 추정.</div>
+</section>
+
+<section id="s3">
+<h2>3. 06-05 "시초부터 정상가동" 시뮬레이션</h2>
+<p>수정 코드로 인증장애 없이 09:00부터 정상 운용됐다면? (실제 5분봉 + 프로덕션 supertrend 로직)</p>
+<div class="warn"><b>핵심:</b> 시초부터 정상 운용해도 결과는 거의 동일(또는 더 나쁨). supertrend는 14:00 고점 @161,900 진입→14:55 @145,200 청산 <b class="neg">-10.32%</b>. <b>06-05 손실은 인증장애가 아니라 전략의 고점 진입이 원인.</b></p></div>
+<div class="find"><b>whipsaw 필터의 역설:</b> 11:25 @130,200 좋은 진입은 flip 돌파 918&lt;1×ATR(2,548)로 <b>거부</b>, 14:00 @161,900 고점은 급등 후라 돌파 8,145≥ATR(6,444)로 <b>통과</b> → 필터가 +7.3% 기회를 막고 -10.3% 고점진입을 허용.</div>
+<p>전체 유니버스(2,912종목)로 09:00부터 돌리면: 진입10/청산8, 합계 <b class="neg">-1,094,680(-2.86%)</b>, 청산 승률 0/8 — 06-05는 휩쏘장이라 supertrend가 톱니에 썰림. <b>인증장애가 오히려 더 큰 손실을 우발적으로 막았다.</b></p>
+</section>
+
+<section id="s4">
+<h2>4. 손익 근본원인 — 매수 시점 vs 매도 시점</h2>
+<div class="lead">🎯 <b>핵심 문제 = 매도(청산) 시점.</b> 패배거래 절반 이상이 보유 중 +2~15% 수익을 거친 뒤 손실 청산(평균 MFE +3.9%), 청산 직후 평균 +2.8% 반등(저점 매도). 진입 불변·청산만 개선 시 -3.55%→-1.16%로 손실 2/3 회복 → 청산이 1차 원인.</div>
+<h3>근거: 청산 로직만 교체 (진입 동일)</h3>
+<table><tr><th>청산 로직</th><th>합계</th><th>수익률</th><th>승률</th></tr>
+<tr><td>① baseline(SELL전환만·현행)</td><td class="neg">-1,357,800</td><td class="neg">-3.55%</td><td>27%</td></tr>
+<tr><td>③ +샹들리에 트레일 3.0</td><td class="neg">-855,100</td><td class="neg">-2.24%</td><td>33%</td></tr>
+<tr><td>⑥ +익절 +5%</td><td class="neg">-860,450</td><td class="neg">-2.25%</td><td>33%</td></tr>
+<tr style="background:#e8f5e9;font-weight:600"><td>⑦ 트레일3.0+익절5%</td><td>-444,450</td><td>-1.16%</td><td>33%</td></tr></table>
+<div class="note">메커니즘: SELL전환 청산이 ATR밴드 지각신호 → 고점에서 ~3×ATR 빠진 뒤 저점 청산. trail_atr_mult=0(트레일 OFF)·익절 부재로 수익 반납. 진입은 부차(상단권 매수).</div>
+</section>
+
+<section id="s5">
+<h2>5. 6월 supertrend 백테스트 + 청산 보강 <span class="tag">BAR-OPS-32</span></h2>
+<p>손익원인(청산)에 따라 샹들리에 트레일(3.0)+익절(5%)+고점진입게이트(≤90%)를 구현, 5~6월 22거래일로 검증.</p>
+<table><tr><th>설정</th><th>승률</th><th>수익률</th></tr>
+<tr><td>① baseline(현행)</td><td>35%</td><td class="neg">-3.27%</td></tr>
+<tr><td>② 트레일3.0</td><td>38%</td><td class="pos">+0.93%</td></tr>
+<tr style="background:#e8f5e9;font-weight:600"><td>④ 트레일3.0+익절5%+고점≤90% (채택)</td><td>43%</td><td>+2.73%</td></tr></table>
+<div class="find">트레일 단독만으로 -3.27%→+0.93% 흑자전환 → 청산이 1차 원인 재확인. 채택 조합 +2.73%(+6.0%p). (main 머지 완료)</div>
+</section>
+
+<section id="s6">
+<h2>6. 4~6월 전체 다전략 비교 — 안정성 순위</h2>
+<p>거래대금 상위150 유니버스, 거래단위 지표. supertrend(5분봉) + 일봉 스윙군(f/sf/gold/swing) 각자 native 엔진.</p>
+<table><tr><th>전략</th><th>TF</th><th>거래</th><th>승률</th><th>손익비</th><th>기대값/거래</th><th>총합%</th><th>MDD%</th><th>연속손실</th></tr>
+<tr style="background:#e8f5e9"><td><b>swing_38</b></td><td>일봉</td><td>123</td><td>55%</td><td>7.36</td><td class="pos">+5.34</td><td class="pos">+656</td><td>-7.6</td><td>5</td></tr>
+<tr><td>gold_zone</td><td>일봉</td><td>58</td><td>48%</td><td>3.99</td><td class="pos">+2.07</td><td class="pos">+120</td><td>-10.5</td><td>7</td></tr>
+<tr><td>f_zone</td><td>일봉</td><td>17</td><td>53%</td><td>5.57</td><td class="pos">+3.72</td><td class="pos">+63</td><td>-2.1</td><td>1</td></tr>
+<tr><td>sf_zone</td><td>일봉</td><td>5</td><td>100%</td><td>∞</td><td class="pos">+6.73</td><td class="pos">+34</td><td>0</td><td>0</td></tr>
+<tr style="background:#ffebee"><td><b>supertrend</b></td><td>5분봉</td><td>125</td><td>32%</td><td>2.00</td><td class="neg">-0.08</td><td class="neg">-9.9</td><td>-40.8</td><td>9</td></tr></table>
+<div class="warn"><b>supertrend는 5전략 중 최약체 — 시그널 레벨 기대값 음수(-0.08/거래)·MDD-40.8%·연속손실9.</b> 앞선 +2.73%는 포트폴리오 제약이 약한 엣지를 가린 것. 반면 <b>일봉 스윙군(swing_38·gold_zone·f_zone)은 일관 우수.</b></div>
+<div class="note">안정성 순위: swing_38 &gt; gold_zone &gt; f_zone &gt; (sf_zone 소표본) &gt; supertrend. 타임프레임 상이(5분봉 단타 vs 일봉 스윙)로 크기 직접비교는 아니나 품질지표(승률·손익비·기대값·MDD)는 비교 유효. 총합%는 엣지누적이지 계좌수익률 아님.</div>
+</section>
+
+<section id="s7">
+<h2>7. 상승장·하락장별 — 진입 종목수 ↔ 손익 상관</h2>
+<p>5~6월 22일(상승 6일/하락 16일)을 국면 분류해 일 진입 종목수와 손익의 상관 분석.</p>
+<table><tr><th>상관쌍</th><th>전체</th><th>상승장</th><th>하락장</th></tr>
+<tr><td>진입 종목수 ↔ 일손익%</td><td>+0.35</td><td>+0.06</td><td class="pos">+0.50</td></tr>
+<tr><td>진입 종목수 ↔ 평균하락률</td><td class="neg">-0.41</td><td class="neg">-0.68</td><td>-0.33</td></tr>
+<tr><td>시장 평균등락 ↔ 일손익%</td><td>-0.05</td><td>+0.35</td><td>-0.06</td></tr></table>
+<div class="find"><b>하락장:</b> 종목 많이 잡을수록 일손익↑(+0.50) — 트레일/익절이 강세주 수익 보호+손실 캡, 분산이 유리. <b>상승장:</b> 종목수 무관(+0.06), 시장 강도가 손익 결정.</div>
+</section>
+
+<section id="s8">
+<h2>8. 5전략 보완 — 안정성 순위 튜닝 + 라이브 활성화 <span class="tag">BAR-OPS-33</span></h2>
+<div class="lead">안정성 순위대로 5전략을 재구동·보완. <b>최우수 swing_38 라이브 활성화</b>, <b>gold_zone min_score 5.0(6월 약세 해소)</b>, <b>supertrend 게이트 강화(드래그 축소)</b>, <b>안정성 우선순위 정렬</b>.</div>
+<h3>4~6월 전/후 검증 (in 4~5월 튜닝 / out 6월 검증)</h3>
+<table><tr><th>전략</th><th>거래(전→후)</th><th>승률</th><th>기대값(전→후)</th><th>6월out(전→후)</th><th>MDD(전→후)</th><th>조치</th></tr>
+<tr style="background:#e8f5e9"><td>swing_38</td><td>123</td><td>55%</td><td>+5.34</td><td>+5.23</td><td>-7.6</td><td>라이브 활성화</td></tr>
+<tr><td>gold_zone</td><td>58→30</td><td>48→57%</td><td>+2.07→<b class="pos">+4.32</b></td><td><b>-1.50→+2.66</b></td><td>-10.5→-3.0</td><td>min_score 4.0→5.0</td></tr>
+<tr><td>f_zone</td><td>17</td><td>53%</td><td>+3.72</td><td>n/a</td><td>-2.1</td><td>유지+활성</td></tr>
+<tr><td>sf_zone</td><td>5</td><td>100%</td><td>+6.73</td><td>n/a</td><td>0</td><td>유지+활성</td></tr>
+<tr style="background:#ffebee"><td>supertrend</td><td>125→30</td><td>32→37%</td><td>-0.08→+0.20</td><td>-0.93→-1.07</td><td>-41→-22</td><td>게이트 강화</td></tr></table>
+<h3>구현 내역 (저위험 파라미터 + 활성화)</h3>
+<ul>
+<li><b>swing_38 라이브 활성화</b> — 데몬 기본 zone + 스캐너 ON. 자체 분할전략이라 데몬 DCA 스킵(<code>_NO_DCA_STRATEGIES</code>), 다일보유는 기존 청산프로파일(min_hold3/max_hold20)이 게이트.</li>
+<li><b>gold_zone min_score 4.0→5.0</b> — 6월 약세 해소(out -1.50→+2.66), in/out 동시 개선=과최적 아님.</li>
+<li><b>supertrend min_adx 25→30·flip 1.0→1.5</b> — 거래125→30·MDD-41→-22. 단 out 음수 유지(약전략)→priority 최하위로 비중 억제.</li>
+<li><b>STRATEGY_PRIORITY</b> — 안정성 순위 정렬 tiebreaker. <b><code>_build_strategies(params_override)</code></b> — 백테스트 sweep 경로.</li>
+</ul>
+<div class="note">전체 테스트 1298 passed. 실거래 송출은 운영자 env(LIVE_TRADING_ENABLED·dry_run)로 별도 — 코드는 활성화 준비만. 워크트리 구현, main 머지는 승인 대기.</div>
+</section>
+
+<section id="s9">
+<h2>9. 결론 · 권고</h2>
+<div class="find"><b>1. 인프라:</b> 토큰 공유캐시로 인증장애 근본 해소. 발급/갱신 알림·백오프 안정화 유지.</div>
+<div class="find"><b>2. 전략 배치:</b> 가장 큰 보완은 "최우수 swing_38을 라이브에 켜고, 최약체 supertrend 비중을 억제"하는 배치 자체. swing_38·gold_zone 중심 운용.</div>
+<div class="find"><b>3. 청산:</b> supertrend는 청산(트레일/익절) 보강이 손익을 좌우. SELL전환 단독 청산의 지각 문제 해소가 핵심.</div>
+<div class="find"><b>4. supertrend:</b> 약전략 — 게이트 강화로 드래그는 줄였으나 out-of-sample 음수. 실거래 비중 최소 또는 추가검증 전 보류 권장.</div>
+<div class="find"><b>5. 국면:</b> 하락장에선 분산(종목수 유지), 상승장에선 종목수보다 추세 강도·종목 질에 집중.</div>
+<div class="note">한계: 유니버스 근사(거래대금 상위)·표본 기간 제한·슬리피지/수수료 미반영. 절대수치보다 전략 간 상대 우열·귀속 결론에 무게. 다국면·장기 표본·실비용 반영 재검증 권장.</div>
+</section>
+
+<p class="foot">BarroAiTrade · 2026-06 전략 진단·개선 종합 문서 · BAR-OPS-31/32/33<br>본 문서는 분석·백테스트 결과 요약이며 실거래는 dry_run 검증 후 운영자 판단으로 진행한다.</p>
+</div></body></html>

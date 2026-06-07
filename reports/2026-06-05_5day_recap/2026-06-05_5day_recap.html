@@ -1,0 +1,82 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<title>2026-05-28~06-05 BarroAiTrade 5거래일 매매복기</title>
+<style>
+body{font-family:'AppleSDGothicNeo','AppleGothic',sans-serif;margin:0;background:#f5f6f8;color:#222}
+.wrap{max-width:1100px;margin:0 auto;padding:32px}
+h1{font-size:26px;border-bottom:3px solid #1565c0;padding-bottom:10px}
+h2{font-size:20px;margin-top:36px;color:#1565c0;border-left:5px solid #1565c0;padding-left:10px}
+h3{font-size:17px;margin-top:24px;color:#0d47a1}
+.kpi{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
+.card{background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);flex:1;min-width:160px}
+.card .v{font-size:23px;font-weight:700;margin-top:6px}
+.neg{color:#c62828} .pos{color:#00701a}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);margin:12px 0}
+th,td{padding:9px 10px;text-align:center;border-bottom:1px solid #eee;font-size:13px}
+th{background:#1565c0;color:#fff}
+.note{background:#fff8e1;border-left:4px solid #f9a825;padding:10px 14px;border-radius:6px;font-size:13px;margin:8px 0}
+.find{background:#e8f5e9;border-left:4px solid #2e7d32;padding:10px 14px;border-radius:6px;margin:8px 0;font-size:14px}
+.warn{background:#ffebee;border-left:4px solid #c62828;padding:12px 16px;border-radius:6px;font-size:13px;margin:14px 0}
+ul{line-height:1.8}
+</style></head><body><div class="wrap">
+<h1>BarroAiTrade 5거래일 매매복기</h1>
+<p style="color:#666">기간 2026-05-28 ~ 06-05 · 생성 2026-06-07 · 소스 order_audit.csv · balance_history.json · logs/barro.log.*</p>
+<div class="warn">⚠ order_audit 체결가가 <b>MKT</b>(미기록)이고 trades 테이블이 비어 있어 <b>종목별 실현손익은 산출 불가</b>.
+본 복기는 계좌 <b>현금(cash) 일별 증감</b>을 실현손익 프록시로 사용. <code>total</code>은 미실현 평가 포함이라 보유일에 착시 있음.</div>
+
+<div class="kpi">
+  <div class="card"><div>5일 누적 실현(cash)</div><div class="v neg">-1,428,788원</div><div style="font-size:13px;color:#888">-3.60%</div></div>
+  <div class="card"><div>매수 / 매도 체결</div><div class="v">57 / 35</div></div>
+  <div class="card"><div>손실한도 차단</div><div class="v neg">20</div></div>
+  <div class="card"><div>주문 실패</div><div class="v neg">4</div></div>
+  <div class="card"><div>토큰 인증실패</div><div class="v neg">21</div></div>
+</div>
+<h2>일별 요약</h2>
+<table><tr><th>날짜</th><th>매수</th><th>매도</th><th>차단</th><th>실패</th><th>종목</th><th>주력전략</th><th>cash 종가</th><th>일 실현(Δcash)</th><th>보유</th><th>인증실패</th></tr>
+<tr><td>2026-05-28</td><td>24</td><td>9</td><td>0</td><td>0</td><td>10</td><td>(미지정)</td><td>39,427,939</td><td class='neg'>-220,536</td><td>0</td><td class=''>0</td></tr><tr><td>2026-05-29</td><td>12</td><td>7</td><td>0</td><td>1</td><td>6</td><td>(미지정)</td><td>39,016,550</td><td class='neg'>-411,389</td><td>1</td><td class=''>0</td></tr><tr><td>2026-06-01</td><td>5</td><td>4</td><td>17</td><td>1</td><td>4</td><td>supertrend</td><td>38,522,455</td><td class='neg'>-494,095</td><td>0</td><td class='neg'>6</td></tr><tr><td>2026-06-02</td><td>15</td><td>14</td><td>3</td><td>2</td><td>11</td><td>supertrend</td><td>38,219,687</td><td class='neg'>-302,768</td><td>1</td><td class='neg'>5</td></tr><tr><td>2026-06-05</td><td>1</td><td>1</td><td>0</td><td>0</td><td>1</td><td>supertrend</td><td>—</td><td class=''>—</td><td>—</td><td class='neg'>10</td></tr></table>
+<h2>일별 상세</h2>
+
+    <h3>2026-05-28</h3>
+    <p>체결 매수 24 / 매도 9 · 종목 10개 · 주문 00:05Z~05:40Z<br>
+    전략: (미지정)×33<br>
+    계좌: cash 39,427,939 / eval 0 / total 39,427,939 (보유 0)</p>
+    
+    <div class='find'>레거시 경로(strategy_id 미지정)로 24매수/9매도. 종목 10개로 분산. 계좌는 소폭 감소(-220,536, -0.56%).</div>
+    <p style='font-size:13px;color:#777'>종목: 001740, 001820, 006660, 009150, 012330, 034220, 319400, 347850, 373220, 417010</p>
+    
+    <h3>2026-05-29</h3>
+    <p>체결 매수 12 / 매도 7 · 종목 6개 · 주문 00:08Z~06:20Z<br>
+    전략: gold_zone×4, (미지정)×9, f_zone×6<br>
+    계좌: cash 39,016,550 / eval 3,060,480 / total 42,077,030 (보유 1)</p>
+    
+    <div class='find'>gold_zone(4)·f_zone(6) 신호 가동 시작. 12매수/7매도, 1종목 보유(평가 3,060,480) 익일 이월. 현금은 -411,389 감소.</div>
+    <p style='font-size:13px;color:#777'>종목: 018260, 018880, 034220, 035420, 064400, 066570</p>
+    
+    <h3>2026-06-01</h3>
+    <p>체결 매수 5 / 매도 4 · 종목 4개 · 주문 05:48Z~06:20Z<br>
+    전략: supertrend×9<br>
+    계좌: cash 38,522,455 / eval 0 / total 38,522,455 (보유 0)</p>
+    <div class='note'>차단 17건 — 일일 손실 한도 도달: -8.4478% ≤ -3.0%. 신규 매수 차단.</div><div class='note'>인프라: 키움 토큰 인증실패 6건</div>
+    <div class='find'>**일일 손실 -8.45% 손실한도 도달 → 신규매수 17건 자동 차단(회로차단기 작동).** 05-29 이월 보유분 강제청산·현금화(balance 보정). supertrend 단일전략 전환. 현금 -494,095.</div>
+    <p style='font-size:13px;color:#777'>종목: 005935, 0193W0, 0195R0, 122630</p>
+    
+    <h3>2026-06-02</h3>
+    <p>체결 매수 15 / 매도 14 · 종목 11개 · 주문 00:00Z~05:54Z<br>
+    전략: supertrend×13, (미지정)×4, gold_zone×8, f_zone×4<br>
+    계좌: cash 38,219,687 / eval 2,880,000 / total 41,099,687 (보유 1)</p>
+    <div class='note'>차단 1건 — 일일 손실 한도 도달: -3.03% ≤ -3.0%. 신규 매수 차단.</div><div class='note'>차단 2건 — 일일 손실 한도 도달: -26.2398% ≤ -3.0%. 신규 매수 차단.</div><div class='note'>인프라: 키움 토큰 인증실패 5건</div>
+    <div class='find'>장중 -3.03% 후 -26.24% 손실한도 재도달 → 차단 3건. supertrend(13)·gold_zone(8)·f_zone(4) 혼합 29건 체결, 11종목. 1종목 보유(평가 2,880,000) 이월. 현금 -302,768. RuntimeError 2건.</div>
+    <p style='font-size:13px;color:#777'>종목: 005930, 005935, 0193W0, 0195R0, 020150, 034220, 043260, 090360, 122630, 454910, 466100</p>
+    
+    <h3>2026-06-05</h3>
+    <p>체결 매수 1 / 매도 1 · 종목 1개 · 주문 05:03Z~06:00Z<br>
+    전략: supertrend×2<br>
+    계좌: cash — / eval — / total — (보유 —)</p>
+    <div class='note'>인프라: 키움 토큰 인증실패 10건</div>
+    <div class='find'>**키움 네이티브 토큰 인증실패 10건 — 종가 데몬이 인증실패로 매수0/매도0 종료(실거래 차질).** order_audit에는 supertrend 090360 1회전(buy 05:03Z/sell 06:00Z)만 기록. balance_history 미기록.</div>
+    <p style='font-size:13px;color:#777'>종목: 090360</p>
+    
+<h2>발견과 진단</h2>
+<div class='find'><b>실현 기준 5일 연속 감소</b> — 현금(cash) 기준 5거래일 연속 마이너스, 누적 -1,428,788원(-3.60%). total이 일부 날 플러스로 보이는 것은 미실현 평가(eval) 이월 때문이며 실제 실현 추세는 하락이다.</div><div class='find'><b>회로차단기 정상 작동</b> — 06-01 -8.45%, 06-02 -26.24%/-3.03% 손실한도 도달 시 신규매수 총 20건이 자동 차단되어 손실 확산을 방어. 리스크 게이트는 설계대로 동작 중.</div><div class='find'><b>06-02 -26.24% 이상치</b> — 단일 구간/종목 급락으로 추정되는 -26.24% 손실한도 트리거는 평소(-3% 부근) 대비 과대. executions.json 부재로 종목 단위 drill-down(_loss_drill_down.py)이 필요.</div><div class='find'><b>인프라 리스크 — 토큰 인증실패</b> — 키움 네이티브 토큰 인증실패 누적 21건(06-01 6 / 06-02 5 / 06-05 10). 특히 06-05는 종가 데몬이 인증실패로 매수0/매도0 종료 — 전략 성과와 무관한 실거래 차질. App Key/Secret·토큰 재발급 경로 점검 필요.</div><div class='find'><b>전략 전환 진행</b> — 05-28 레거시(미지정) → 05-29 gold_zone/f_zone → 06-01 이후 supertrend 중심으로 이동. 전환기 거래량 급감(33건→2건)은 전략 단일화 + 손실한도/인증장애 복합 영향.</div>
+<h2>권고 (다음 사이클)</h2>
+<ul><li>키움 토큰 발급/갱신 자동화 안정화 — 인증실패 시 알림 + 자동 재시도 백오프, 06-05형 데몬 0건 종료 재발 방지.</li><li>06-02 -26.24% 종목 drill-down 실행: `python scripts/_loss_drill_down.py --symbol <코드> --date 2026-06-02`.</li><li>체결가 기록 보강 — order_audit에 평균체결가/실현손익 컬럼 추가 또는 trades 테이블 적재 활성화(현재 0행)로 종목별 복기 가능화.</li><li>evening pipeline(`_daily_evening_pipeline.py`) 정기 실행으로 executions.json 확보 → 정량 매매복기 자동화.</li></ul>
+</div></body></html>

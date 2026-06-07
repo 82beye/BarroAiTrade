@@ -1,0 +1,60 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<title>2026-06-05 BarroAiTrade 매매복기 (상세)</title>
+<style>
+body{font-family:'AppleSDGothicNeo','AppleGothic',sans-serif;margin:0;background:#f5f6f8;color:#222}
+.wrap{max-width:1000px;margin:0 auto;padding:32px}
+h1{font-size:26px;border-bottom:3px solid #1565c0;padding-bottom:10px}
+h2{font-size:20px;margin-top:34px;color:#1565c0;border-left:5px solid #1565c0;padding-left:10px}
+h3{font-size:16px;color:#0d47a1;margin-top:20px}
+.kpi{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
+.card{background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);flex:1;min-width:150px}
+.card .v{font-size:22px;font-weight:700;margin-top:6px}
+.neg{color:#c62828} .pos{color:#00701a}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);margin:12px 0}
+th,td{padding:9px 11px;text-align:center;border-bottom:1px solid #eee;font-size:13px}
+th{background:#1565c0;color:#fff}
+.lead{background:#e3f2fd;border-left:5px solid #1565c0;padding:14px 18px;border-radius:6px;font-size:15px;margin:16px 0}
+.note{background:#fff8e1;border-left:4px solid #f9a825;padding:11px 15px;border-radius:6px;font-size:13px;margin:10px 0}
+.warn{background:#ffebee;border-left:4px solid #c62828;padding:11px 15px;border-radius:6px;font-size:13.5px;margin:9px 0}
+.find{background:#e8f5e9;border-left:4px solid #2e7d32;padding:11px 15px;border-radius:6px;font-size:14px;margin:9px 0}
+ul{line-height:1.85}
+</style></head><body><div class="wrap">
+<h1>BarroAiTrade 매매복기 — 2026-06-05 <span style="font-size:15px;color:#888">(상세)</span></h1>
+<p style="color:#666">생성 2026-06-07 · 소스 order_audit.csv · _active_positions_history · ohlcv_cache(일봉) · logs</p>
+<div class="note">진입가는 position_history <code>filled_price</code>로 확정(162,800). 청산가는 order_audit가 <code>MKT</code>만 기록하고 5분봉에 06-05가 없어 <b>일봉 종가/손절가 기반 추정</b> — 정확값은 키움 체결내역 대조 필요. balance_history 06-05 미기록.</div>
+<div class="lead">📌 단 1종목 <b>090360 로보스타</b>(supertrend) 1회전. 일중 고점권(162,800) 진입 후 반락, 종가(148,100) 기준 추정 <b class="neg">-205,800원 (-9.0%)</b>. 청산 직후 키움 토큰 인증실패로 매매엔진 전면 마비 — <b>인프라 장애가 지배한 날</b>.</div>
+<div class="kpi">
+  <div class="card"><div>추정 실현손익(종가)</div><div class="v neg">-205,800원</div><div style="font-size:13px;color:#888">-9.0%</div></div>
+  <div class="card"><div>거래</div><div class="v">1회전</div><div style="font-size:13px;color:#888">090360 로보스타</div></div>
+  <div class="card"><div>보유</div><div class="v">14주</div><div style="font-size:13px;color:#888">1차 분할만 체결</div></div>
+  <div class="card"><div>인프라 장애</div><div class="v neg">토큰 인증실패</div><div style="font-size:13px;color:#888">청산 후 엔진 마비</div></div>
+</div>
+
+<h2>거래 상세</h2>
+<table>
+<tr><th>항목</th><th>값</th></tr>
+<tr><td>종목 / 전략</td><td>090360 로보스타 / supertrend (sl -4.0%)</td></tr>
+<tr><td>진입</td><td>14:03:46 KST · 162,800원 × 14주 (1차 분할, order_no 0122467)</td></tr>
+<tr><td>2차 분할</td><td>10주 / -1.5% 트리거 — <b class="neg">미체결</b></td></tr>
+<tr><td>청산</td><td>15:00:16 KST · 시장가 (order_no 0140253)</td></tr>
+<tr><td>매수금액</td><td>2,279,200원</td></tr>
+</table>
+<h3>청산가 추정 시나리오</h3>
+<table><tr><th>시나리오</th><th>청산가</th><th>손익(14주)</th><th>수익률</th></tr><tr><td style='text-align:left'>일봉 종가 기준(유력, 15:00 청산~15:30 종가 근접)</td><td>148,100</td><td class='neg'>-205,800</td><td class='neg'>-9.0%</td></tr><tr><td style='text-align:left'>-4% 손절가 기준</td><td>156,288</td><td class='neg'>-91,168</td><td class='neg'>-4.0%</td></tr></table>
+
+<h2>종목 일봉 맥락 (090360)</h2>
+<table><tr><th>날짜</th><th>시가</th><th>고가</th><th>저가</th><th>종가</th><th>거래량</th></tr><tr><td>2026-06-01</td><td>122,200</td><td>122,200</td><td>115,100</td><td>122,200</td><td>750,195</td></tr><tr><td>2026-06-02</td><td>151,400</td><td>158,800</td><td>135,000</td><td>158,800</td><td>1,642,275</td></tr><tr><td>2026-06-04</td><td>137,800</td><td>146,500</td><td>132,500</td><td>139,200</td><td>1,114,914</td></tr><tr style="background:#fff3e0;font-weight:600"><td>2026-06-05</td><td>129,900</td><td>171,600</td><td>121,100</td><td>148,100</td><td>4,206,111</td></tr></table>
+<p style="font-size:13.5px;color:#555">06-05는 시 129,900 → 고 171,600(<b>+32%</b>) → 종 148,100, 저 121,100로 일중 변동폭 약 <b>42%</b>, 거래량 4.2M주의 극단적 변동성. 진입가 162,800는 고점권.</p>
+
+<h2>타임라인 (KST)</h2>
+<table><tr><th>시각</th><th>이벤트</th><th>내용</th></tr><tr><td>14:03:46</td><td><b>진입 체결</b></td><td style='text-align:left'>090360 로보스타 1차 분할 14주 @ 162,800 (시장가, order_no 0122467). supertrend 신호. 2차(10주, -1.5% 트리거) 대기.</td></tr><tr><td>~14:0x</td><td><b>일중 고점권</b></td><td style='text-align:left'>당일 고가 171,600원(시가 대비 +32%) 형성 — 진입가 162,800는 고점 부근.</td></tr><tr><td>15:00:16</td><td><b>청산 체결</b></td><td style='text-align:left'>090360 매도 (시장가, order_no 0140253). 보유 14주 정리. 종가 148,100원 근접 추정.</td></tr><tr><td>15:03:30~</td><td><b>인프라 장애</b></td><td style='text-align:left'>키움 네이티브 토큰 인증실패(rc=3, 8001 App Key/Secret 검증실패) 연속 발생 — BUY/SELL 매 사이클 에러.</td></tr><tr><td>15:06~15:17</td><td><b>ST 사이클 마비</b></td><td style='text-align:left'>ST-CYCLE 평가완료 진입0/청산0(보유1), ST-UNIVERSE-ERR 반복. chart ka10080 429 rate-limit 다발.</td></tr><tr><td>15:19:03</td><td><b>잔고조회 실패</b></td><td style='text-align:left'>[BALANCE-ERR] 토큰 인증실패 — 평가/리스크 상태 갱신 불가.</td></tr><tr><td>장 마감</td><td><b>데몬 종료</b></td><td style='text-align:left'>== 장 마감 — 데몬 종료 (매수 0건, 매도 0건) == — 청산 이후 윈도우 전체 무거래.</td></tr></table>
+
+<h2>인시던트 분석</h2>
+<div class='warn'><b>키움 토큰 인증실패 (치명)</b> — barro.log 10건 + intraday.log 매 사이클 — rc=3 [8001:App Key/Secret 검증 실패] / [8005:Token 유효하지 않음]. 15:00 청산 직후부터 매매엔진 전면 마비. 추가 진입·트레일링·2차 분할 트리거·잔고평가 모두 불능.</div><div class='warn'><b>chart API 429 rate-limit</b> — ka10080(분봉 차트) 429 다발 — 1초 후 재시도(최대 3회). 인증장애와 겹쳐 시세 갱신 지연.</div><div class='warn'><b>2차 분할 미체결</b> — -1.5% 트리거가(약 160,358원) 미발동. 진입 직후 해당 가격을 거치지 않았거나, 토큰장애로 트리거 평가 자체가 불가했을 가능성.</div><div class='warn'><b>주문수량 로깅 불일치</b> — order_audit sell qty=24(추천수량)로 기록되나 실제 보유/체결은 14주(1차 분할만). 감사로그가 추천수량을 적재하는 한계 — 종목별 정산 시 주의.</div>
+
+<h2>발견과 진단</h2>
+<div class='find'><b>고변동 종목 고점권 진입</b> — 로보스타는 당일 시 129,900→고 171,600(+32%)→종 148,100, 저 121,100로 일중 변동폭 ±20% 이상. 진입가 162,800는 고점 부근이라 반락에 그대로 노출 — 종가 기준 추정 -9.0%.</div><div class='find'><b>인프라가 성과를 지배한 날</b> — 전략 판단보다 키움 토큰 인증실패가 결과를 좌우. 청산은 가까스로 성공했으나 이후 엔진 전면 정지 — 보유분이 더 있었다면 트레일링/손절 미작동으로 손실 확대 위험. 06-01·06-02·06-05 반복되는 SPOF.</div><div class='find'><b>표본 1건의 한계</b> — 당일 유효 거래는 단 1회전. 전략 성과로 일반화 불가 — 인프라 안정화 후 재측정 필요.</div><div class='find'><b>리스크 게이트는 침묵</b> — 손실한도 차단·회로차단 트리거 없음(거래 1건). 단 청산가 미기록으로 실현손익 자동집계가 안 되는 점은 복기 자동화의 공백.</div>
+
+<h2>권고</h2>
+<ul><li>키움 App Key/Secret·토큰 발급 경로 즉시 점검 — 인증실패 시 ① 즉시 알림 ② 지수 백오프 재발급 ③ 연속 실패 N회 시 안전모드(신규진입 중단, 보유분 보호청산) 전환.</li><li>고변동 종목 진입 게이트 추가 — 시가/전일종가 대비 상승률·ATR·일중 고점대비 위치(예: 고점 -X% 이내 진입 금지)로 고점권 시장가 진입 억제.</li><li>체결가/실현손익 적재 — order_audit에 평균체결가·실현손익 컬럼 또는 trades 테이블 활성화(현재 0행). 청산가 미기록 해소.</li><li>chart ka10080 호출 레이트리밋 완화 — 캐시 TTL/배치 조회로 429 저감.</li><li>2차 분할 트리거 로깅 강화 — 트리거 평가 시점·가격·발동여부를 기록해 미체결 원인(가격 미도달 vs 장애) 구분.</li></ul>
+</div></body></html>

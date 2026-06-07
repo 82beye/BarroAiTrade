@@ -1,0 +1,36 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>6월 손실 근본원인 — 매수 vs 매도</title>
+<style>
+body{font-family:'AppleSDGothicNeo','AppleGothic',sans-serif;margin:0;background:#f5f6f8;color:#222}
+.wrap{max-width:1000px;margin:0 auto;padding:32px}
+h1{font-size:23px;border-bottom:3px solid #1565c0;padding-bottom:10px}
+h2{font-size:18px;margin-top:28px;color:#1565c0;border-left:5px solid #1565c0;padding-left:10px}
+.verdict{background:#ffebee;border-left:5px solid #c62828;padding:14px 18px;border-radius:6px;font-size:15px;margin:14px 0}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);margin:12px 0}
+th,td{padding:8px 10px;text-align:center;border-bottom:1px solid #eee;font-size:13px}
+th{background:#1565c0;color:#fff}
+.neg{color:#c62828} .pos{color:#00701a}
+.find{background:#e8f5e9;border-left:4px solid #2e7d32;padding:10px 14px;border-radius:6px;font-size:14px;margin:8px 0}
+ul{line-height:1.85}
+.note{background:#fff8e1;border-left:4px solid #f9a825;padding:9px 14px;border-radius:6px;font-size:13px;margin:10px 0}
+</style></head><body><div class="wrap">
+<h1>6월 백테스트 손실 근본원인 — 매수 vs 매도 시점 귀속</h1>
+<p style="color:#666">생성 2026-06-08 · 6월 supertrend 유니버스 백테스트 청산거래 · 5분봉 MFE/MAE/청산후반등 분해 + 청산로직 교체 검증</p>
+<div class="verdict">🎯 <b>핵심 문제 = 매도(청산) 시점.</b> 패배거래 절반 이상이 보유 중 +2~15% 수익을 거친 뒤 손실 청산(평균 MFE 09:00 +3.9%), 청산 직후 평균 +2.8% 반등(저점 매도). <b>진입 불변·청산만 개선 시 -3.55%→-1.16%</b>로 손실 2/3 회복 — 청산이 1차 원인. 진입은 부차(상단권 매수).</div>
+
+<h2>근거 1 — 청산 로직만 교체 (진입 동일)</h2>
+<table><tr><th>청산 로직</th><th>합계 손익</th><th>수익률</th><th>승률</th></tr><tr><td style='text-align:left'>① baseline (SELL전환만·현행)</td><td class='neg'>-1,357,800</td><td class='neg'>-3.55%</td><td>27%</td></tr><tr><td style='text-align:left'>② +샹들리에 트레일 k=4.0</td><td class='neg'>-1,126,600</td><td class='neg'>-2.95%</td><td>27%</td></tr><tr><td style='text-align:left'>③ +샹들리에 트레일 k=3.0</td><td class='neg'>-855,100</td><td class='neg'>-2.24%</td><td>33%</td></tr><tr><td style='text-align:left'>④ +샹들리에 트레일 k=2.0</td><td class='neg'>-821,150</td><td class='neg'>-2.15%</td><td>17%</td></tr><tr><td style='text-align:left'>⑤ +고정손절 -4%</td><td class='neg'>-1,094,900</td><td class='neg'>-2.86%</td><td>27%</td></tr><tr><td style='text-align:left'>⑥ +익절 +5%</td><td class='neg'>-860,450</td><td class='neg'>-2.25%</td><td>33%</td></tr><tr style=background:#e8f5e9;font-weight:600><td style='text-align:left'>⑦ 트레일3.0 + 익절5%</td><td class='neg'>-444,450</td><td class='neg'>-1.16%</td><td>33%</td></tr></table>
+<div class="note">동일 진입에서 청산만 개선(트레일 3.0 + 익절 5%) 시 약 <b>+913,000원(+2.39%p)</b> 개선. 청산이 손익을 좌우.</div>
+
+<h2>근거 2 — 거래 단위 수익 반납 (MFE vs 청산수익)</h2>
+<table><tr><th>종목</th><th>진입</th><th>MFE(최대수익)</th><th>청산수익</th><th>진입위치</th><th>청산후 30분반등</th></tr><tr><td>377480</td><td>09:00</td><td class='pos'>+14.6%</td><td class='neg'>-1.12%</td><td>100%</td><td class='pos'>+5.6%</td></tr><tr><td>066570</td><td>09:05</td><td class='pos'>+15.1%</td><td class='neg'>-2.23%</td><td>100%</td><td class='pos'>+7.0%</td></tr><tr><td>090360</td><td>14:00</td><td class='pos'>+6.0%</td><td class='neg'>-10.32%</td><td>92%</td><td class='pos'>+3.7%</td></tr><tr><td>347850</td><td>14:10</td><td class='pos'>+6.8%</td><td class='neg'>-6.56%</td><td>34%</td><td class='pos'>+9.9%</td></tr><tr><td>034220</td><td>09:00</td><td class='pos'>+6.5%</td><td class='neg'>-0.54%</td><td>65%</td><td class='pos'>+0.7%</td></tr><tr><td>035420(win)</td><td>09:00</td><td class='pos'>+23.3%</td><td class='pos'>+17.85%</td><td>21%</td><td class='pos'>+0.2%</td></tr></table>
+<div class="note">377480 +14.6%→-1.12%(15.7%p 반납), 066570 +15.1%→-2.23%. 승리거래(035420)도 +23.3%→+17.85%로 5.5%p 반납 — 수익 보호 장치 부재.</div>
+
+<h2>근거 3 — 패배거래 집계</h2>
+<table><tr><th>지표</th><th>값(09:30 / 09:00)</th><th>해석</th></tr><tr><td style='text-align:left'>패배거래 평균 MFE(보유중 최대수익)</td><td>09:30 +2.46% / 09:00 +3.92%</td><td style='text-align:left'>대부분 수익 구간을 거침 — 진입 직후 못 오른 게 아님</td></tr><tr><td style='text-align:left'>패배거래 평균 MAE(최대손실)</td><td>09:30 -6.37% / 09:00 -7.03%</td><td style='text-align:left'>손실은 깊게 허용됨</td></tr><tr><td style='text-align:left'>청산 후 30분 반등</td><td>09:30 +2.85% / 09:00 +2.76%</td><td style='text-align:left'>청산 직후 가격이 되돌아옴 = 저점 매도</td></tr><tr><td style='text-align:left'>진입 일중위치</td><td>09:30 65% / 09:00 74%</td><td style='text-align:left'>상단권 매수 경향(부차 문제)</td></tr><tr><td style='text-align:left'>수익기회 있었음(MFE≥2%) 비율</td><td>09:30 38% / 09:00 55%</td><td style='text-align:left'>절반 이상이 '수익→손실 반납' = 청산 문제</td></tr><tr><td style='text-align:left'>진입직후 수익無(MFE<0.5%) 비율</td><td>09:30 25% / 09:00 9%</td><td style='text-align:left'>순수 진입실패는 소수</td></tr></table>
+
+<h2>원인 메커니즘</h2>
+<div class='find'><b>청산 신호(SELL전환)가 지각</b> — supertrend SELL은 ATR밴드(10·3.0) 하향이탈 후 발생 — 고점에서 ~3×ATR 빠진 뒤 청산. 왕복 수익이 손실로 전환.</div><div class='find'><b>저점 매도</b> — 청산 직후 +2.8% 반등(되돌림) — 신호 지연으로 국면 저점에서 매도.</div><div class='find'><b>수익 보호 장치 OFF</b> — trail_atr_mult=0·익절 없음 → 오른 포지션 방어 수단 전무. 샹들리에 트레일 코드는 있으나 꺼짐.</div><div class='find'><b>진입은 부차 문제</b> — 진입 일중위치 65~74%(상단권)·일부 고점매수. 단 패배의 9~25%만 진입직후 하락 — 청산 기여가 큼.</div>
+<h2>권고 (우선순위)</h2>
+<ul><li><b>[1순위·청산] 샹들리에 트레일 활성화</b> — trail_atr_mult 0→3.0. 단독 -3.55%→-2.24%.</li><li><b>[1순위·청산] 익절 티어</b> — +5% 도달 시 (부분)청산. 트레일 병행 시 -1.16%.</li><li><b>[2순위·진입] 고점/상단권 진입 억제</b> — 일중 고점대비 위치·상승률 게이트.</li><li><b>[검증]</b> 트레일3.0+익절5%를 5~6월 전체 재백테스트(표본·과최적화 점검).</li><li><b>[운영]</b> 토큰/09:30 게이트 유지(손실과 독립이나 리스크 방어).</li></ul>
+<div class="note">한계: 유니버스 근사·4거래일 표본·슬리피지/수수료 미반영. 절대수치보다 <b>청산&gt;진입 귀속 결론</b>에 무게.</div>
+</div></body></html>

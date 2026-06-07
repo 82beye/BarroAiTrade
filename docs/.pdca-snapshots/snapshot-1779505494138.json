@@ -1,0 +1,1829 @@
+{
+  "timestamp": "2026-05-23T03:04:54.136Z",
+  "reason": "compaction",
+  "status": {
+    "version": "2.0",
+    "lastUpdated": "2026-05-22T23:51:24.205Z",
+    "activeFeatures": [
+      "bar-17-dashboard",
+      "gateway",
+      "backend",
+      "core",
+      "risk",
+      "api",
+      "frontend",
+      "trading",
+      "markets",
+      "positions",
+      "ui",
+      "dashboard",
+      "strategy",
+      "scanner",
+      "routes",
+      "monitoring",
+      "scripts",
+      "watchlist",
+      "reports",
+      "settings",
+      "layout",
+      "config",
+      "db",
+      "repositories",
+      "execution",
+      "analysis",
+      "legacy_scalping",
+      "tests",
+      "scalping_team",
+      "strategy_team",
+      "verification_team",
+      "agents",
+      "files",
+      "backtester"
+    ],
+    "primaryFeature": "bar-17-dashboard",
+    "features": {
+      "bar-17-dashboard": {
+        "phase": "completed",
+        "phaseNumber": 6,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [
+          "FR-01",
+          "FR-02",
+          "FR-03",
+          "FR-04",
+          "FR-05",
+          "FR-06",
+          "FR-07",
+          "FR-08",
+          "FR-09",
+          "FR-10"
+        ],
+        "documents": {
+          "plan": "docs/01-plan/features/bar-17-dashboard.plan.md",
+          "design": "docs/02-design/features/bar-17-dashboard.design.md"
+        },
+        "timestamps": {
+          "started": "2026-04-11T10:00:00.000Z",
+          "lastUpdated": "2026-04-11T10:30:00.000Z"
+        },
+        "lastFile": "docs/02-design/features/bar-17-dashboard.design.md"
+      },
+      "gateway": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T01:35:02.437Z",
+          "lastUpdated": "2026-04-11T03:43:12.841Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/gateway/kiwoom.py"
+      },
+      "backend": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T01:35:08.910Z",
+          "lastUpdated": "2026-05-05T19:40:01.880Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/main.py"
+      },
+      "core": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T01:35:49.362Z",
+          "lastUpdated": "2026-05-22T23:50:23.060Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/core/orchestrator.py"
+      },
+      "risk": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T01:36:02.007Z",
+          "lastUpdated": "2026-04-11T09:30:12.665Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/risk/compliance.py"
+      },
+      "api": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T01:36:19.770Z",
+          "lastUpdated": "2026-04-11T01:36:19.770Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/api/websocket.py"
+      },
+      "frontend": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T01:38:55.961Z",
+          "lastUpdated": "2026-04-12T02:33:51.214Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/next.config.js"
+      },
+      "trading": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T01:40:07.705Z",
+          "lastUpdated": "2026-04-11T02:21:13.436Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/app/trading/page.tsx"
+      },
+      "markets": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T01:40:16.224Z",
+          "lastUpdated": "2026-04-11T02:21:25.379Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/app/markets/page.tsx"
+      },
+      "positions": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T01:40:23.880Z",
+          "lastUpdated": "2026-04-11T02:21:39.914Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/app/positions/page.tsx"
+      },
+      "ui": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T02:19:04.686Z",
+          "lastUpdated": "2026-04-11T02:19:27.464Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/components/ui/select.tsx"
+      },
+      "dashboard": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T02:19:58.515Z",
+          "lastUpdated": "2026-04-11T02:20:12.738Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/components/dashboard/recent-orders.tsx"
+      },
+      "strategy": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T03:35:51.026Z",
+          "lastUpdated": "2026-05-22T23:51:24.205Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/tests/strategy/test_f_zone.py"
+      },
+      "scanner": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T03:36:52.160Z",
+          "lastUpdated": "2026-04-11T03:45:28.664Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/scanner/indicators.py"
+      },
+      "routes": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T03:39:34.491Z",
+          "lastUpdated": "2026-05-22T23:50:30.312Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/api/routes/signals.py"
+      },
+      "monitoring": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T03:40:13.519Z",
+          "lastUpdated": "2026-05-05T19:40:34.891Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/tests/monitoring/test_metrics.py"
+      },
+      "scripts": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T03:40:44.877Z",
+          "lastUpdated": "2026-05-06T10:47:48.453Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/scripts/run_baseline.py"
+      },
+      "watchlist": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T09:20:41.169Z",
+          "lastUpdated": "2026-04-11T09:23:01.243Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/app/watchlist/page.tsx"
+      },
+      "reports": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T09:21:04.147Z",
+          "lastUpdated": "2026-04-11T09:23:09.871Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/app/reports/page.tsx"
+      },
+      "settings": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T09:21:28.005Z",
+          "lastUpdated": "2026-04-11T09:22:41.176Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/app/settings/page.tsx"
+      },
+      "layout": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T09:21:40.239Z",
+          "lastUpdated": "2026-04-11T09:21:40.239Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/components/layout/app-sidebar.tsx"
+      },
+      "config": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T09:25:27.806Z",
+          "lastUpdated": "2026-05-05T19:25:45.061Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/config/settings.py"
+      },
+      "db": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T09:25:38.809Z",
+          "lastUpdated": "2026-04-11T09:25:38.809Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/db/database.py"
+      },
+      "repositories": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T09:25:50.194Z",
+          "lastUpdated": "2026-04-11T09:25:50.194Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/db/repositories/audit_repo.py"
+      },
+      "execution": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-11T09:26:49.910Z",
+          "lastUpdated": "2026-04-11T09:27:14.421Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/core/execution/position_manager.py"
+      },
+      "analysis": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-04-12T03:51:50.394Z",
+          "lastUpdated": "2026-04-12T03:52:19.525Z"
+        },
+        "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/analysis/bar-29-backtest-validation.py"
+      },
+      "legacy_scalping": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-05-05T17:59:04.453Z",
+          "lastUpdated": "2026-05-05T19:05:16.305Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/tests/legacy_scalping/test_adapter.py"
+      },
+      "tests": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-05-05T19:04:36.454Z",
+          "lastUpdated": "2026-05-05T19:04:52.393Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/tests/conftest.py"
+      },
+      "scalping_team": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-05-05T19:07:22.327Z",
+          "lastUpdated": "2026-05-05T19:07:22.327Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/legacy_scalping/strategy/scalping_team/__init__.py"
+      },
+      "strategy_team": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-05-05T19:07:25.130Z",
+          "lastUpdated": "2026-05-05T19:07:25.130Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/legacy_scalping/strategy/strategy_team/__init__.py"
+      },
+      "verification_team": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-05-05T19:07:26.695Z",
+          "lastUpdated": "2026-05-05T19:07:26.695Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/legacy_scalping/strategy/verification_team/__init__.py"
+      },
+      "agents": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-05-05T19:07:28.523Z",
+          "lastUpdated": "2026-05-05T19:07:28.523Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/legacy_scalping/scanner/agents/__init__.py"
+      },
+      "files": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-05-21T16:07:02.709Z",
+          "lastUpdated": "2026-05-21T16:12:43.226Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/skills/barro-daily-audit-phase1/references/files/04-test-daily-pipeline.py"
+      },
+      "backtester": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-05-21T17:02:37.148Z",
+          "lastUpdated": "2026-05-22T23:50:36.199Z"
+        },
+        "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/core/backtester/intraday_simulator.py"
+      }
+    },
+    "pipeline": {
+      "currentPhase": 1,
+      "level": "Dynamic",
+      "phaseHistory": []
+    },
+    "session": {
+      "startedAt": "2026-04-11T01:23:25.516Z",
+      "onboardingCompleted": false,
+      "lastActivity": "2026-05-22T23:51:24.205Z"
+    },
+    "history": [
+      {
+        "timestamp": "2026-04-11T01:35:02.437Z",
+        "feature": "gateway",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:35:08.910Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:35:17.765Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:35:23.509Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:35:31.167Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:35:37.636Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:35:49.362Z",
+        "feature": "core",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:36:02.007Z",
+        "feature": "risk",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:36:11.448Z",
+        "feature": "risk",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:36:19.770Z",
+        "feature": "api",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:36:30.054Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:38:55.961Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:39:02.610Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:39:04.912Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:39:12.930Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:39:18.239Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:39:21.544Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:39:27.342Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:39:41.966Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:39:45.839Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:40:07.705Z",
+        "feature": "trading",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:40:16.224Z",
+        "feature": "markets",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T01:40:23.880Z",
+        "feature": "positions",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:19:04.686Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:19:10.372Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:19:13.641Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:19:19.288Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:19:24.056Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:19:27.464Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:19:40.574Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:19:50.564Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:19:58.515Z",
+        "feature": "dashboard",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:20:07.368Z",
+        "feature": "dashboard",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:20:12.738Z",
+        "feature": "dashboard",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:20:28.559Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:20:53.417Z",
+        "feature": "trading",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:21:01.457Z",
+        "feature": "trading",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:21:13.436Z",
+        "feature": "trading",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:21:25.379Z",
+        "feature": "markets",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T02:21:39.914Z",
+        "feature": "positions",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:34:45.392Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:35:51.026Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:35:56.718Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:36:15.793Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:36:34.935Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:36:52.160Z",
+        "feature": "scanner",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:37:00.401Z",
+        "feature": "scanner",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:38:15.068Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:39:34.491Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:39:38.588Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:40:13.519Z",
+        "feature": "monitoring",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:40:28.222Z",
+        "feature": "monitoring",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:40:33.931Z",
+        "feature": "monitoring",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:40:44.877Z",
+        "feature": "scripts",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:40:48.809Z",
+        "feature": "scripts",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:40:53.860Z",
+        "feature": "scripts",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:41:13.449Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:41:17.042Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:41:46.480Z",
+        "feature": "gateway",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:41:48.641Z",
+        "feature": "scripts",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:41:49.292Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:41:51.201Z",
+        "feature": "gateway",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:42:11.244Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:42:11.816Z",
+        "feature": "gateway",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:42:16.625Z",
+        "feature": "gateway",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:42:20.847Z",
+        "feature": "risk",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:42:22.619Z",
+        "feature": "gateway",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:42:31.058Z",
+        "feature": "gateway",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:42:42.985Z",
+        "feature": "risk",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:42:53.007Z",
+        "feature": "gateway",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:42:57.550Z",
+        "feature": "gateway",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:43:03.820Z",
+        "feature": "gateway",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:43:07.169Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:43:12.841Z",
+        "feature": "gateway",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:43:18.881Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:43:30.145Z",
+        "feature": "core",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:43:43.189Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:43:49.311Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:43:55.456Z",
+        "feature": "core",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:44:04.427Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:44:10.868Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:44:14.230Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:44:29.363Z",
+        "feature": "scanner",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:44:53.955Z",
+        "feature": "scanner",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:44:57.535Z",
+        "feature": "scanner",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:45:15.869Z",
+        "feature": "scanner",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:45:28.664Z",
+        "feature": "scanner",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:46:55.193Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:47:05.429Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:47:12.579Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:47:19.418Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:47:26.498Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:47:35.119Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:47:42.591Z",
+        "feature": "core",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T03:47:46.842Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:20:41.169Z",
+        "feature": "watchlist",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:21:04.147Z",
+        "feature": "reports",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:21:28.005Z",
+        "feature": "settings",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:21:40.239Z",
+        "feature": "layout",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:21:57.292Z",
+        "feature": "reports",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:22:04.066Z",
+        "feature": "reports",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:22:07.518Z",
+        "feature": "watchlist",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:22:14.944Z",
+        "feature": "watchlist",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:22:21.389Z",
+        "feature": "settings",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:22:29.748Z",
+        "feature": "settings",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:22:33.916Z",
+        "feature": "settings",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:22:39.017Z",
+        "feature": "settings",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:22:41.176Z",
+        "feature": "settings",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:22:57.756Z",
+        "feature": "watchlist",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:23:01.243Z",
+        "feature": "watchlist",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:23:05.136Z",
+        "feature": "reports",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:23:07.502Z",
+        "feature": "reports",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:23:09.871Z",
+        "feature": "reports",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:25:27.806Z",
+        "feature": "config",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:25:38.809Z",
+        "feature": "db",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:25:50.194Z",
+        "feature": "repositories",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:25:57.722Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:26:30.427Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:26:49.910Z",
+        "feature": "execution",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:27:14.421Z",
+        "feature": "execution",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:27:33.154Z",
+        "feature": "monitoring",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:28:05.156Z",
+        "feature": "monitoring",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:28:58.196Z",
+        "feature": "core",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:30:06.052Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:30:12.665Z",
+        "feature": "risk",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-11T09:30:22.390Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-12T02:29:21.715Z",
+        "feature": "core",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-12T02:29:25.959Z",
+        "feature": "core",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-12T02:29:39.675Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-12T02:33:51.214Z",
+        "feature": "frontend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-12T02:36:04.711Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-12T02:36:16.743Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-12T02:36:40.104Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-12T02:36:46.069Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-12T03:51:50.394Z",
+        "feature": "analysis",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-04-12T03:52:19.525Z",
+        "feature": "analysis",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T17:59:04.453Z",
+        "feature": "legacy_scalping",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:04:24.258Z",
+        "feature": "legacy_scalping",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:04:35.721Z",
+        "feature": "legacy_scalping",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:04:36.454Z",
+        "feature": "tests",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:04:37.190Z",
+        "feature": "legacy_scalping",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:04:52.393Z",
+        "feature": "tests",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:05:16.305Z",
+        "feature": "legacy_scalping",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:07:22.327Z",
+        "feature": "scalping_team",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:07:25.130Z",
+        "feature": "strategy_team",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:07:26.695Z",
+        "feature": "verification_team",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:07:28.523Z",
+        "feature": "agents",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:24:57.764Z",
+        "feature": "config",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:25:20.963Z",
+        "feature": "config",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:25:45.061Z",
+        "feature": "config",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:39:23.363Z",
+        "feature": "monitoring",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:39:25.030Z",
+        "feature": "monitoring",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:39:44.493Z",
+        "feature": "monitoring",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:39:51.976Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:40:01.880Z",
+        "feature": "backend",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-05T19:40:34.891Z",
+        "feature": "monitoring",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-06T10:47:48.453Z",
+        "feature": "scripts",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-06T10:48:46.536Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-06T10:49:01.773Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:07:02.709Z",
+        "feature": "files",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:07:24.974Z",
+        "feature": "files",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:12:41.070Z",
+        "feature": "files",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:12:43.226Z",
+        "feature": "files",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:38:44.692Z",
+        "feature": "core",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:38:50.535Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:39:03.407Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:54:16.200Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:54:26.039Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:54:37.580Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:54:46.816Z",
+        "feature": "core",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:54:53.089Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:55:00.171Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T16:55:35.413Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T17:01:42.974Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T17:01:50.971Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T17:02:02.512Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T17:02:37.148Z",
+        "feature": "backtester",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T17:02:38.675Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T17:03:09.717Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T17:08:55.062Z",
+        "feature": "backtester",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T17:09:15.992Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T17:09:24.533Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T22:13:13.165Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T22:13:17.869Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T22:13:26.495Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T22:13:30.365Z",
+        "feature": "backtester",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T22:13:56.545Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T22:14:07.612Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T22:38:32.450Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T22:38:38.054Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T22:38:42.737Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T22:38:47.944Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T22:38:53.112Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-21T22:38:59.320Z",
+        "feature": "backtester",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T22:53:00.897Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T22:53:03.776Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T22:53:10.847Z",
+        "feature": "backtester",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T22:53:19.218Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:34:17.178Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:34:22.920Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:36:35.053Z",
+        "feature": "backtester",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:36:43.707Z",
+        "feature": "backtester",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:36:58.029Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:40:31.676Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:40:37.304Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:40:43.035Z",
+        "feature": "backtester",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:40:55.146Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:49:55.676Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:50:02.143Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:50:04.189Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:50:11.110Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:50:16.876Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:50:23.060Z",
+        "feature": "core",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:50:25.698Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:50:30.312Z",
+        "feature": "routes",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:50:36.199Z",
+        "feature": "backtester",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:50:50.746Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:50:57.730Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-05-22T23:51:24.205Z",
+        "feature": "strategy",
+        "phase": "do",
+        "action": "updated"
+      }
+    ]
+  }
+}
