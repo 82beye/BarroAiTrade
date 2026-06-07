@@ -77,6 +77,7 @@ async def test_oauth_token_issue_success():
         app_secret=SecretStr("s"),
         base_url="https://mockapi.kiwoom.com",
         http_client=client,
+        use_shared_cache=False,
     )
     t = await o.get_token()
     assert t.access_token.get_secret_value() == "abc.def.ghi"
@@ -102,6 +103,7 @@ async def test_oauth_token_cached():
     o = KiwoomNativeOAuth(
         app_key=SecretStr("k"), app_secret=SecretStr("s"),
         base_url="https://mockapi.kiwoom.com", http_client=client,
+        use_shared_cache=False,
     )
     await o.get_token(); await o.get_token()
     assert client.post.await_count == 1
@@ -118,9 +120,93 @@ async def test_oauth_error_return_code():
     o = KiwoomNativeOAuth(
         app_key=SecretStr("k"), app_secret=SecretStr("s"),
         base_url="https://mockapi.kiwoom.com", http_client=client,
+        use_shared_cache=False,
     )
     with pytest.raises(RuntimeError, match="rc=2"):
         await o.get_token()
+
+
+# -- 공유 토큰 캐시 (BAR-OPS-31) ---------------------------------------------
+
+
+def _ok_client(token: str = "shared.tok"):
+    client = AsyncMock(spec=httpx.AsyncClient)
+    client.post = AsyncMock(
+        return_value=_http_response(
+            200,
+            {"return_code": 0, "token": token, "token_type": "bearer",
+             "expires_dt": "20991231235959"},
+        )
+    )
+    return client
+
+
+def _cached_oauth(cache_path, http_client, key="k", secret="s"):
+    return KiwoomNativeOAuth(
+        app_key=SecretStr(key), app_secret=SecretStr(secret),
+        base_url="https://mockapi.kiwoom.com", http_client=http_client,
+        use_shared_cache=True, token_cache_path=cache_path,
+    )
+
+
+@pytest.mark.asyncio
+async def test_shared_cache_reused_across_instances(tmp_path):
+    """프로세스1 발급분을 프로세스2가 채택 — 발급 1회만 발생(폭주 방지)."""
+    cache = tmp_path / "tok.json"
+    c1 = _ok_client("AAA")
+    o1 = _cached_oauth(cache, c1)
+    t1 = await o1.get_token()
+    assert t1.access_token.get_secret_value() == "AAA"
+    assert c1.post.await_count == 1
+    assert cache.exists()
+
+    # 별도 인스턴스(다른 프로세스 모사) — 같은 캐시 채택, 발급 호출 0
+    c2 = _ok_client("BBB")
+    o2 = _cached_oauth(cache, c2)
+    t2 = await o2.get_token()
+    assert t2.access_token.get_secret_value() == "AAA"   # 캐시 토큰 채택
+    assert c2.post.await_count == 0                       # 발급 안 함
+
+
+@pytest.mark.asyncio
+async def test_shared_cache_file_permissions(tmp_path):
+    """토큰 캐시 파일은 0600 (CWE-732)."""
+    cache = tmp_path / "tok.json"
+    await _cached_oauth(cache, _ok_client()).get_token()
+    mode = oct(cache.stat().st_mode & 0o777)
+    assert mode == "0o600", mode
+
+
+@pytest.mark.asyncio
+async def test_invalidate_forces_reissue_not_cache_readopt(tmp_path):
+    """거부된 토큰은 캐시에 남아도 재채택하지 않고 재발급."""
+    cache = tmp_path / "tok.json"
+    client = AsyncMock(spec=httpx.AsyncClient)
+    client.post = AsyncMock(side_effect=[
+        _http_response(200, {"return_code": 0, "token": "OLD",
+                             "token_type": "bearer", "expires_dt": "20991231235959"}),
+        _http_response(200, {"return_code": 0, "token": "NEW",
+                             "token_type": "bearer", "expires_dt": "20991231235959"}),
+    ])
+    o = _cached_oauth(cache, client)
+    t1 = await o.get_token()
+    assert t1.access_token.get_secret_value() == "OLD"
+    # rc=3 거부 모사
+    o.invalidate_token()
+    t2 = await o.get_token()
+    assert t2.access_token.get_secret_value() == "NEW"   # 캐시 OLD 재채택 X
+    assert client.post.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_shared_cache_separate_fingerprint(tmp_path):
+    """appkey 가 다르면 캐시 항목 분리(자격증명 변경 시 무효화)."""
+    cache = tmp_path / "tok.json"
+    await _cached_oauth(cache, _ok_client("KEY1TOK"), key="k1").get_token()
+    c2 = _ok_client("KEY2TOK")
+    t2 = await _cached_oauth(cache, c2, key="k2").get_token()
+    assert t2.access_token.get_secret_value() == "KEY2TOK"  # k1 캐시 채택 안 함
+    assert c2.post.await_count == 1
 
 
 # -- _abs_int ---------------------------------------------------------------
