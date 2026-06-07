@@ -45,6 +45,20 @@ from backend.core.risk.holding_evaluator import (
 from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
 
 
+def _eod_force_close_disabled(force_mode: bool, env: dict | None = None) -> bool:
+    """장마감 강제청산 일시 해제 여부 (BAR-OPS-34, 임시·가역적).
+
+    force_mode(공격적 TP/SL = 장마감 강제청산)이고 env EOD_FORCE_CLOSE_DISABLED 가
+    truthy 면 True → 강제 매도 건너뜀. 일반 TP/SL 자동매도(force_mode=False)는 무관.
+    env 해제 시 즉시 원복.
+    """
+    e = env if env is not None else os.environ
+    truthy = (e.get("EOD_FORCE_CLOSE_DISABLED", "") or "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    return bool(force_mode and truthy)
+
+
 def _build_oauth() -> KiwoomNativeOAuth:
     app_key = os.environ.get("KIWOOM_APP_KEY", "")
     app_secret = os.environ.get("KIWOOM_APP_SECRET", "")
@@ -108,6 +122,15 @@ async def _run(args) -> int:
 
     # CLI에서 TP/SL 명시 지정 시 (강제청산 등) 전략 override 비활성
     force_mode = (args.tp != 5.0 or args.sl != -4.0)
+
+    # BAR-OPS-34 (2026-06-08, 임시): 장마감 매매포지션 강제청산 일시 해제 토글.
+    #   env EOD_FORCE_CLOSE_DISABLED=1 이면 강제 매도를 건너뛴다(평가/출력은 유지).
+    if _eod_force_close_disabled(force_mode):
+        print(
+            "⚠ [EOD-FORCE-DISABLED] 장마감 강제청산 일시 해제됨"
+            " (EOD_FORCE_CLOSE_DISABLED) — 강제 매도 건너뜀(평가만 수행)."
+        )
+        args.auto_sell = False
 
     # ActivePosition 컨텍스트 로드 + peak 업데이트
     pos_store = ActivePositionStore(args.pos_log)
