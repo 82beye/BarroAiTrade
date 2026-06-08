@@ -575,7 +575,14 @@ def _build_supertrend_auto_trader(notifier):
     order_executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=dry_run)
     order_gate = LiveOrderGate(
         executor=order_executor, audit_path=_AUDIT_PATH,
-        policy=GatePolicy(daily_loss_limit_pct=Decimal(os.environ.get("SUPERTREND_AUTO_DAILY_LOSS_LIMIT", "-3.0"))), notifier=notifier,
+        policy=GatePolicy(
+            daily_loss_limit_pct=Decimal(os.environ.get("SUPERTREND_AUTO_DAILY_LOSS_LIMIT", "-3.0")),
+            # ── BAR-OPS-35 env 토글 (기본 OFF — env 미설정 시 동작 불변) ──
+            daily_loss_latch=_env_truthy("SUPERTREND_AUTO_LOSS_LATCH"),
+            order_retry_count=int(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY", "0")),
+            order_retry_backoff_sec=float(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY_BACKOFF", "0")),
+            retry_sell_only=_env_truthy("SUPERTREND_AUTO_RETRY_SELL_ONLY", "1"),
+        ), notifier=notifier,
     )
     pos_store = ActivePositionStore(_POS_LOG)
     picker = KiwoomNativeLeaderPicker(oauth=oauth, min_score=0.5)
@@ -611,6 +618,26 @@ def _build_supertrend_auto_trader(notifier):
         # ATR 트레일링 청산(샹들리에) — 기본 0(OFF). 활성: SUPERTREND_AUTO_TRAIL_ATR=4
         #   (백테스트 권장 4×ATR: 최악 단일손실 캡, 단 총수익 일부 희생 — opt-in).
         trail_atr_mult=float(os.environ.get("SUPERTREND_AUTO_TRAIL_ATR", "0")),
+        # ── BAR-OPS-35 가드 env 토글 (전부 기본 OFF/dataclass 기본 → env 미설정 시 동작 불변) ──
+        hard_stop_pct=float(os.environ.get("SUPERTREND_AUTO_HARD_STOP", "0")),
+        max_entries_per_symbol_day=int(os.environ.get("SUPERTREND_AUTO_MAX_ENTRIES", "0")),
+        reentry_cooldown_min=int(os.environ.get("SUPERTREND_AUTO_REENTRY_COOLDOWN", "0")),
+        block_reentry_after_loss=_env_truthy("SUPERTREND_AUTO_BLOCK_REENTRY_LOSS"),
+        max_atr_pct_for_entry=float(os.environ.get("SUPERTREND_AUTO_MAX_ATR_PCT", "0")),
+        take_profit_trail_only=_env_truthy("SUPERTREND_AUTO_TP_TRAIL_ONLY"),
+        vol_halve_atr_pct=float(os.environ.get("SUPERTREND_AUTO_VOL_HALVE_ATR", "0")),
+        single_tranche=_env_truthy("SUPERTREND_AUTO_SINGLE_TRANCHE"),
+        max_entry_gap_pct=float(os.environ.get("SUPERTREND_AUTO_MAX_ENTRY_GAP", "0")),
+        # ── BAR-OPS-36 Runner env 토글 ──
+        runner_enabled=_env_truthy("SUPERTREND_AUTO_RUNNER"),
+        runner_limit_up_pct=float(os.environ.get("SUPERTREND_AUTO_RUNNER_LIMIT_UP", "29")),
+        runner_gap_up_pct=float(os.environ.get("SUPERTREND_AUTO_RUNNER_GAP_UP", "0")),
+        runner_giveback_pct=float(os.environ.get("SUPERTREND_AUTO_RUNNER_GIVEBACK", "3")),
+        runner_giveback_atr_mult=float(os.environ.get("SUPERTREND_AUTO_RUNNER_GIVEBACK_ATR", "0")),
+        runner_profit_lock_pct=float(os.environ.get("SUPERTREND_AUTO_RUNNER_LOCK", "2")),
+        runner_gap_partial_ratio=float(os.environ.get("SUPERTREND_AUTO_GAP_PARTIAL", "0")),
+        runner_gap_partial_min_pct=float(os.environ.get("SUPERTREND_AUTO_GAP_PARTIAL_MIN", "3")),
+        runner_gap_partial_window_bars=int(os.environ.get("SUPERTREND_AUTO_GAP_PARTIAL_WINDOW", "6")),
     )
     # entry_lookback env 노브 (BAR-OPS-10 2026-06-05) — '이미 상승 중' 종목 진입 위해 확장.
     #   기본 2봉(방금 전환만). 늘리면 최근 N봉 내 BUY전환이면 진입(추격 리스크↑). 미설정 시 기본 유지.
