@@ -1,0 +1,172 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<title>2026-06-08 BarroAiTrade 매매복기 (상세)</title>
+<style>
+body{font-family:'AppleSDGothicNeo','AppleGothic',sans-serif;margin:0;background:#f5f6f8;color:#222;line-height:1.6}
+.wrap{max-width:1000px;margin:0 auto;padding:32px}
+h1{font-size:26px;border-bottom:3px solid #1565c0;padding-bottom:10px}
+h2{font-size:20px;margin-top:34px;color:#1565c0;border-left:5px solid #1565c0;padding-left:10px}
+h3{font-size:16px;color:#0d47a1;margin-top:22px}
+.kpi{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
+.card{background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);flex:1;min-width:150px}
+.card .v{font-size:22px;font-weight:700;margin-top:6px}
+.card .l{font-size:12px;color:#666}
+.card .s{font-size:13px;color:#888;margin-top:2px}
+.neg{color:#c62828;font-weight:600} .pos{color:#00701a;font-weight:600}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);margin:12px 0}
+th,td{padding:9px 11px;text-align:center;border-bottom:1px solid #eee;font-size:13px}
+th{background:#1565c0;color:#fff}
+tbody tr:nth-child(even){background:#fafafa}
+.lead{background:#e3f2fd;border-left:5px solid #1565c0;padding:14px 18px;border-radius:6px;font-size:15px;margin:16px 0}
+.note{background:#fff8e1;border-left:4px solid #f9a825;padding:11px 15px;border-radius:6px;font-size:13px;margin:10px 0}
+.warn{background:#ffebee;border-left:4px solid #c62828;padding:11px 15px;border-radius:6px;font-size:13.5px;margin:9px 0}
+.find{background:#e8f5e9;border-left:4px solid #2e7d32;padding:11px 15px;border-radius:6px;font-size:14px;margin:9px 0}
+.crit{background:#fce4ec;border-left:5px solid #ad1457;padding:13px 18px;border-radius:6px;font-size:14.5px;margin:12px 0}
+code{background:#eef1f4;padding:1px 5px;border-radius:4px;font-size:12px}
+ul,ol{line-height:1.85}
+.tag{display:inline-block;color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;margin-right:4px}
+.p0{background:#c62828}.p1{background:#1565c0}.p2{background:#757575}
+.foot{text-align:center;color:#888;font-size:12px;margin-top:30px}
+</style></head><body><div class="wrap">
+<h1>BarroAiTrade 매매복기 — 2026-06-08 <span style="font-size:15px;color:#888">(상세)</span></h1>
+<p style="color:#666">생성 2026-06-08 · 소스 order_audit.csv · active_positions.json · _active_positions_history(50) · ohlcv_cache(일봉)·ohlcv_cache_5m(5분봉)</p>
+<div class="note"><b>데이터 신뢰도</b> — order_audit는 시장가(<code>MKT</code>)만 기록 → 모든 손익은 <b>5분봉 종가 기반 추정</b>. 독립 FIFO 엔진 교차검증 결과 산술 일치(verdict: confirmed)이나, 동일 캔들 open/low/high로 바꾸면 실현손익이 <b>-426K ~ -766K</b> 밴드로 변동(헤드라인 -674,559원은 밴드 내 한 점). trades.log 빈 파일, 6/8 balance_history는 09:05 단일 스냅샷·50,000,000원(자본 재투입 라운드값)이라 장중 손익 역산 불가.</div>
+
+<div class="lead">📌 <b>고변동 테마주 폭발일</b>(459550·001740·066430 상한가, NAVER +15%). 진입(스캐너)은 흑자였으나 <b>청산·재진입 규율이 당일을 망쳤다</b>. 추정 실현 <b class="neg">-674,559원(-1.35%)</b> + 보유평가 +119,260원 = <b>당일 종합 <span class="neg">-555,299원(-1.11%)</span></b>. 핵심은 단 1건 — 회로차단기가 두 번 막았던 459550을 회복 후 재진입(고점추격)해 <b class="neg">-509,481원</b>, 당일 종합손실의 <b>91.7%</b>. 이 건만 안 했어도 사실상 본전(-46K).</div>
+
+<div class="kpi">
+  <div class="card"><div class="l">추정 실현손익</div><div class="v neg">-674,559원</div><div class="s">-1.35% · 밴드 -426K~-766K</div></div>
+  <div class="card"><div class="l">당일 종합(실현+평가)</div><div class="v neg">-555,299원</div><div class="s">-1.11% (계좌 5천만)</div></div>
+  <div class="card"><div class="l">승률</div><div class="v">26.7%</div><div class="s">15청산 승4/패11</div></div>
+  <div class="card"><div class="l">최대 단일 손실</div><div class="v neg">459550 2차</div><div class="s">-509,481원 (91.7%)</div></div>
+  <div class="card"><div class="l">보유 평가</div><div class="v pos">+119,260원</div><div class="s">SK네트웍스 178주 +4.96%</div></div>
+</div>
+
+<h2>거래 요약 — 라운드트립 (FIFO, 시간순)</h2>
+<table>
+<tr><th>종목</th><th>수량</th><th>매수가</th><th>매도가</th><th>net손익</th><th>수익률</th><th>전략</th><th>보유(KST)</th></tr>
+<tr><td style="text-align:left">대원제약(003220)</td><td>180</td><td>12,670</td><td>11,940</td><td class="neg">-135,933</td><td class="neg">-5.96%</td><td>(미지정)</td><td>09:30→09:35</td></tr>
+<tr><td style="text-align:left">두산로보틱스(454910)</td><td>16</td><td>143,700</td><td>150,400</td><td class="pos">+102,163</td><td class="pos">+4.44%</td><td>gold_zone</td><td>09:05→09:37</td></tr>
+<tr><td style="text-align:left">두산로보틱스</td><td>16</td><td>146,800</td><td>150,400</td><td class="pos">+52,555</td><td class="pos">+2.24%</td><td>(미지정)</td><td>09:30→09:37</td></tr>
+<tr><td style="text-align:left">두산로보틱스</td><td>27</td><td>150,400</td><td>150,400</td><td class="neg">-8,528</td><td>-0.21%</td><td>supertrend</td><td>09:32→09:37</td></tr>
+<tr><td style="text-align:left">미래에셋생명(085620)</td><td>124</td><td>19,350</td><td>18,370</td><td class="neg">-126,322</td><td class="neg">-5.26%</td><td>gold_zone</td><td>09:05→09:40</td></tr>
+<tr><td style="text-align:left">미래에셋생명</td><td>124</td><td>18,470</td><td>18,370</td><td class="neg">-17,185</td><td>-0.75%</td><td>(미지정)</td><td>09:30→09:40</td></tr>
+<tr><td style="text-align:left">미래에셋생명</td><td>1</td><td>?</td><td>18,370</td><td>(계산불가)</td><td>-</td><td>phantom 매도</td><td>→09:40</td></tr>
+<tr><td style="text-align:left">두산로보틱스</td><td>26</td><td>144,200</td><td>144,200</td><td class="neg">-7,873</td><td>-0.21%</td><td>supertrend</td><td>09:38→09:41</td></tr>
+<tr><td style="text-align:left">066430(미기록)</td><td>1,002</td><td>4,135</td><td>4,270</td><td class="pos">+126,305</td><td class="pos">+3.05%</td><td>supertrend</td><td>09:38→09:46</td></tr>
+<tr><td style="text-align:left">로보스타(090360)</td><td>15</td><td>154,400</td><td>151,100</td><td class="neg">-54,267</td><td class="neg">-2.34%</td><td>f_zone</td><td>09:30→09:55</td></tr>
+<tr><td style="text-align:left">로보스타</td><td>10</td><td>156,500</td><td>151,100</td><td class="neg">-57,181</td><td class="neg">-3.65%</td><td>f_zone</td><td>09:35→09:55</td></tr>
+<tr><td style="text-align:left">두산로보틱스</td><td>27</td><td>147,000</td><td>138,900</td><td class="neg">-226,608</td><td class="neg">-5.71%</td><td>supertrend</td><td>09:43→10:00</td></tr>
+<tr><td style="text-align:left">두산로보틱스</td><td>11</td><td>147,000</td><td>138,900</td><td class="neg">-92,322</td><td class="neg">-5.71%</td><td>supertrend</td><td>09:43→10:00</td></tr>
+<tr><td style="text-align:left">459550(미기록)</td><td>1,851</td><td>2,110</td><td>2,330</td><td class="pos">+398,224</td><td class="pos">+10.20%</td><td>supertrend</td><td>12:55→13:47</td></tr>
+<tr><td style="text-align:left">NAVER(035420)</td><td>13</td><td>286,500</td><td>278,000</td><td class="neg">-118,106</td><td class="neg">-3.17%</td><td>supertrend</td><td>11:28→15:14</td></tr>
+<tr style="background:#fce4ec;font-weight:600"><td style="text-align:left">459550(미기록)</td><td>1,731</td><td>2,330</td><td>2,040</td><td class="neg">-509,481</td><td class="neg">-12.63%</td><td>supertrend</td><td>14:12→15:19</td></tr>
+</table>
+<p style="font-size:13.5px;color:#555"><b>보유 미청산</b>: SK네트웍스(001740) <b>178주</b> @13,500 (supertrend, 11:28 진입) → 종가 14,170(상한가) <b class="pos">평가 +119,260원 (+4.96%)</b>. ※order_audit는 296주로 기록되나 실보유 178주(인시던트 분석 참조).</p>
+
+<h2>전략별 집계</h2>
+<table>
+<tr><th>전략</th><th>청산</th><th>승</th><th>패</th><th>승률</th><th>실현손익</th><th>비고</th></tr>
+<tr><td><b>supertrend</b></td><td>8</td><td>2</td><td>6</td><td>25.0%</td><td class="neg">-438,389</td><td style="text-align:left">당일 최대 손실원(65%). 459550 2차·두산 재진입</td></tr>
+<tr><td>f_zone</td><td>2</td><td>0</td><td>2</td><td>0.0%</td><td class="neg">-111,448</td><td style="text-align:left">로보스타. 고점권을 눌림목으로 오인</td></tr>
+<tr><td>(미지정)</td><td>3</td><td>1</td><td>2</td><td>33.3%</td><td class="neg">-100,563</td><td style="text-align:left">대원제약·미래에셋. strategy_id 누락</td></tr>
+<tr><td>gold_zone</td><td>2</td><td>1</td><td>1</td><td>50.0%</td><td class="neg">-24,159</td><td style="text-align:left">정의는 작동, 조기손절로 반등 놓침</td></tr>
+</table>
+
+<h2>종목 일봉 맥락 (6/8 = 고변동 모멘텀/테마 폭발일)</h2>
+<table>
+<tr><th>종목</th><th>시가</th><th>고가</th><th>저가</th><th>종가</th><th>거래량</th><th>일중폭</th><th>비고</th></tr>
+<tr style="background:#fff3e0"><td style="text-align:left">459550</td><td>1,837</td><td>2,385</td><td>1,753</td><td>2,020</td><td>26.3M</td><td><b>36%</b></td><td style="text-align:left">6/5 +30% 연속, 초고변동</td></tr>
+<tr style="background:#fff3e0"><td style="text-align:left">001740 SK네트웍스</td><td>9,500</td><td>14,170</td><td>9,500</td><td>14,170</td><td>56.5M</td><td><b>+49%</b></td><td style="text-align:left">저점→상한가, 종가 상한가</td></tr>
+<tr><td style="text-align:left">035420 NAVER</td><td>239,500</td><td>294,000</td><td>238,500</td><td>279,000</td><td>10.1M</td><td>15%</td><td style="text-align:left">대형주 이례적 변동</td></tr>
+<tr><td style="text-align:left">454910 두산로보틱스</td><td>140,500</td><td>154,000</td><td>126,100</td><td>127,200</td><td>3.9M</td><td>22%</td><td style="text-align:left">고점→종가 -19%, 종가 저점권</td></tr>
+<tr><td style="text-align:left">085620 미래에셋생명</td><td>19,920</td><td>22,000</td><td>17,900</td><td>21,000</td><td>4.8M</td><td>23%</td><td style="text-align:left">저점17,900→종가21,000 반등</td></tr>
+<tr><td style="text-align:left">090360 로보스타</td><td>141,000</td><td>159,100</td><td>127,500</td><td>139,000</td><td>2.0M</td><td>23%</td><td style="text-align:left">고점→종가 -12.6%</td></tr>
+<tr><td style="text-align:left">003220 대원제약</td><td>13,670</td><td>13,670</td><td>11,610</td><td>12,400</td><td>3.6M</td><td>17%</td><td style="text-align:left">갭상승 후 페이드</td></tr>
+<tr style="background:#fff3e0"><td style="text-align:left">066430(미기록)</td><td>3,380</td><td>4,270</td><td>3,380</td><td>4,270</td><td>17.9M</td><td><b>+30%</b></td><td style="text-align:left">종가 상한가</td></tr>
+</table>
+
+<h2>타임라인 (KST)</h2>
+<table>
+<tr><th>시각</th><th>이벤트</th><th>내용</th></tr>
+<tr><td>09:05</td><td><b>진입(gold_zone)</b></td><td style="text-align:left">미래에셋생명 124@19,350, 두산로보틱스 16@143,700 매수.</td></tr>
+<tr><td>09:30~35</td><td><b>오전 난타전</b></td><td style="text-align:left">대원제약·미래에셋·두산·로보스타·066430 다발 진입/청산. gold_zone+f_zone+미지정 혼재.</td></tr>
+<tr><td>09:32:50</td><td><b class="neg">FAILED buy</b></td><td style="text-align:left">066430 1,005주 HTTPStatusError → 09:38 1,002주 재시도 성공(+126K, 진입가 +180원 비싸짐).</td></tr>
+<tr><td>09:43→10:00</td><td><b class="neg">두산 supertrend 재진입 손실</b></td><td style="text-align:left">09:43 고점권(147,000) 38주 재매수 → 10:00 138,900 -5.71% 손절 <b class="neg">-318,930원</b>.</td></tr>
+<tr><td>11:28:18</td><td><b>SK네트웍스 진입</b></td><td style="text-align:left">supertrend 296주 권고 → tranche1 <b>178주 @13,500 체결</b>, tranche2 118주(-1.5% 트리거) pending.</td></tr>
+<tr><td>11:28:19</td><td>NAVER 진입</td><td style="text-align:left">supertrend 13@286,500 → 15:14 278,000 청산 -118K.</td></tr>
+<tr><td>12:30:03</td><td><b class="neg">BLOCKED</b></td><td style="text-align:left">459550 1,789주 매수 차단 — "일일 손실 한도 도달: -3.14% ≤ -3.0%".</td></tr>
+<tr><td>12:35:16</td><td><b class="neg">BLOCKED</b></td><td style="text-align:left">459550 1,873주 매수 차단 — "-3.75% ≤ -3.0%".</td></tr>
+<tr><td>12:55:25</td><td><b class="neg">회로차단기 재무장(통과)</b></td><td style="text-align:left">평가손실이 -3% 위로 회복 → 459550 1,851주 @2,110 매수 성공.</td></tr>
+<tr><td>13:47:00</td><td><b class="pos">459550 1차 익절</b></td><td style="text-align:left">2,330 매도 <b class="pos">+398,224원(+10.20%)</b> — 추세 초입을 탄 승리.</td></tr>
+<tr style="background:#fce4ec"><td>14:12:53</td><td><b class="neg">459550 2차 재진입(고점추격)</b></td><td style="text-align:left">1,731주 @2,330 매수 — 당일 고점 2,385(14:05) 도달 7분 후 전고점 직하.</td></tr>
+<tr><td>14:35~15:05</td><td><b>데이터 공백</b></td><td style="text-align:left">459550 5분봉 30분 공백(VI/정지 추정). 손절 트리거 평가 누락.</td></tr>
+<tr><td>15:14:41</td><td><b class="neg">FAILED sell</b></td><td style="text-align:left">459550 1,731주 매도 HTTPStatusError → 15:19 재시도. 5분 지연 사이 2,330→2,040 급락.</td></tr>
+<tr style="background:#fce4ec;font-weight:600"><td>15:19:52</td><td><b class="neg">459550 2차 손절</b></td><td style="text-align:left">2,040 매도 <b class="neg">-509,481원(-12.63%)</b> — 당일 최대 손실.</td></tr>
+<tr><td>장 마감</td><td>보유</td><td style="text-align:left">SK네트웍스 178주 보유(종가 14,170 상한가, 평가 +4.96%).</td></tr>
+</table>
+
+<h2>핵심 사건 심층 분석</h2>
+<h3>1. 459550 2차 재진입 — 당일을 결정한 단 한 건 (손실의 91.7%)</h3>
+<div class="crit">1차(12:55 @2,110 → 13:47 @2,330, <b class="pos">+398,224원</b>)는 12:25 돌파 직후 <b>눌림(추세 초입)</b>에서 진입한 정석 승리였다. 그러나 익절로 일중 손익이 흑자전환되자 회로차단기가 완전히 풀렸고, supertrend가 <b>같은 종목 고점(14:12 @2,330, 당일고점 2,385 직하)</b>에서 사이즈를 그대로 다시 실었다. 14:35~15:05 30분 데이터 공백(VI 추정) 후 갭하락이 진입가를 관통, 15:19 @2,040에 -12.63% 청산. <b>"방금 이긴 종목에 자만 재진입"</b> 전형.</div>
+<ul>
+<li>이 건 제거 시: 당일 종합 -555,299 → <b>-45,818원(본전 근접)</b>. 비중 <b>91.7%</b>.</li>
+<li>손절 지연 기여: -4% 하드손절(손절선 2,237)이 작동했다면 갭 시가 2,195에서 -241,699원에 막혔을 것. 실제 -509,481원 → <b>손절 지연이 +267,782원을 추가로 키움</b>(막판 30분에 손실 4배 증폭).</li>
+</ul>
+<h3>2. supertrend "첫 진입 승 · 재진입 패"의 구조적 비대칭</h3>
+<div class="find">두산·459550 모두 supertrend dir이 종일 +1(상승) 유지. 가격이 고점에서 -10% 빠지는 동안에도 ATR(10)×3.0 밴드가 가격의 <b>9~11%</b> 떨어져 있어 청산 신호가 13:45/15:10에야 발생. 즉 <b>dir=+1 지속 = 재진입 허가</b>로 작동하나 그 시점은 이미 고점이라 <b>재진입 = 고점매수</b>. 손절(-4%)이 지표 반전보다 먼저 터지는 비대칭. 고변동일수록 ATR 밴드가 넓어져 신호가 더 느려지는 역설 → supertrend 8청산 25%승 -438,389원(손실의 65%).</div>
+<h3>3. 회로차단기 — "회복"을 리스크 허용 신호로 오독</h3>
+<div class="warn">12:30(-3.14%)·12:35(-3.75%) 두 번 459550을 막은 차단기가 12:55엔 통과시켰다. 임계 비교 대상이 <b>장중 평가손익(mark-to-market, <code>total_pnl_rate</code>)</b>이라 변동성에 -3% 경계를 오르내리고, 한 번 트립돼도 잠그는 <b>latch·강제 cooldown이 코드에 없다</b>(stateless, <code>live_order_gate.py:121-135</code>). 14:12 2차 재진입 시엔 1차 익절(+398K)로 일중 손익이 흑자라 차단기가 완전 무력 → <b>당일 최대 손실(-509K)이 보호망 밖에서 발생</b>. "4h 쿨다운 설계"는 코드 미구현(설계-구현 갭).</div>
+
+<h2>인시던트 분석</h2>
+<div class="warn"><b>001740 sync-loss (audit 296 ≠ 실체결 178)</b> — order_audit <code>ORDERED buy 001740 296 rc=0</code>이나 active_positions·6/8 50개 히스토리 전부 tranche1 178 filled / tranche2 118 pending으로 100% 일관. 키움 시장가는 접수 시 order_no+rc=0만 반환(체결수량 없음) → <code>live_order_gate._audit</code>이 <b>요청수량(296)을 기록</b>. DCA가 296 중 60%(178)만 즉시 포지션화 → 이중 괴리. <b>메모리의 swing_38 sync-loss 동일 계열</b>. 청산 경로(<code>supertrend_auto_trader.py:253</code>)가 recommended(296) 우선 사용 시 초과매도 위험.</div>
+<div class="warn"><b>tranche2 118주 영구 pending</b> — -1.5% 트리거 종일 미발동(저점→상한가). 미발동 pending이 자본만 묶고 손절/청산 로직 대상에서 빠짐(exit engine 밖). EOD cleanup 정책 부재.</div>
+<div class="warn"><b>HTTPStatusError 2건, 재시도·circuit breaker·idempotency 전무</b> — 09:32 매수·15:14 매도. <code>live_order_gate.py:187-196</code>이 예외를 FAILED 감사 후 즉시 raise(재시도 0회). <b>매도 실패가 청산을 5분 지연</b>시켜 저점매도(-509K)로 직결. 프로젝트 전체 8회(5/13·5/19·5/20·5/26·6/1·6/8x2)의 만성 결함.</div>
+<div class="warn"><b>복기 자동화 병목</b> — 체결가 미기록(MKT)·trades.log 0바이트·balance_history 단일 스냅샷(50M 라운드 자본재투입)으로 KPI 전체가 추정. 장중 자본곡선·회로차단기 base 역산 불가.</div>
+<div class="note"><b>strategy_id 누락 3건</b> — 대원제약·미래에셋 일부 주문 전략 라벨 공백(미지정). 전략 귀속·성과 측정 왜곡.</div>
+
+<h2>발견과 진단</h2>
+<div class="find"><b>진입 알파는 살아있고 청산·재진입 알파가 전부 까먹었다</b> — 첫 진입 승자 합계 <b class="pos">+798,507원</b>(066430 1차 +126K, 459550 1차 +398K, 두산 1차 +155K, 001740 평가 +119K) vs 청산·재진입 파괴자 <b class="neg">-1,353,806원</b>. 스캐너는 상한가 마감 3종목을 모두 포착 → <b>스캐너 무죄, 운용 유죄</b>.</div>
+<div class="find"><b>손실은 소수 의사결정에 집중</b> — 통제 가능 실수 2건(459550 2차 +509K, 두산 09:43 +319K)만 제거하면 당일이 <b>-555K → +273K(+828K 스윙, 흑자 전환)</b>. <b>재진입 규칙 1개</b>로 대부분 차단 가능.</div>
+<div class="find"><b>하드 손절이 supertrend에 사실상 미적용</b> — <code>sl_pct=-4.0</code>이 position에 저장만 되고 <code>supertrend_auto_trader</code>가 읽지 않음. 청산은 ATR 트레일·익절·신호 flip뿐이라 고변동주에서 손절선이 진입가 -6~13%로 너무 멀어 <b>꼬리리스크를 못 막음</b>.</div>
+<div class="find"><b>전략-청산룰 불일치</b> — gold_zone(역추세 바닥매수)에 추세형 변동손절 적용 → 미래에셋생명 바닥(저17,900) 정의대로 잡고도 09:40 -5% 조기손절 → 종가 21,000(+8.5% 반등) 놓침. f_zone은 상한가급 일시 조정을 '눌림목'으로 오인(로보스타 0%승).</div>
+<div class="find"><b>변동성 무관 균등 사이징</b> — 459550(일중폭 36%)에 NAVER·저변동주와 동일 8% 슬롯 → 단일종목 -12.63%가 계좌 -1.02% 타격. <code>max_order_value</code> 하드캡은 명목만 자르고 변동성 미반영.</div>
+
+<h2>What-if 시나리오</h2>
+<table>
+<tr><th>시나리오</th><th>당일 종합</th><th>Δ</th></tr>
+<tr><td style="text-align:left">실제</td><td class="neg">-555,299원</td><td>—</td></tr>
+<tr><td style="text-align:left">+ 459550 2차 재진입 제거</td><td class="neg">-45,818원</td><td class="pos">+509,481</td></tr>
+<tr style="background:#e8f5e9;font-weight:600"><td style="text-align:left">+ 두산 09:43 고점 재진입 제거</td><td class="pos">+273,112원</td><td class="pos">+828,411</td></tr>
+<tr><td style="text-align:left">+ 459550 1차를 고점 2,385까지 보유</td><td class="pos">+374,718원</td><td class="pos">+930,017</td></tr>
+</table>
+<p style="font-size:13.5px;color:#555">→ <b>재진입 금지 + 하드손절 + 차단기 latch</b> 3개 규칙이면 당일은 흑자였다.</p>
+
+<h2>권고 (우선순위)</h2>
+<h3><span class="tag p0">P0</span> 즉시 — 이번 손실 직접 차단</h3>
+<ul>
+<li><b>동일종목 당일 재진입 금지</b>(또는 직전 청산 후 30분 cooldown + 사이즈 절반). 직전 손절/익절 종목 재진입은 별도 승인 게이트. → 459550 2차·두산 09:43 직접 차단(-555K→+273K). 대상: <code>supertrend_auto_trader</code> 진입부, <code>intraday_buy_daemon.py:63</code>(매수기준→매도기준 전환).</li>
+<li><b>회로차단기 latch + 실현손익 기반 재설계</b> — -3% 최초 도달 시 당일 sticky lock(회복해도 리셋 금지). 임계 기준을 진동 평가손익 → <b>단조 증가 실현손실(또는 일중 최대낙폭 트레일)</b>로 변경. 대상: <code>live_order_gate.py:121-135</code>, <code>intraday_buy_daemon.py:761-770</code>.</li>
+<li><b>supertrend 하드 catastrophic stop 연결</b> — 미사용 <code>sl_pct=-4.0</code>을 청산 평가에 실제 연결(ATR 트레일과 OR). 데이터 공백(VI) 복귀 첫 호가에서 손절선 강제 재평가, 갭 관통 시 시장가 청산. 대상: <code>supertrend_auto_trader.py:218-262</code>.</li>
+<li><b>audit 스키마 요청/체결 분리</b> — <code>qty</code>(요청) 외 <code>filled_qty</code>·<code>avg_fill_price</code> 컬럼 추가, 체결통보 수신 후 FILLED 행 기록. 손익 재구성은 FILLED 기준. 대상: <code>live_order_gate.py:198-235</code>, <code>kiwoom_native_orders.py:49-58</code>.</li>
+<li><b>주문 실행 retry(지수 백오프)+idempotency</b> — 특히 매도(청산)는 고우선 즉시 재시도 + 실패 지속 시 텔레그램 경보. → 5분 청산지연(-509K 악화) 방지. 대상: <code>live_order_gate.py:187-204</code>.</li>
+</ul>
+<h3><span class="tag p1">P1</span> 단기</h3>
+<ul>
+<li>변동성 조정 포지션 사이징(목표 리스크=계좌 0.5%/손절거리). 일중폭 25%+ 초고변동주는 비중 상한 절반(4%).</li>
+<li>고변동 테마주 종목군에 supertrend 비중 축소/화이트리스트화(8청산 -438K가 손실의 65%). 1차 진입만 소액 허용, 재진입 비활성.</li>
+<li>전략별 청산룰 분리: gold_zone은 고정 -2% 손절 + BB중심선 익절, f_zone은 '직전 고점 N봉 미경신' 눌림 조건 추가.</li>
+<li>승자 보유 강화: 상한가/추세 지속 종목은 고정 +5% 익절 → ATR 트레일로 전환.</li>
+<li>DCA pending tranche를 <code>filled_qty()</code> 단일 진실원천으로 통일 + EOD 자동 cleanup(tranche2 영구 pending 방지).</li>
+</ul>
+<h3><span class="tag p2">P2</span> 개선</h3>
+<ul>
+<li>체결통보를 trades.log·order_audit에 실체결가/수량 기록, balance_history를 장중 N분 mark-to-market 스냅샷 전환(자본 재투입은 별도 transfer 이벤트).</li>
+<li>audit FAILED 행 return_code 일관화(매수 빈값/매도 0 불일치), transient(HTTP) vs permanent 오류 reason 코드 구분.</li>
+<li>MKT 추격 매수 가드(진입가 vs 직전봉 종가 갭 임계 초과 시 지정가 전환) — 두산 09:32 고점 직격 슬리피지 방지.</li>
+</ul>
+
+<h2>검증 노트</h2>
+<div class="note">독립 FIFO 엔진으로 전 수치 재계산 → <b>전 항목 일치(verdict: confirmed)</b>. 주문 31건, 실현 -674,559원, 459550 2차 -509,481원, supertrend -438,389원, 보유 178주 +119,260원, 당일 종합 -555,299원 검증. <b>추정 불확실성</b>: 시장가를 '가장 가까운 5분봉 close'로 추정 → 동일 캔들 open/low/high 기준 시 실현손익 <b>-426K(low) ~ -766K(high)</b> 밴드. 캔들 매칭 시차 최대 292초(459550 2차·NAVER 오차 기여 큼). 1주 phantom 매도(085620)는 계산불가 제외. 정확값은 키움 체결내역(kt00009) 대조 필요(<code>_daily_evening_pipeline.py</code> zip 임포트).</div>
+
+<div class="foot">BarroAiTrade 매매복기 · 2026-06-08 · order_audit + 5분봉 OHLCV 기반 추정 (체결가 미기록) · 독립 검증 confirmed</div>
+</div></body></html>
