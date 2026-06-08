@@ -653,3 +653,134 @@ def test_config_defaults_bar_ops_33():
     assert c.min_adx == 30.0
     assert c.min_flip_atr_mult == 1.5
     assert c.max_positions == 10  # 사이징 역효과 회피 — 게이트/priority로 드래그 축소
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# BAR-OPS-35 (2026-06-08 매매복기 권고) — 재진입 가드·하드손절·테마/추격 필터·승자보유
+# 전부 default OFF(no-op): 기본 동작 불변은 위 54개 회귀 테스트가 보장. 아래는 ON 동작.
+# ════════════════════════════════════════════════════════════════════════════
+from datetime import timezone as _tz  # noqa: E402
+
+# 보유종목 하락/상승 시리즈 (청산 경로 테스트용)
+_DROP = [10000] * 55 + [9800, 9600, 9300, 9000, 9000]   # entry 10000 대비 -10%
+_RISE = [10000 + i * 12 for i in range(60)]              # +7.08% (TP/trail 테스트)
+
+
+def test_p0_3_hard_stop_helper_boundary():
+    """[P0#3] _hard_stop_hit — 진입가 대비 손실률 ≤ hard_stop_pct 경계."""
+    pos = type("P", (), {"entry_price": 10000.0})()
+    bars_95 = _candles([10000] * 30 + [9500])   # -5%
+    t = _trader({}, universe=[])
+    t.config.hard_stop_pct = -6.0
+    assert t._hard_stop_hit(pos, bars_95) is False   # -5% > -6% → 미발동
+    t.config.hard_stop_pct = -4.0
+    assert t._hard_stop_hit(pos, bars_95) is True    # -5% ≤ -4% → 발동
+    t.config.hard_stop_pct = 0.0
+    assert t._hard_stop_hit(pos, bars_95) is False   # 0=비활성
+
+
+@pytest.mark.asyncio
+async def test_p0_3_hard_stop_exit_reason():
+    """[P0#3] 하드손절 ON 이면 신호 무관 청산(reason=하드손절). 459550 -12.63% 방치 방지."""
+    gate = _FakeGate()
+    pos = _FakePosStore()
+    pos._inject("459550", strategy="supertrend", qty=1731)
+    t = _trader({"459550": _DROP}, universe=[], gate=gate, pos=pos,
+                config=_base_config(hard_stop_pct=-6.0))
+    r = await t.run_cycle()
+    assert any(s[0] == "459550" for s in gate.sells)
+    assert r["exited"] and r["exited"][0]["reason"] == "하드손절"
+    assert pos.get("459550") is None  # 청산됨
+
+
+@pytest.mark.asyncio
+async def test_p0_1_max_entries_per_symbol_day():
+    """[P0#1] 동일종목 당일 재진입 횟수 상한 — 1회 진입 후 청산해도 재진입 차단.
+
+    459550 1차 익절 후 14:12 재진입(-509K) 차단 시나리오의 결정적 축소판.
+    """
+    gate = _FakeGate()
+    pos = _FakePosStore()
+    t = _trader({"459550": _BUY}, universe=[("459550", "더블유")], gate=gate, pos=pos,
+                config=_base_config(max_entries_per_symbol_day=1))
+    await t.run_cycle()                 # 1차 진입
+    assert len(gate.buys) == 1
+    pos.remove("459550")               # 청산(매도) 시뮬 — 보유 해제
+    await t.run_cycle()                 # 재진입 시도 → 당일 상한으로 차단
+    assert len(gate.buys) == 1          # 여전히 1건 (재진입 안 됨)
+
+
+@pytest.mark.asyncio
+async def test_p0_1_reentry_cooldown_blocks():
+    """[P0#1] 청산 후 cooldown(분) 이내 동일종목 재진입 차단."""
+    gate = _FakeGate()
+    t = _trader({"459550": _BUY}, universe=[("459550", "더블유")], gate=gate,
+                config=_base_config(reentry_cooldown_min=30))
+    t._entry_day = t._kst_today()                       # _roll_day 리셋 방지
+    t._last_exit["459550"] = datetime.now(_tz.utc)      # 방금 청산
+    await t.run_cycle()
+    assert gate.buys == []                              # cooldown 내 → 차단
+
+
+@pytest.mark.asyncio
+async def test_p0_1_block_reentry_after_loss():
+    """[P0#1] 당일 손절 종목 재진입 금지."""
+    gate = _FakeGate()
+    t = _trader({"459550": _BUY}, universe=[("459550", "더블유")], gate=gate,
+                config=_base_config(block_reentry_after_loss=True))
+    t._entry_day = t._kst_today()
+    t._loss_locked.add("459550")
+    await t.run_cycle()
+    assert gate.buys == []
+
+
+@pytest.mark.asyncio
+async def test_p2_chase_guard_blocks_gap_up():
+    """[P2] 추격 매수 가드 — 직전봉 대비 급등(+4.6%) 진입봉 스킵."""
+    # _BUY 마지막 갭 ≈ +4.64%
+    gate_on = _FakeGate()
+    t_on = _trader({"459550": _BUY}, universe=[("459550", "더블유")], gate=gate_on,
+                   config=_base_config(max_entry_gap_pct=3.0))
+    await t_on.run_cycle()
+    assert gate_on.buys == []          # 갭 4.6% > 3% → 차단
+
+    gate_off = _FakeGate()
+    t_off = _trader({"459550": _BUY}, universe=[("459550", "더블유")], gate=gate_off,
+                    config=_base_config(max_entry_gap_pct=0.0))
+    await t_off.run_cycle()
+    assert len(gate_off.buys) == 1     # 0=비활성 → 진입
+
+
+@pytest.mark.asyncio
+async def test_p1_theme_filter_blocks_high_atr():
+    """[P1] 고변동(테마) 필터 — ATR/price 과대 종목 진입 스킵."""
+    gate_on = _FakeGate()
+    t_on = _trader({"459550": _BUY}, universe=[("459550", "더블유")], gate=gate_on,
+                   config=_base_config(max_atr_pct_for_entry=1e-6))  # 사실상 전부 차단
+    await t_on.run_cycle()
+    assert gate_on.buys == []
+
+    gate_off = _FakeGate()
+    t_off = _trader({"459550": _BUY}, universe=[("459550", "더블유")], gate=gate_off,
+                    config=_base_config(max_atr_pct_for_entry=1.0))  # 사실상 허용
+    await t_off.run_cycle()
+    assert len(gate_off.buys) == 1
+
+
+@pytest.mark.asyncio
+async def test_p1_take_profit_trail_only():
+    """[P1] take_profit_trail_only — 고정 익절 비활성(트레일만). 승자 조기청산 방지."""
+    # TP ON(기존): +7% 도달 → 익절 청산
+    gate1 = _FakeGate(); pos1 = _FakePosStore(); pos1._inject("066430", qty=1002)
+    t1 = _trader({"066430": _RISE}, universe=[], gate=gate1, pos=pos1,
+                 config=_base_config(take_profit_pct=5.0, take_profit_trail_only=False))
+    r1 = await t1.run_cycle()
+    assert r1["exited"] and r1["exited"][0]["reason"] == "익절"
+
+    # trail_only ON: 고정 익절 비활성 + 트레일/신호 없음 → 청산 안 함(승자 보유)
+    gate2 = _FakeGate(); pos2 = _FakePosStore(); pos2._inject("066430", qty=1002)
+    t2 = _trader({"066430": _RISE}, universe=[], gate=gate2, pos=pos2,
+                 config=_base_config(take_profit_pct=5.0, take_profit_trail_only=True))
+    r2 = await t2.run_cycle()
+    assert r2["exited"] == []
+    assert pos2.get("066430") is not None

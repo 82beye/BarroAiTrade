@@ -120,3 +120,36 @@ class TestCorruptionRecovery:
         store.load_all()  # 복원 + 재기록
         healed = json.loads(store.path.read_text("utf-8"))  # 정상 JSON 이어야 함
         assert set(healed) == {"001820", "006660"}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# BAR-OPS-35 — create_from_order(single_tranche=True): sync-loss 방지.
+# supertrend 전량 단일주문 진입에서 178/118 분할 모델링이 broker 보유와 어긋나는
+# 2026-06-08 001740(audit 296 vs filled 178) 문제 방지 — 전량을 단일 filled tranche 로.
+# ════════════════════════════════════════════════════════════════════════════
+def test_single_tranche_marks_full_qty_filled(tmp_path):
+    """single_tranche=True → 전량 1개 filled tranche, pending 없음, filled_qty()=total."""
+    store = ActivePositionStore(path=tmp_path / "ap.json")
+    pos = store.create_from_order(
+        symbol="001740", name="SK네트웍스", strategy="supertrend",
+        entry_price=13500.0, total_recommended_qty=296, order_no="0079949",
+        single_tranche=True,
+    )
+    assert len(pos.tranches) == 1
+    assert pos.tranches[0].status == "filled"
+    assert pos.tranches[0].qty == 296
+    assert pos.filled_qty() == 296          # broker 보유와 일치 (sync-loss 없음)
+    assert pos.pending_tranches() == []
+
+
+def test_default_still_splits_dca_tranches(tmp_path):
+    """기본(single_tranche=False) → 기존 60/40 분할 유지(회귀 보호)."""
+    store = ActivePositionStore(path=tmp_path / "ap.json")
+    pos = store.create_from_order(
+        symbol="001740", name="SK네트웍스", strategy="supertrend",
+        entry_price=13500.0, total_recommended_qty=296, order_no="0079949",
+    )
+    assert len(pos.tranches) == 2
+    assert pos.tranches[0].qty == 178 and pos.tranches[0].status == "filled"   # round(296*0.6)
+    assert pos.tranches[1].qty == 118 and pos.tranches[1].status == "pending"
+    assert pos.filled_qty() == 178
