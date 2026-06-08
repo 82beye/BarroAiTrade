@@ -106,12 +106,26 @@ class ActivePosition:
         return self.strategy
 
 
-def _build_tranches(total_qty: int, entry_price: float, order_no: str, filled_at: str) -> list[Tranche]:
-    """2분할 트랜치 생성 — T1 60% 즉시, T2 40% at -1.5% (SL -4% 전 완료)."""
+def _build_tranches(total_qty: int, entry_price: float, order_no: str, filled_at: str,
+                    single_tranche: bool = False) -> list[Tranche]:
+    """2분할 트랜치 생성 — T1 60% 즉시, T2 40% at -1.5% (SL -4% 전 완료).
+
+    BAR-OPS-35: single_tranche=True 면 전량을 단일 filled tranche 로 생성한다.
+    supertrend 등 '전량 단일주문' 진입 경로에서 178/118 분할 모델링이 broker 보유와
+    어긋나는 sync-loss(2026-06-08 001740)를 방지 — filled_qty()=total_recommended_qty 일치.
+    """
+    now = filled_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if single_tranche:
+        return [
+            Tranche(
+                tranche=1, ratio=1.0, qty=total_qty,
+                trigger_drop_pct=0.0, status="filled",
+                order_no=order_no, filled_price=entry_price, filled_at=now,
+            ),
+        ]
     q1 = round(total_qty * 0.6)
     q2 = total_qty - q1  # 나머지 전부 T2로
 
-    now = filled_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
     return [
         Tranche(
             tranche=1, ratio=0.6, qty=q1,
@@ -350,10 +364,16 @@ class ActivePositionStore:
         sl_pct: float = -4.0,
         flu_rate: float = 0.0,
         score: float = 0.0,
+        single_tranche: bool = False,
     ) -> ActivePosition:
-        """매수 주문 직후 호출 — 3분할 트랜치 생성 후 저장."""
+        """매수 주문 직후 호출 — 분할 트랜치 생성 후 저장.
+
+        single_tranche=True (BAR-OPS-35): 전량 단일주문 진입(supertrend)에서 178/118 분할
+        모델링이 broker 보유와 어긋나는 sync-loss 방지 — 전량을 단일 filled tranche 로 기록.
+        """
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        tranches = _build_tranches(total_recommended_qty, entry_price, order_no, now)
+        tranches = _build_tranches(total_recommended_qty, entry_price, order_no, now,
+                                   single_tranche=single_tranche)
         pos = ActivePosition(
             symbol=symbol, name=name, strategy=strategy,
             entry_price=entry_price, entry_time=now,

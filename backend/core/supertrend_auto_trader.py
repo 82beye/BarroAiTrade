@@ -130,6 +130,35 @@ class SupertrendAutoConfig:
     max_intraday_range_pos: float = 0.90
     max_day_change_pct: float = 0.0
 
+    # ── BAR-OPS-35 (2026-06-08 매매복기 권고) — 전부 default OFF(no-op). shadow→enforce ──
+    # 근거: reports/2026-06-08/2026-06-08_매매복기.md. 459550 2차 재진입 -509K(당일손실 91.7%),
+    #   두산 supertrend 재진입 -319K. 진입알파는 흑자, 청산·재진입 규율이 손실을 만듦.
+    #
+    # [P0#3] catastrophic 하드 손절 — 진입가 대비 손실률 ≤ hard_stop_pct(음수) 시 신호 무관 즉시 청산.
+    #   ATR 트레일(trail_atr_mult=3.0)은 고변동주에서 손절선이 진입가 -6~13%로 너무 멀어
+    #   459550 2차 -12.63% 방치. 변동성 무관 절대 손절 상한(꼬리리스크 캡). 0=비활성. 권고 예: -6.0.
+    hard_stop_pct: float = 0.0
+    # [P0#1] 동일종목 당일 재진입 횟수 상한 — 459550 1차 익절 후 14:12 같은종목 고점 재진입(-509K) 차단.
+    #   >0 이면 당일 그 종목 진입 횟수를 상한(1=재진입 전면 금지). 0=비활성.
+    max_entries_per_symbol_day: int = 0
+    # [P0#1] 동일종목 청산 후 재진입 cooldown(분) — 직전 '청산' 시각 기준 N분 이내 재진입 차단. 0=비활성.
+    reentry_cooldown_min: int = 0
+    # [P0#1] 당일 손절(실현손실) 종목 재진입 금지 — 손절난 종목 추격 차단. False=비활성.
+    block_reentry_after_loss: bool = False
+    # [P1] 고변동(테마) 종목 진입 억제 — ATR/price 비율이 임계 초과면 supertrend 진입 스킵.
+    #   고변동일수록 ATR 밴드가 넓어 신호 지연(459550·두산 밴드폭 9~11%)→음의 기대값. 0=비활성. 예 0.05.
+    max_atr_pct_for_entry: float = 0.0
+    # [P1] 승자 보유 강화 — True 면 고정 익절(take_profit_pct) 비활성, ATR 트레일만으로 수익 동행.
+    take_profit_trail_only: bool = False
+    # [P1] 변동성 조정 사이징 — ATR/price > 이 값이면 진입 수량 절반(고변동주 비중 축소). 0=비활성. 예 0.05.
+    vol_halve_atr_pct: float = 0.0
+    # [P1] DCA tranche 미사용 — supertrend 는 전량 단일주문 진입인데 create_from_order 가 178/118 분할로
+    #   모델링해 sync-loss(보유≠tracker) 유발. True 면 전량을 단일 filled tranche 로 기록(일치). False=기존.
+    single_tranche: bool = False
+    # [P2] 추격 매수 가드 — 진입봉 종가가 직전봉 종가 대비 +이값% 초과 급등이면 진입 스킵(고점추격 방지).
+    #   0=비활성. 예 3.0.
+    max_entry_gap_pct: float = 0.0
+
 
 class SupertrendAutoTrader:
     """슈퍼트렌드 5분봉 자동매매 (진입+청산).
@@ -167,6 +196,11 @@ class SupertrendAutoTrader:
         # 장시간 판단기 (주입 가능 — 테스트는 가짜 주입). None 이면 기본 서비스.
         self._session = session_service or MarketSessionService()
         self._running = False
+        # ── BAR-OPS-35 재진입/손절 추적 (당일 단위, KST 일자 바뀌면 _roll_day 로 리셋) ──
+        self._entry_day: str = ""
+        self._entries_today: dict[str, int] = {}   # symbol -> 당일 진입 횟수
+        self._last_exit: dict[str, datetime] = {}   # symbol -> 마지막 청산 시각(UTC)
+        self._loss_locked: set[str] = set()         # 당일 손절(실현손실) 종목
 
     # ── 라이프사이클 ──────────────────────────────────────────────────────────
     async def run_forever(self) -> None:
@@ -193,6 +227,7 @@ class SupertrendAutoTrader:
     async def run_cycle(self) -> dict:
         """청산 평가 → 진입 평가 1회. 반환: {entered:[...], exited:[...]} (관측/테스트용)."""
         result = {"entered": [], "exited": []}
+        self._roll_day()  # BAR-OPS-35 — KST 일자 변경 시 당일 재진입/손절 추적 리셋
 
         # ── 장시간 가드 — 정규장(REGULAR)에서만 매매 ────────────────────────
         # 시장가 자동주문이므로 장외/시간외(지정가만)·주말·휴장일엔 사이클 skip.
@@ -231,8 +266,13 @@ class SupertrendAutoTrader:
                 #   [청산1] 트레일(샹들리에): 진입후 고점종가 − k×ATR 이탈 시 청산.
                 #   [청산2] 익절: 진입가 대비 +take_profit_pct% 도달 시 청산(수익 반납 방지).
                 trailed = self._trail_hit(pos, bars, res)
-                tp_hit = self._take_profit_hit(pos, bars) if not trailed else False
-                if not (trailed or tp_hit):
+                # [P0#3] catastrophic 하드 손절 — 트레일보다 먼저 평가(OR, 신호 무관 즉시 청산).
+                hard_hit = self._hard_stop_hit(pos, bars) if not trailed else False
+                # [P1] take_profit_trail_only=True 면 고정 익절 비활성(트레일만으로 수익 동행).
+                tp_hit = (self._take_profit_hit(pos, bars)
+                          if not (trailed or hard_hit or self.config.take_profit_trail_only)
+                          else False)
+                if not (trailed or hard_hit or tp_hit):
                     # 청산 = 슈퍼트렌드 SELL(기준·필수). RSI 단독 청산 없음.
                     st_exit = bool(res.sell_signals) and any(res.sell_signals[-lb:])
                     if not st_exit:
@@ -258,7 +298,13 @@ class SupertrendAutoTrader:
                     daily_pnl_pct=daily_pnl_pct, strategy_id=_STRATEGY_ID,
                 )
                 self._pos.remove(symbol)
-                _xreason = "트레일청산" if trailed else ("익절" if tp_hit else "SELL 전환")
+                # [P0#1] 재진입 가드용 청산 추적 — 청산 시각 + 손절(실현손실) 여부 기록.
+                self._last_exit[symbol] = datetime.now(timezone.utc)
+                _entry_px = float(getattr(pos, "entry_price", 0) or 0)
+                if _entry_px > 0 and float(bars[-1].close) < _entry_px:
+                    self._loss_locked.add(symbol)
+                _xreason = ("트레일청산" if trailed else
+                            ("하드손절" if hard_hit else ("익절" if tp_hit else "SELL 전환")))
                 result["exited"].append({"symbol": symbol, "qty": qty, "reason": _xreason,
                                          "order_no": getattr(r, "order_no", ""),
                                          "dry_run": getattr(r, "dry_run", False)})
@@ -285,9 +331,15 @@ class SupertrendAutoTrader:
 
         universe = await self._universe_provider()
         candidates: list[tuple[str, str, Decimal]] = []  # (symbol, name, price)
+        atr_pct_by_symbol: dict[str, float] = {}  # BAR-OPS-35 변동성 사이징용
         for symbol, name in universe[: self.config.universe_max]:
             if symbol in held_after:
                 continue  # 이미 보유(전략 무관) — 중복 진입 방지
+            # [P0#1] BAR-OPS-35 재진입 가드 — 당일 횟수상한/cooldown/손절후 차단 (전부 default OFF)
+            _rb = self._reentry_blocked(symbol)
+            if _rb:
+                logger.debug("슈퍼트렌드 진입 제외(재진입가드): %s — %s", symbol, _rb)
+                continue
             try:
                 bars = await self._fetch_bars(symbol)
                 if bars is None:
@@ -315,6 +367,22 @@ class SupertrendAutoTrader:
                     logger.debug("슈퍼트렌드 진입 제외(저가주): %s @%s < min_price %s",
                                  symbol, price, self.config.min_price)
                     continue
+                # [P1] 고변동(테마) 필터 — ATR/price 과대 종목 진입 스킵(신호 지연으로 음의 기대값).
+                atr_pct = self._atr_pct(res, float(price))
+                if self.config.max_atr_pct_for_entry > 0 and atr_pct > self.config.max_atr_pct_for_entry:
+                    logger.debug("슈퍼트렌드 진입 제외(고변동): %s ATR%%=%.3f > %.3f",
+                                 symbol, atr_pct, self.config.max_atr_pct_for_entry)
+                    continue
+                # [P2] 추격 매수 가드 — 진입봉 종가가 직전봉 종가 대비 급등이면 스킵(고점추격 방지).
+                if self.config.max_entry_gap_pct > 0 and len(bars) >= 2:
+                    prev_c = float(bars[-2].close)
+                    if prev_c > 0:
+                        gap = (float(bars[-1].close) - prev_c) / prev_c * 100.0
+                        if gap > self.config.max_entry_gap_pct:
+                            logger.debug("슈퍼트렌드 진입 제외(추격): %s 갭=%.2f%% > %.2f%%",
+                                         symbol, gap, self.config.max_entry_gap_pct)
+                            continue
+                atr_pct_by_symbol[symbol] = atr_pct
                 candidates.append((symbol, name, price))
             except Exception as e:
                 logger.warning("슈퍼트렌드 진입 분석 실패: %s — %s", symbol, type(e).__name__)
@@ -342,6 +410,14 @@ class SupertrendAutoTrader:
                 continue
             # ── [개선3] 주문 수량 하드캡 — 저가종목 사이징 폭주 방지 ──────────
             qty = self._cap_qty(rec.recommended_qty, float(rec.cur_price), rec.symbol)
+            # [P1] 변동성 조정 사이징 — 고변동 종목은 비중 절반(꼬리리스크 축소). 0=비활성.
+            if self.config.vol_halve_atr_pct > 0:
+                _ap = atr_pct_by_symbol.get(rec.symbol, 0.0)
+                if _ap > self.config.vol_halve_atr_pct and qty > 1:
+                    _halved = qty // 2
+                    logger.info("슈퍼트렌드 변동성 사이징: %s %d→%d주 (ATR%%=%.3f > %.3f)",
+                                rec.symbol, qty, _halved, _ap, self.config.vol_halve_atr_pct)
+                    qty = _halved
             if qty <= 0:
                 continue
             try:
@@ -354,8 +430,11 @@ class SupertrendAutoTrader:
                     entry_price=float(rec.cur_price),
                     total_recommended_qty=qty,
                     order_no=getattr(r, "order_no", ""),
+                    single_tranche=self.config.single_tranche,  # [P1] sync-loss 방지
                 )
                 placed += 1
+                # [P0#1] 당일 진입 횟수 기록 — 동일종목 재진입 상한 평가용.
+                self._entries_today[rec.symbol] = self._entries_today.get(rec.symbol, 0) + 1
                 result["entered"].append({"symbol": rec.symbol, "qty": rec.recommended_qty,
                                           "price": float(rec.cur_price),
                                           "order_no": getattr(r, "order_no", ""),
@@ -512,6 +591,56 @@ class SupertrendAutoTrader:
             logger.warning("슈퍼트렌드 수량 하드캡: %s %d→%d주 (@%.0f, 캡 qty=%d/value=%.0f)",
                            symbol, qty, capped, price, c.max_order_qty, c.max_order_value)
         return max(capped, 0)
+
+    # ── BAR-OPS-35 재진입/손절/변동성 가드 헬퍼 ───────────────────────────────
+    @staticmethod
+    def _kst_today() -> str:
+        from datetime import datetime, timezone, timedelta
+        return datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+
+    def _roll_day(self) -> None:
+        """KST 일자 변경 시 당일 재진입/손절 추적 리셋 (사이클 시작 시 호출)."""
+        today = self._kst_today()
+        if today != self._entry_day:
+            self._entry_day = today
+            self._entries_today = {}
+            self._loss_locked = set()
+            self._last_exit = {}
+
+    def _reentry_blocked(self, symbol: str) -> Optional[str]:
+        """[P0#1] 동일종목 재진입 차단 사유(없으면 None). 전부 default OFF."""
+        c = self.config
+        if c.max_entries_per_symbol_day > 0:
+            n = self._entries_today.get(symbol, 0)
+            if n >= c.max_entries_per_symbol_day:
+                return f"당일 진입 {n}회 ≥ 상한 {c.max_entries_per_symbol_day}"
+        if c.block_reentry_after_loss and symbol in self._loss_locked:
+            return "당일 손절 종목 재진입 금지"
+        if c.reentry_cooldown_min > 0 and symbol in self._last_exit:
+            elapsed = (datetime.now(timezone.utc) - self._last_exit[symbol]).total_seconds() / 60.0
+            if elapsed < c.reentry_cooldown_min:
+                return f"청산 후 {elapsed:.0f}분 < cooldown {c.reentry_cooldown_min}분"
+        return None
+
+    def _hard_stop_hit(self, pos: Any, bars) -> bool:
+        """[P0#3] 진입가 대비 손실률 ≤ hard_stop_pct(음수) 시 True (변동성 무관 절대 손절). 0=비활성."""
+        hs = self.config.hard_stop_pct
+        if hs >= 0 or not bars:
+            return False
+        entry_px = float(getattr(pos, "entry_price", 0) or 0)
+        if entry_px <= 0:
+            return False
+        cur = float(bars[-1].close)
+        return (cur - entry_px) / entry_px * 100.0 <= hs
+
+    @staticmethod
+    def _atr_pct(res, price: float) -> float:
+        """ATR(최근)/price 비율. 변동성 게이트·사이징용. 산출 불가 시 0."""
+        try:
+            atr = res.atr[-1] if res.atr else 0.0
+            return float(atr) / price if price > 0 else 0.0
+        except Exception:
+            return 0.0
 
     # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────
     async def _fetch_bars(self, symbol: str):

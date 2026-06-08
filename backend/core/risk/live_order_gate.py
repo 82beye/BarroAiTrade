@@ -11,6 +11,7 @@ BAR-64 Kill Switch / BAR-68 audit log 의 경량 통합 버전.
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import logging
 import os
@@ -37,14 +38,19 @@ _AUDIT_HEADERS = [
     "ts", "action", "side", "symbol", "qty", "price",
     "order_no", "return_code", "blocked", "reason",
     "strategy_id",  # BAR-OPS-09 Phase D2.6 (2026-05-29) — 전략별 KPI 측정 인프라
+    # BAR-OPS-35 (2026-06-08) — 요청수량(qty) ≠ 체결수량 분리. DCA/부분체결 환경에서
+    #   audit 기반 손익 재구성을 정확히 하기 위함(001740 audit 296 vs filled 178 sync-loss).
+    "filled_qty", "avg_fill_price",
 ]
 
 
 def _migrate_audit_csv_header(audit_path: Path) -> bool:
-    """기존 10 컬럼 audit csv 를 11 컬럼(strategy_id 추가) 으로 in-place migration.
+    """기존 audit csv 에 _AUDIT_HEADERS 의 누락 컬럼을 끝에 추가하는 in-place migration.
+
+    10→11(strategy_id)·11→13(filled_qty/avg_fill_price) 모두 처리. 누락분만 append.
 
     Returns:
-        True 시 migration 수행, False 시 이미 migrated 또는 파일 없음.
+        True 시 migration 수행, False 시 이미 최신 또는 파일 없음.
     """
     if not audit_path.exists():
         return False
@@ -57,12 +63,13 @@ def _migrate_audit_csv_header(audit_path: Path) -> bool:
     if not rows:
         return False
     header = rows[0]
-    if "strategy_id" in header:
-        return False  # already migrated
+    missing = [h for h in _AUDIT_HEADERS if h not in header]
+    if not missing:
+        return False  # already migrated (모든 컬럼 존재)
 
-    new_header = header + ["strategy_id"]
-    # 기존 row 끝에 빈 strategy_id 추가
-    new_rows = [new_header] + [r + [""] for r in rows[1:]]
+    pad = [""] * len(missing)
+    new_header = header + missing
+    new_rows = [new_header] + [r + pad for r in rows[1:]]
 
     # atomic write — tempfile + replace
     tmp = audit_path.with_suffix(audit_path.suffix + ".tmp")
@@ -70,7 +77,7 @@ def _migrate_audit_csv_header(audit_path: Path) -> bool:
         w = csv.writer(f)
         w.writerows(new_rows)
     tmp.replace(audit_path)
-    logger.info("order_audit.csv migration 완료 (10→11 컬럼, +strategy_id)")
+    logger.info("order_audit.csv migration 완료 (+%s)", ",".join(missing))
     return True
 
 
@@ -100,6 +107,16 @@ class GatePolicy:
     daily_max_orders: int = 50                           # 일 50건
     require_env_flag: bool = True                        # LIVE_TRADING_ENABLED 강제
     env_flag_name: str = "LIVE_TRADING_ENABLED"
+    # ── BAR-OPS-35 (2026-06-08 매매복기 권고) — 전부 default OFF(no-op). shadow→enforce ──
+    # [P0#2] 일일 손실 한도 latch — True 면 한도 최초 도달 시 당일 sticky lock(평가손익이 -3%
+    #   위로 회복돼도 신규매수 재개 금지). 현행 stateless 게이트는 12:30/12:35 차단 후 12:55
+    #   회복으로 통과시켜 459550 2차(-509K) 재진입을 허용했음. latch 가 이를 원천 차단.
+    daily_loss_latch: bool = False
+    # [P0#5] 주문 실행 재시도 — transient(HTTP 5xx/timeout) 오류 시 재시도 횟수. 0=비활성(기존).
+    #   2026-06-08 매도 HTTPStatusError 가 청산을 5분 지연→저점매도(-509K 악화). 매도 우선 재시도.
+    order_retry_count: int = 0
+    order_retry_backoff_sec: float = 0.0     # 재시도 간 백오프(초) — i회차에 ×(i+1) 선형 증가
+    retry_sell_only: bool = True             # True 면 매도(청산)만 재시도(시간민감 우선)
 
 
 class LiveOrderGate:
@@ -117,6 +134,8 @@ class LiveOrderGate:
         self._audit_path.parent.mkdir(parents=True, exist_ok=True)
         self._policy = policy or GatePolicy()
         self._notifier = notifier
+        # [P0#2 BAR-OPS-35] 일일 손실 한도 latch 상태 — 한도 도달한 UTC 일자(YYYY-MM-DD). 당일 sticky.
+        self._loss_latch_date: Optional[str] = None
 
     def _preflight(self, side: OrderSide, daily_pnl_pct: Decimal) -> None:
         # 1) ENV flag 강제 (실전 host 의 안전망)
@@ -129,10 +148,25 @@ class LiveOrderGate:
                 )
 
         # 2) 일일 손실 한도 — 매수만 차단 (매도는 손절 가능해야)
-        if side == OrderSide.BUY and daily_pnl_pct <= self._policy.daily_loss_limit_pct:
-            raise DailyLossLimitExceeded(
-                f"일일 손실 한도 도달: {daily_pnl_pct}% ≤ {self._policy.daily_loss_limit_pct}%. 신규 매수 차단."
-            )
+        if side == OrderSide.BUY:
+            limit = self._policy.daily_loss_limit_pct
+            if self._policy.daily_loss_latch:
+                # [P0#2 BAR-OPS-35] sticky latch — 한번 도달하면 당일 회복해도 잠금 유지.
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                if self._loss_latch_date == today:
+                    raise DailyLossLimitExceeded(
+                        f"일일 손실 한도 latch — 당일({today}) 신규 매수 잠금(평가 회복 무관)."
+                    )
+                if daily_pnl_pct <= limit:
+                    self._loss_latch_date = today
+                    raise DailyLossLimitExceeded(
+                        f"일일 손실 한도 도달(latch 설정): {daily_pnl_pct}% ≤ {limit}%. "
+                        f"당일 신규 매수 잠금."
+                    )
+            elif daily_pnl_pct <= limit:
+                raise DailyLossLimitExceeded(
+                    f"일일 손실 한도 도달: {daily_pnl_pct}% ≤ {limit}%. 신규 매수 차단."
+                )
 
         # 3) 일일 매수 한도 — 매수만 차단 (매도는 손절 가능해야).
         # 2026-05-19 P3 fix: 기존 _count_today_orders 가 매수+매도 합계라
@@ -151,21 +185,56 @@ class LiveOrderGate:
         price: Optional[Decimal] = None,
         daily_pnl_pct: Decimal = Decimal("0.0"),
         strategy_id: Optional[str] = None,
+        filled_qty: Optional[int] = None,
+        avg_fill_price: Optional[Decimal] = None,
     ) -> OrderResult:
-        return await self._gated(OrderSide.BUY, symbol, qty, price, daily_pnl_pct, strategy_id)
+        return await self._gated(OrderSide.BUY, symbol, qty, price, daily_pnl_pct,
+                                 strategy_id, filled_qty, avg_fill_price)
 
     async def place_sell(
         self, symbol: str, qty: int,
         price: Optional[Decimal] = None,
         daily_pnl_pct: Decimal = Decimal("0.0"),
         strategy_id: Optional[str] = None,
+        filled_qty: Optional[int] = None,
+        avg_fill_price: Optional[Decimal] = None,
     ) -> OrderResult:
-        return await self._gated(OrderSide.SELL, symbol, qty, price, daily_pnl_pct, strategy_id)
+        return await self._gated(OrderSide.SELL, symbol, qty, price, daily_pnl_pct,
+                                 strategy_id, filled_qty, avg_fill_price)
+
+    async def _place_with_retry(
+        self, side: OrderSide, symbol: str, qty: int, price: Optional[Decimal],
+    ) -> OrderResult:
+        """[P0#5 BAR-OPS-35] transient 오류 시 재시도. order_retry_count=0 이면 1회 시도(기존).
+
+        retry_sell_only=True 면 매도(청산)만 재시도 — 손절 청산은 시간민감이라 우선 보호.
+        """
+        p = self._policy
+        attempts = 1
+        if p.order_retry_count > 0 and (side == OrderSide.SELL or not p.retry_sell_only):
+            attempts = 1 + p.order_retry_count
+        last_exc: Optional[Exception] = None
+        for i in range(attempts):
+            try:
+                if side == OrderSide.BUY:
+                    return await self._executor.place_buy(symbol, qty, price)
+                return await self._executor.place_sell(symbol, qty, price)
+            except Exception as exc:  # noqa: BLE001 — transient 재시도 목적
+                last_exc = exc
+                if i < attempts - 1:
+                    logger.warning("주문 재시도 %d/%d (%s %s): %s",
+                                   i + 1, attempts - 1, side.value, symbol, type(exc).__name__)
+                    if p.order_retry_backoff_sec > 0:
+                        await asyncio.sleep(p.order_retry_backoff_sec * (i + 1))
+        assert last_exc is not None
+        raise last_exc
 
     async def _gated(
         self, side: OrderSide, symbol: str, qty: int,
         price: Optional[Decimal], daily_pnl_pct: Decimal,
         strategy_id: Optional[str] = None,
+        filled_qty: Optional[int] = None,
+        avg_fill_price: Optional[Decimal] = None,
     ) -> OrderResult:
         # 0) qty 검증 — 호출자(DCA 분할 등) 에서 0/음수가 들어와도 executor 진입 전 차단.
         #    이전엔 executor 측 ValueError 가 audit 에 'FAILED' 로 남아 추적 어려웠음.
@@ -185,10 +254,7 @@ class LiveOrderGate:
             raise
 
         try:
-            if side == OrderSide.BUY:
-                result = await self._executor.place_buy(symbol, qty, price)
-            else:
-                result = await self._executor.place_sell(symbol, qty, price)
+            result = await self._place_with_retry(side, symbol, qty, price)
         except Exception as e:
             self._audit("FAILED", side, symbol, qty, price, None, None,
                         blocked=False, reason=type(e).__name__, strategy_id=strategy_id)
@@ -200,6 +266,7 @@ class LiveOrderGate:
             side, symbol, qty, price,
             result.order_no, result.return_code, blocked=False,
             strategy_id=strategy_id,
+            filled_qty=filled_qty, avg_fill_price=avg_fill_price,
         )
         return result
 
@@ -208,6 +275,8 @@ class LiveOrderGate:
         price: Optional[Decimal], order_no: Optional[str],
         return_code: Optional[int], blocked: bool, reason: str = "",
         strategy_id: Optional[str] = None,
+        filled_qty: Optional[int] = None,
+        avg_fill_price: Optional[Decimal] = None,
     ) -> None:
         try:
             new_file = not self._audit_path.exists()
@@ -232,6 +301,8 @@ class LiveOrderGate:
                     "1" if blocked else "0",
                     reason,
                     strategy_id or "",  # Phase D2.6 신규 컬럼
+                    str(filled_qty) if filled_qty is not None else "",       # BAR-OPS-35
+                    str(avg_fill_price) if avg_fill_price is not None else "",  # BAR-OPS-35
                 ])
         except OSError as exc:
             logger.error("audit log write failed (%s) — %s %s not recorded",
