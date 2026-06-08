@@ -26,7 +26,7 @@ _TR_BALANCE = "kt00018"     # 계좌평가현황
 _TR_DEPOSIT = "kt00001"     # 예수금상세현황
 _TR_REALIZED = "ka10073"    # 종목별실현손익 (BAR-OPS-28)
 _TR_DAILY_PNL = "ka10074"   # 일자별실현손익합산
-_TR_OPEN_ORDERS = "kt00004" # 미체결요청 (BAR-OPS-33)
+_TR_OPEN_ORDERS = "ka10075" # 미체결요청 oso (2026-06-08: kt00004는 접수상태 미반환 → 교체)
 
 
 def _abs_decimal(s: str) -> Decimal:
@@ -168,34 +168,50 @@ class KiwoomNativeAccountFetcher:
     async def fetch_open_orders(
         self, exchange: str = "KRX", trade_type: str = "0",
     ) -> list[OpenOrder]:
-        """미체결 주문 (kt00004). trade_type: 0=전체/1=매수/2=매도."""
+        """미체결 주문 (ka10075 oso). trade_type: 0=전체/1=매수/2=매도.
+
+        2026-06-08: kt00004 는 '접수' 상태 주문을 반환하지 않아(0건) 미체결이
+        코드에서 비가시화됐다(접수정체 인시던트). ka10075(oso)로 교체 — 접수/미체결
+        주문이 io_tp_nm(+매수/-매도)·oso_qty·cntr_qty 로 노출된다.
+        """
         if exchange not in {"KRX", "NXT", "SOR"}:
             raise ValueError(f"invalid exchange: {exchange}")
         if trade_type not in {"0", "1", "2"}:
             raise ValueError(f"invalid trade_type: {trade_type}")
         data = await self._post(_TR_OPEN_ORDERS, {
-            "all_stk_tp": "1",          # 전체 종목
-            "trde_tp": trade_type,
+            "all_stk_tp": "0",
+            "trde_tp": "0",
             "stk_cd": "",
             "stex_tp": "0",
-            "dmst_stex_tp": exchange,
-            "qry_tp": "1",
         })
-        # list_key 후보 — 응답 키는 모의 0건일 때 stk_acnt_evlt_prst,
-        # 실 미체결 시 다른 키일 수 있어 동적 탐색
-        for key in ("stk_acnt_evlt_prst", "open_ordr", "ndchg_ordr"):
-            rows = data.get(key)
-            if isinstance(rows, list):
-                break
-        else:
-            rows = []
+        rows = data.get("oso")
+        if not isinstance(rows, list):
+            # 폴백: 구 kt00004 응답 키
+            for key in ("stk_acnt_evlt_prst", "open_ordr", "ndchg_ordr"):
+                rows = data.get(key)
+                if isinstance(rows, list):
+                    break
+            else:
+                rows = []
 
         out: list[OpenOrder] = []
         for r in rows:
             ord_qty = int(_abs_decimal(r.get("ord_qty", "0")))
             filled = int(_abs_decimal(r.get("cntr_qty", "0")))
-            tp = r.get("trde_tp", "")
-            side = "buy" if tp == "1" else ("sell" if tp == "2" else "unknown")
+            # ka10075: oso_qty=미체결수량(접수 포함). 없으면 ord-filled 로 보정.
+            pending = int(_abs_decimal(r.get("oso_qty", str(max(ord_qty - filled, 0)))))
+            io = r.get("io_tp_nm", "")            # "+매수" / "-매도"
+            if "매수" in io:
+                side = "buy"
+            elif "매도" in io:
+                side = "sell"
+            else:
+                tp = r.get("trde_tp", "")
+                side = "buy" if tp == "1" else ("sell" if tp == "2" else "unknown")
+            if trade_type == "1" and side != "buy":
+                continue
+            if trade_type == "2" and side != "sell":
+                continue
             out.append(OpenOrder(
                 order_no=r.get("ord_no", ""),
                 symbol=(r.get("stk_cd") or "").lstrip("A"),
@@ -203,9 +219,9 @@ class KiwoomNativeAccountFetcher:
                 side=side,
                 order_qty=ord_qty,
                 filled_qty=filled,
-                pending_qty=max(ord_qty - filled, 0),
-                order_price=_abs_decimal(r.get("ord_uv", "0")),
-                order_date=r.get("ord_dt", ""),
+                pending_qty=pending,
+                order_price=_abs_decimal(r.get("ord_pric", r.get("ord_uv", "0"))),
+                order_date=r.get("tm", r.get("ord_dt", "")),
             ))
         return out
 

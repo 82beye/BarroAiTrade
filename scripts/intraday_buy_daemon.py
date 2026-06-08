@@ -166,16 +166,28 @@ def _build_oauth() -> KiwoomNativeOAuth:
     )
 
 
-async def _sync_positions(pos_store: ActivePositionStore, held_symbols: set[str]) -> int:
-    """브로커 잔고와 active_positions 동기화. 잔고에 없는 종목은 제거."""
+async def _sync_positions(pos_store: ActivePositionStore, held_symbols: set[str],
+                          pending_symbols: "set[str] | None" = None) -> int:
+    """브로커 잔고와 active_positions 동기화. 잔고에 없는 종목은 제거.
+
+    2026-06-08: 발주 직후 '접수' 상태로 아직 미체결인 주문(ka10075 oso)이 있는
+    종목은 잔고0이어도 제거하지 않는다 — 접수정체/체결지연을 SYNC 가 조용히
+    지워버리던 문제(접수정체 인시던트) 차단.
+    """
+    pending_symbols = pending_symbols or set()
     active = pos_store.load_all()
     removed = 0
     for sym in list(active.keys()):
-        if sym not in held_symbols:
-            pos_store.remove(sym)
+        if sym in held_symbols:
+            continue
+        if sym in pending_symbols:
             ts = _now_kst().strftime("%H:%M:%S")
-            print(f"  [{ts}][SYNC] {sym} {active[sym].name} — 잔고에 없음, active_positions 제거")
-            removed += 1
+            print(f"  [{ts}][SYNC] {sym} {active[sym].name} — 잔고엔 없으나 미체결(접수) 존재 → 보존")
+            continue
+        pos_store.remove(sym)
+        ts = _now_kst().strftime("%H:%M:%S")
+        print(f"  [{ts}][SYNC] {sym} {active[sym].name} — 잔고에 없음, active_positions 제거")
+        removed += 1
     return removed
 
 
@@ -189,10 +201,16 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     account = KiwoomNativeAccountFetcher(oauth=oauth)
     balance = await account.fetch_balance()
 
-    # 브로커 잔고 ↔ active_positions 동기화
+    # 브로커 잔고 ↔ active_positions 동기화 (미체결 접수 주문은 보존)
     pos_store = ActivePositionStore(args.pos_log)
     held_symbols = {h.symbol for h in (balance.holdings or [])}
-    await _sync_positions(pos_store, held_symbols)
+    try:
+        _open = await account.fetch_open_orders()   # ka10075 oso
+        pending_symbols = {o.symbol for o in _open if o.pending_qty > 0}
+        await _sync_positions(pos_store, held_symbols, pending_symbols)
+    except Exception as _e:
+        # 미체결 조회 실패 → 접수정체를 잘못 지울 위험. 이번 사이클 SYNC 제거 보류.
+        print(f"  [SYNC-SKIP] 미체결 조회 실패({type(_e).__name__}) — 제거 보류")
 
     if not balance.holdings:
         return 0
