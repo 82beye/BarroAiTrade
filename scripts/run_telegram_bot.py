@@ -575,7 +575,7 @@ def _build_supertrend_auto_trader(notifier):
     order_executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=dry_run)
     order_gate = LiveOrderGate(
         executor=order_executor, audit_path=_AUDIT_PATH,
-        policy=GatePolicy(), notifier=notifier,
+        policy=GatePolicy(daily_loss_limit_pct=Decimal(os.environ.get("SUPERTREND_AUTO_DAILY_LOSS_LIMIT", "-3.0"))), notifier=notifier,
     )
     pos_store = ActivePositionStore(_POS_LOG)
     picker = KiwoomNativeLeaderPicker(oauth=oauth, min_score=0.5)
