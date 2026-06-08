@@ -1,0 +1,90 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<title>2026-06-08 BarroAiTrade 시뮬 (BAR-OPS-35 가드 counterfactual)</title>
+<style>
+body{font-family:'AppleSDGothicNeo','AppleGothic',sans-serif;margin:0;background:#f5f6f8;color:#222;line-height:1.6}
+.wrap{max-width:1000px;margin:0 auto;padding:32px}
+h1{font-size:25px;border-bottom:3px solid #1565c0;padding-bottom:10px}
+h2{font-size:20px;margin-top:34px;color:#1565c0;border-left:5px solid #1565c0;padding-left:10px}
+h3{font-size:15.5px;color:#0d47a1;margin-top:22px}
+.kpi{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
+.card{background:#fff;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.08);flex:1;min-width:160px}
+.card .v{font-size:21px;font-weight:700;margin-top:6px}
+.card .l{font-size:12px;color:#666}
+.card .s{font-size:13px;color:#888;margin-top:2px}
+.neg{color:#c62828;font-weight:600} .pos{color:#00701a;font-weight:600}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);margin:12px 0}
+th,td{padding:9px 11px;text-align:center;border-bottom:1px solid #eee;font-size:13px}
+th{background:#1565c0;color:#fff}
+tbody tr:nth-child(even){background:#fafafa}
+.lead{background:#e3f2fd;border-left:5px solid #1565c0;padding:14px 18px;border-radius:6px;font-size:15px;margin:16px 0}
+.note{background:#fff8e1;border-left:4px solid #f9a825;padding:11px 15px;border-radius:6px;font-size:13px;margin:10px 0}
+.warn{background:#ffebee;border-left:4px solid #c62828;padding:11px 15px;border-radius:6px;font-size:13.5px;margin:9px 0}
+.find{background:#e8f5e9;border-left:4px solid #2e7d32;padding:11px 15px;border-radius:6px;font-size:14px;margin:9px 0}
+.best{background:#e8f5e9;border:2px solid #2e7d32;border-radius:8px;padding:14px 18px;margin:14px 0}
+code{background:#eef1f4;padding:1px 5px;border-radius:4px;font-size:12px}
+ul,ol{line-height:1.85}
+.foot{text-align:center;color:#888;font-size:12px;margin-top:30px}
+</style></head><body><div class="wrap">
+<h1>BarroAiTrade 시뮬 — 2026-06-08 <span style="font-size:14px;color:#888">(BAR-OPS-35 가드 counterfactual)</span></h1>
+<p style="color:#666">생성 2026-06-09 · 소스 order_audit.csv(실제 6/8 트립) · ohlcv_cache_5m · 머지된 BAR-OPS-35 가드 코드</p>
+<div class="note"><b>방법</b> — 6/8 <b>실제 매매 시퀀스</b>(베이스라인=실거래, 신호 재현 불확실성 없음)에 <b>머지된 가드 코드를 그대로 구동</b>한 counterfactual. <code>SupertrendAutoTrader._reentry_blocked</code>·<code>_hard_stop_hit</code>, <code>LiveOrderGate._preflight</code>(latch)를 실제 호출. 재진입·하드손절은 supertrend 트립만(가드 위치), latch는 전 경로. 손익은 5분봉 체결가 추정 + 수수료 0.015%×2 + 매도세 0.18%.</div>
+
+<div class="lead">📌 <b>수술적 조합(재진입상한 + 하드손절)이 6/8을 <span class="neg">-555,299원</span> → <span class="pos">+280,985원</span>으로 +836,285원 개선</b>(흑자 전환). 승자(459550 1차 +398K)는 살리고 재진입 손실(두산 -319K, 459550 2차 -509K)만 차단. 반면 <b>회로차단기 latch는 승자까지 막는 blunt 안전망</b>(latch 포함 S5는 -117,239원). → 1차 방어 = 재진입상한+하드손절, latch는 최후 안전망.</div>
+
+<div class="kpi">
+  <div class="card"><div class="l">실제 (baseline)</div><div class="v neg">-555,299원</div><div class="s">실현 -674,559 + 보유 +119,260</div></div>
+  <div class="card" style="border:2px solid #2e7d32"><div class="l">S4 수술적 (권고)</div><div class="v pos">+280,985원</div><div class="s">+836,285 개선 · 흑자전환</div></div>
+  <div class="card"><div class="l">S5 안전망 풀(latch 포함)</div><div class="v neg">-117,239원</div><div class="s">latch가 승자 차단 → S4보다 못함</div></div>
+  <div class="card"><div class="l">최고 레버리지</div><div class="v">재진입상한</div><div class="s">단독 +836,285</div></div>
+</div>
+
+<h2>시나리오 비교 (종합 = 실현 + 보유평가)</h2>
+<table>
+<tr><th>시나리오</th><th>가드</th><th>실현</th><th>보유평가</th><th>종합</th><th>Δ vs 실제</th></tr>
+<tr><td style="text-align:left">baseline (실제)</td><td>—</td><td class="neg">-674,559</td><td class="pos">+119,260</td><td class="neg">-555,299</td><td>—</td></tr>
+<tr style="background:#e8f5e9;font-weight:600"><td style="text-align:left">S4 수술적</td><td>재진입상한1 + 하드손절-6%</td><td class="pos">+161,725</td><td class="pos">+119,260</td><td class="pos">+280,985</td><td class="pos">+836,285</td></tr>
+<tr><td style="text-align:left">S1 재진입상한</td><td><code>max_entries_per_symbol_day=1</code></td><td class="pos">+161,725</td><td class="pos">+119,260</td><td class="pos">+280,985</td><td class="pos">+836,285</td></tr>
+<tr><td style="text-align:left">S2 하드손절</td><td><code>hard_stop_pct=-6.0</code></td><td class="neg">-493,159</td><td class="pos">+119,260</td><td class="neg">-373,899</td><td class="pos">+181,401</td></tr>
+<tr><td style="text-align:left">S3 회로차단기 latch</td><td><code>daily_loss_latch</code></td><td class="neg">-563,303</td><td class="pos">+119,260</td><td class="neg">-444,043</td><td class="pos">+111,257</td></tr>
+<tr><td style="text-align:left">S5 안전망 풀</td><td>latch + 재진입상한 + 하드손절</td><td class="neg">-236,499</td><td class="pos">+119,260</td><td class="neg">-117,239</td><td class="pos">+438,060</td></tr>
+</table>
+<p style="font-size:13px;color:#555">보유평가(+119,260)는 SK네트웍스 178주 @13,500 → 종가 14,170(상한가). 진입 11:28(&lt;12:30)이라 전 시나리오 보유 유지.</p>
+
+<h2>시나리오별 가드 작동 내역 (머지 코드가 차단·변경)</h2>
+<div class="best"><b>S4 수술적 (재진입상한 + 하드손절) — 권고 1차 방어선</b>
+<ul>
+<li>✗ 두산로보틱스 26주 @144,200 (09:38, supertrend) — 당일 진입 1회 ≥ 상한 1</li>
+<li>✗ 두산로보틱스 27주 @147,000 (09:43) — 〃 (실제 <b class="neg">-226,608원</b> 회피)</li>
+<li>✗ 두산로보틱스 11주 @147,000 (09:43) — 〃 (실제 <b class="neg">-92,322원</b> 회피)</li>
+<li>✗ <b>459550 1,731주 @2,330 (14:12) — 재진입 차단 (실제 <span class="neg">-509,481원</span> 회피)</b></li>
+<li>✓ 유지: 459550 1,851주 @2,110 (12:55, 1차) → <b class="pos">+398,224원 승자 보존</b>, 두산 첫 supertrend·066430·NAVER</li>
+</ul></div>
+<div class="warn"><b>S2 하드손절 단독 (-6%)</b> — <code>_hard_stop_hit</code>가 5분봉 종가 경로에서 -6% 이탈 시 조기청산. 459550 2차: 실제 2,040(-12.63%) → <b>2,145(-약 -7.9%)</b>, net -509,481 → <b>-328,080원</b>(+181,401). ⚠️ 14:35~15:05 <b>30분 데이터 공백(VI)</b> 동안 종가 트리거 누락 → 공백 직후 2,145에서야 발동. 실시간/공백복귀 손절이면 더 일찍(2,195~) 차단.</div>
+<div class="warn"><b>S3 회로차단기 latch 단독</b> — <code>_preflight</code> latch가 12:30:03(실제 최초 -3% BLOCKED) trip 후 당일 매수 잠금. 459550 1차(12:55)+2차(14:12) <b>둘 다 차단</b> → 2차 손실(-509K) 막으나 <b class="neg">1차 승자(+398K)도 포기</b> → 순효과 +111K (blunt).</div>
+
+<h2>핵심 통찰</h2>
+<div class="find"><b>수술적 &gt; 안전망</b> — 재진입상한+하드손절(S4 +280,985)이 latch 포함(S5 -117,239)보다 <b>+398K 우월</b>. latch는 드로다운 후 모든 신규매수를 막아 459550 1차 승자까지 희생.</div>
+<div class="find"><b>재진입상한이 단일 최고 레버리지</b> — S1 단독 +836,285 개선. 6/8 손실의 본질이 "동일종목 재진입"(두산 supertrend ×3, 459550 2차)임을 정량 확증.</div>
+<div class="find"><b>하드손절은 보완재</b> — 459550 2차 -12.63%→-7.9% 캡(+181K). 5분봉 종가·데이터 공백 한계로 단독효과 제한 → 실시간/공백복귀 손절 필요.</div>
+<div class="find"><b>latch는 최후 안전망</b> — 기회비용(승자 차단) 커서 1차 방어 아닌 연속손실·시스템이상 시 hard cap 으로.</div>
+<div class="note"><b>P&amp;L 무영향(별도 가치)</b> — <code>single_tranche</code>(audit 296≠보유 178 sync-loss 해소)·<code>order_retry</code>(매도 HTTPStatusError 청산지연 방지)는 손익 시뮬엔 안 잡히나 데이터정합성·실행안정성 개선.</div>
+
+<h2>운영 권고 (shadow → enforce)</h2>
+<ol>
+<li><b><code>max_entries_per_symbol_day=1</code></b> (SupertrendAutoConfig) — 최고 레버리지. 동일종목 재진입 전면 차단.</li>
+<li><b><code>hard_stop_pct=-6.0</code></b> — 꼬리리스크 캡 보완.</li>
+<li>(실행) <b><code>order_retry_count=2</code></b> + <b><code>single_tranche=True</code></b> — 청산지연·sync-loss 해소.</li>
+<li><b><code>daily_loss_latch=True</code></b> — 최후 안전망으로만(승자 차단 기회비용 인지). 연속 손실일 한정 활성 검토.</li>
+</ol>
+
+<h2>한계 / 신뢰도</h2>
+<ul>
+<li><b>trip-level counterfactual</b>: 실제 체결 15개 라운드트립 기준. 가드는 신규 신호를 만들지 않음(차단·조기청산만) — 진입 알파는 실제와 동일.</li>
+<li><b>체결가 추정</b>: 5분봉 종가 기반(실현 -426K~-766K 밴드). 절대값보다 <b>시나리오 간 상대 비교</b>가 핵심.</li>
+<li><b>latch 앵커</b>: 실제 order_audit 최초 -3% BLOCKED(12:30:03)를 trip 시점으로 사용.</li>
+<li><b>전략범위</b>: 재진입·하드손절은 supertrend 트립만(가드 위치). gold/f_zone(daemon)은 별도 OOS 백테스트 후보.</li>
+<li><b>보유</b>: 001740 178주(tranche1 실체결, 권고 296 아님) 기준 평가익.</li>
+</ul>
+
+<div class="foot">BarroAiTrade 시뮬 · 2026-06-08 · BAR-OPS-35 가드 counterfactual (머지 코드 구동) · 베이스=실거래</div>
+</div></body></html>
