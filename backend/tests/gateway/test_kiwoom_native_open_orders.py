@@ -1,4 +1,7 @@
-"""BAR-OPS-33 — fetch_open_orders (kt00004) 테스트."""
+"""BAR-OPS-33/35 — fetch_open_orders (ka10075 oso) 테스트.
+
+2026-06-08(BAR-OPS-35): kt00004 → ka10075 교체 (접수상태 미반환 인시던트). 본 테스트는
+ka10075 계약(api-id·all_stk_tp/trde_tp body·oso 응답키)에 맞춰 갱신."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -57,19 +60,19 @@ async def test_invalid_trade_type_raises():
 
 @pytest.mark.asyncio
 async def test_fetch_open_orders_empty():
-    """모의 환경 0건 — stk_acnt_evlt_prst 빈 list 응답."""
+    """모의 환경 0건 — ka10075 oso 빈 list 응답 (2026-06-08 kt00004→ka10075 교체)."""
     http = AsyncMock(spec=httpx.AsyncClient)
     http.post = AsyncMock(return_value=_http_response({
-        "return_code": 0, "stk_acnt_evlt_prst": [],
+        "return_code": 0, "oso": [],
     }))
     f = KiwoomNativeAccountFetcher(oauth=_oauth_mock(), http_client=http, rate_limit_seconds=0)
     out = await f.fetch_open_orders()
     assert out == []
     headers = http.post.call_args.kwargs["headers"]
-    assert headers["api-id"] == "kt00004"
+    assert headers["api-id"] == "ka10075"
     body = http.post.call_args.kwargs["json"]
-    assert body["dmst_stex_tp"] == "KRX"
-    assert body["qry_tp"] == "1"
+    assert body["all_stk_tp"] == "0"
+    assert body["trde_tp"] == "0"
 
 
 @pytest.mark.asyncio
