@@ -159,6 +159,30 @@ class SupertrendAutoConfig:
     #   0=비활성. 예 3.0.
     max_entry_gap_pct: float = 0.0
 
+    # ── BAR-OPS-36 (2026-06-09) Runner — 승자 보유 강화 → 최고점 청산 ─────────────
+    # 근거: reports/2026-06-08. 459550 1차를 고점(2,385)까지 들었으면 +101K 추가. 고정 익절(+5%)이
+    #   상한가·강한 추세의 초과 수익을 잘라먹음. 러너 모드는 익절가를 '즉시 매도'가 아니라 '최고점 추적
+    #   전환' 트리거로 바꿔, 추세가 무너질 때만 청산한다. 전부 default OFF(no-op). shadow→enforce.
+    #
+    # [러너 마스터] True 면 아래 트리거(TP도달/상한가/시초갭) 충족 시 고정 익절 대신 최고점 추적 청산.
+    runner_enabled: bool = False
+    # [트리거2] 상한가 — 현재가 ≥ 전일종가×(1+이값/100) 이면 상한가로 보고 러너 + '상한가 잠김 홀딩'.
+    #   KRX 일일 상한 ~+30% → 29%로 근접 포착. 0=상한가 트리거 비활성.
+    runner_limit_up_pct: float = 29.0
+    # [트리거3] 보유종목 시초 갭상승 — 당일 시가 ≥ 전일종가×(1+이값/100) 이면 러너 진입. 0=비활성. 예 5.0.
+    runner_gap_up_pct: float = 0.0
+    # [청산] 최고점 되돌림 — 진입 후 최고종가 대비 이 %만큼 되돌리면 추세이탈로 청산. 0이면 ATR 사용.
+    runner_giveback_pct: float = 3.0
+    runner_giveback_atr_mult: float = 0.0   # >0 이면 peak − mult×ATR 사용(giveback_pct 대신)
+    # [안전] 수익잠금 floor — 러너 진입 후 현재가가 진입가×(1+이값/100) 밑이면 청산(승자→손실 방지).
+    runner_profit_lock_pct: float = 2.0
+    # [익일 시가 갭 부분익절] 보유종목이 익일 개장초 갭상승하면 일부 확정 후 잔량은 러너로 런.
+    #   분석(2026-06-09, 상한가 익일 531건): 79% 갭상승·평균 +8.3%이나 47%가 장중 페이드 →
+    #   시가 갭에서 일부 확정(+8.3% 신뢰구간) + 잔량 peak-trail(고가 평균 +18.6%)이 최적 +EV.
+    runner_gap_partial_ratio: float = 0.0       # 익일 시가갭에서 매도할 비율(0.5=절반). 0=비활성
+    runner_gap_partial_min_pct: float = 3.0     # 익일 시가갭(전일종가比)이 이 % 이상이어야 부분익절
+    runner_gap_partial_window_bars: int = 6     # 개장 후 이 봉수(×5분) 이내만(갭은 개장 현상). 6=30분
+
 
 class SupertrendAutoTrader:
     """슈퍼트렌드 5분봉 자동매매 (진입+청산).
@@ -261,6 +285,10 @@ class SupertrendAutoTrader:
                     multiplier=self.config.params.multiplier,
                     source=self.config.params.source,
                 )
+                # [BAR-OPS-36] 익일 시가 갭 부분익절 — 보유종목 개장초 갭상승 시 일부 확정,
+                #   잔량은 러너로 런(고점 추종). 부분익절한 사이클은 잔량 청산평가 스킵(중복매도 방지).
+                if await self._maybe_gap_partial(symbol, pos, bars, daily_pnl_pct, result):
+                    continue
                 lb = max(1, self.config.params.exit_lookback)
                 # ── 가격기반 리스크 청산 — 신호와 OR(최우선). 진입 불변·청산개선 효과 ──
                 #   [청산1] 트레일(샹들리에): 진입후 고점종가 − k×ATR 이탈 시 청산.
@@ -268,12 +296,21 @@ class SupertrendAutoTrader:
                 trailed = self._trail_hit(pos, bars, res)
                 # [P0#3] catastrophic 하드 손절 — 트레일보다 먼저 평가(OR, 신호 무관 즉시 청산).
                 hard_hit = self._hard_stop_hit(pos, bars) if not trailed else False
-                # [P1] take_profit_trail_only=True 면 고정 익절 비활성(트레일만으로 수익 동행).
+                # [BAR-OPS-36] 러너 — 상한가/시초갭/TP도달 시 고정 익절 대신 최고점 추적.
+                #   하드/트레일(외곽 안전망)이 먼저 잡으면 러너 평가 생략.
+                runner_on = (self.config.runner_enabled and not (trailed or hard_hit)
+                             and self._runner_triggered(pos, bars))
+                runner_exit, runner_reason = (False, "")
+                if runner_on:
+                    runner_exit, runner_reason = self._runner_should_exit(pos, bars, res)
+                # [P1] take_profit_trail_only 또는 러너 진행 중이면 고정 익절 비활성(러너가 대체).
                 tp_hit = (self._take_profit_hit(pos, bars)
-                          if not (trailed or hard_hit or self.config.take_profit_trail_only)
+                          if not (trailed or hard_hit or runner_on
+                                  or self.config.take_profit_trail_only)
                           else False)
-                if not (trailed or hard_hit or tp_hit):
+                if not (trailed or hard_hit or tp_hit or runner_exit):
                     # 청산 = 슈퍼트렌드 SELL(기준·필수). RSI 단독 청산 없음.
+                    #   러너 홀딩 중에도 ST SELL(추세 반전)은 추세이탈 청산으로 인정.
                     st_exit = bool(res.sell_signals) and any(res.sell_signals[-lb:])
                     if not st_exit:
                         continue
@@ -304,7 +341,9 @@ class SupertrendAutoTrader:
                 if _entry_px > 0 and float(bars[-1].close) < _entry_px:
                     self._loss_locked.add(symbol)
                 _xreason = ("트레일청산" if trailed else
-                            ("하드손절" if hard_hit else ("익절" if tp_hit else "SELL 전환")))
+                            ("하드손절" if hard_hit else
+                             (runner_reason if runner_exit else
+                              ("익절" if tp_hit else "SELL 전환"))))
                 result["exited"].append({"symbol": symbol, "qty": qty, "reason": _xreason,
                                          "order_no": getattr(r, "order_no", ""),
                                          "dry_run": getattr(r, "dry_run", False)})
@@ -641,6 +680,156 @@ class SupertrendAutoTrader:
             return float(atr) / price if price > 0 else 0.0
         except Exception:
             return 0.0
+
+    # ── BAR-OPS-36 Runner (승자 보유 → 최고점 청산) 헬퍼 ──────────────────────────
+    @staticmethod
+    def _closes_since_entry(pos: Any, bars) -> list[float]:
+        """진입(entry_time) 이후 종가 리스트. entry_time 비교 불가 시 전체 폴백 (_trail_hit 와 동일 규약)."""
+        et = getattr(pos, "entry_time", None)
+        out = []
+        for b in bars:
+            try:
+                if et is None or b.timestamp >= et:
+                    out.append(float(b.close))
+            except TypeError:
+                out.append(float(b.close))
+        return out or [float(b.close) for b in bars]
+
+    @staticmethod
+    def _prev_close(bars) -> Optional[float]:
+        """bars(다일 5분봉) 중 '현재일 직전 거래일'의 마지막 종가 — 상한가/갭 판정 기준."""
+        if not bars:
+            return None
+        cur_date = bars[-1].timestamp.date()
+        prior = [b for b in bars if b.timestamp.date() < cur_date]
+        return float(prior[-1].close) if prior else None
+
+    @staticmethod
+    def _today_open(bars) -> Optional[float]:
+        """현재일 첫 봉 시가 — 시초 갭 판정 기준."""
+        if not bars:
+            return None
+        cur_date = bars[-1].timestamp.date()
+        today = [b for b in bars if b.timestamp.date() == cur_date]
+        return float(today[0].open) if today else None
+
+    def _is_limit_up(self, bars) -> bool:
+        """현재가가 전일종가 대비 runner_limit_up_pct% 이상 = 상한가권."""
+        c = self.config
+        if c.runner_limit_up_pct <= 0 or not bars:
+            return False
+        pc = self._prev_close(bars)
+        if not pc or pc <= 0:
+            return False
+        return float(bars[-1].close) >= pc * (1 + c.runner_limit_up_pct / 100.0)
+
+    def _runner_triggered(self, pos: Any, bars) -> bool:
+        """러너 진입 트리거 — TP 도달 | 상한가 | 보유종목 시초 갭상승 중 하나."""
+        c = self.config
+        entry = float(getattr(pos, "entry_price", 0) or 0)
+        if entry <= 0 or not bars:
+            return False
+        cur = float(bars[-1].close)
+        # (1) TP 도달 — 익절가를 '즉시 매도'가 아닌 러너 전환점으로 사용
+        if c.take_profit_pct > 0 and (cur - entry) / entry * 100.0 >= c.take_profit_pct:
+            return True
+        # (2) 상한가
+        if self._is_limit_up(bars):
+            return True
+        # (3) 보유종목 시초 갭상승
+        if c.runner_gap_up_pct > 0:
+            pc = self._prev_close(bars)
+            op = self._today_open(bars)
+            if pc and op and pc > 0 and op >= pc * (1 + c.runner_gap_up_pct / 100.0):
+                return True
+        return False
+
+    def _runner_should_exit(self, pos: Any, bars, res) -> tuple[bool, str]:
+        """러너 모드 청산 판정 — (청산여부, 사유). '추세 무너지면만' 청산.
+
+        우선순위: 상한가 잠김 홀딩 > 수익잠금 floor > 최고점 되돌림(추세이탈).
+        """
+        c = self.config
+        entry = float(getattr(pos, "entry_price", 0) or 0)
+        if entry <= 0 or not bars:
+            return (False, "")
+        cur = float(bars[-1].close)
+        # 1) 상한가 잠김 — 상한가권이면 되돌림 무시하고 홀딩 (최고점에서 안 판다)
+        if self._is_limit_up(bars):
+            return (False, "상한가 홀딩")
+        # 2) 수익잠금 floor — 러너 진입 후 진입가×(1+lock%) 밑으론 청산(승자→손실/본전 방지)
+        floor = entry * (1 + c.runner_profit_lock_pct / 100.0)
+        if c.runner_profit_lock_pct > 0 and cur <= floor:
+            return (True, "러너 수익잠금")
+        # 3) 최고점 되돌림 = 추세이탈
+        peak = max(self._closes_since_entry(pos, bars))
+        if c.runner_giveback_atr_mult > 0 and getattr(res, "atr", None):
+            level = peak - c.runner_giveback_atr_mult * res.atr[-1]
+        else:
+            level = peak * (1 - c.runner_giveback_pct / 100.0)
+        if cur <= level:
+            return (True, "추세이탈(고점되돌림)")
+        return (False, "러너 홀딩")
+
+    async def _maybe_gap_partial(self, symbol: str, pos: Any, bars, daily_pnl_pct,
+                                 result: dict) -> bool:
+        """[BAR-OPS-36] 익일 시가 갭 부분익절 — 보유(오버나잇)종목이 개장초 갭상승하면 일부 확정.
+
+        조건(전부 충족): runner_enabled + gap_partial_ratio>0, 부분익절 미완료(partial_tp_done),
+        개장 후 window_bars 이내(오늘 봉수 ≤ window), 익일 시가갭 ≥ min_pct, 오버나잇 보유(진입일<오늘),
+        현재가 > 진입가(이익). 성사 시 part 매도 + 잔량(total_recommended_qty) 갱신 + 마킹 후 True.
+        """
+        c = self.config
+        if not (c.runner_enabled and c.runner_gap_partial_ratio > 0):
+            return False
+        if getattr(pos, "partial_tp_done", False):
+            return False
+        if not bars:
+            return False
+        cur_date = bars[-1].timestamp.date()
+        today_bars = [b for b in bars if b.timestamp.date() == cur_date]
+        if not today_bars or len(today_bars) > c.runner_gap_partial_window_bars:
+            return False  # 개장 초반 윈도우 밖
+        # 오버나잇 보유만 (당일 진입은 갭 대상 아님)
+        et = getattr(pos, "entry_time", "") or ""
+        if et:
+            try:
+                if datetime.fromisoformat(et).date() >= cur_date:
+                    return False
+            except ValueError:
+                pass
+        pc = self._prev_close(bars)
+        op = self._today_open(bars)
+        if not pc or not op or pc <= 0:
+            return False
+        gap = (op - pc) / pc
+        if gap < c.runner_gap_partial_min_pct / 100.0:
+            return False
+        entry = float(getattr(pos, "entry_price", 0) or 0)
+        cur = float(bars[-1].close)
+        if entry <= 0 or cur <= entry:   # 이익일 때만 부분익절
+            return False
+        held = int(getattr(pos, "total_recommended_qty", 0)) or self._filled_qty(pos)
+        part = int(held * c.runner_gap_partial_ratio)
+        if part <= 0 or part >= held:
+            return False
+        r = await self._gate.place_sell(
+            symbol=symbol, qty=part, daily_pnl_pct=daily_pnl_pct, strategy_id=_STRATEGY_ID,
+        )
+        # 잔량 갱신 + 부분익절 마킹 후 영속(remove 아님 — 잔량은 러너로 런)
+        pos.total_recommended_qty = held - part
+        pos.partial_tp_done = True
+        try:
+            self._pos.upsert(pos)
+        except Exception as e:
+            logger.error("부분익절 후 포지션 갱신 실패: %s — %s", symbol, type(e).__name__)
+        result["exited"].append({"symbol": symbol, "qty": part, "reason": "익일갭 부분익절",
+                                 "order_no": getattr(r, "order_no", ""),
+                                 "dry_run": getattr(r, "dry_run", False), "partial": True})
+        logger.info("익일 시가갭 부분익절: %s %d/%d주 (갭 %+.1f%%, 잔량 %d 러너)",
+                    symbol, part, held, gap * 100, held - part)
+        await self._notify("익일갭 부분익절", f"{symbol} {part}주 확정 (갭 {gap*100:+.1f}%, 잔량 런)")
+        return True
 
     # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────
     async def _fetch_bars(self, symbol: str):

@@ -784,3 +784,254 @@ async def test_p1_take_profit_trail_only():
     r2 = await t2.run_cycle()
     assert r2["exited"] == []
     assert pos2.get("066430") is not None
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# BAR-OPS-36 Runner (승자 보유 → 최고점 청산). 전부 default OFF: 위 회귀 테스트가
+# 기본동작(고정 익절 즉시매도) 불변을 보장. 아래는 runner_enabled ON 동작.
+# ════════════════════════════════════════════════════════════════════════════
+from types import SimpleNamespace as _NS  # noqa: E402
+
+
+def _md_bars(prev_close, today_closes, *, today_open=None, symbol="459550"):
+    """전일 1봉(prev_close) + 당일 today_closes 봉들. 상한가/갭/되돌림 판정용 멀티데이 봉."""
+    bars = [OHLCV(symbol=symbol, timestamp=datetime(2026, 6, 8, 15, 0),
+                  open=prev_close, high=prev_close, low=prev_close, close=prev_close,
+                  volume=1000, market_type=MarketType.STOCK)]
+    t0 = datetime(2026, 6, 9, 9, 0)
+    op0 = today_open if today_open is not None else today_closes[0]
+    for i, c in enumerate(today_closes):
+        o = op0 if i == 0 else today_closes[i - 1]
+        bars.append(OHLCV(symbol=symbol, timestamp=t0 + timedelta(minutes=5 * i),
+                          open=o, high=max(o, c), low=min(o, c), close=c,
+                          volume=1000 + i, market_type=MarketType.STOCK))
+    return bars
+
+
+# ── 트리거 단위 테스트 ───────────────────────────────────────────────────────
+def test_runner_trigger_tp():
+    t = _trader({}, universe=[], config=SupertrendAutoConfig(take_profit_pct=5.0, runner_gap_up_pct=0))
+    pos = _NS(entry_price=10000.0, entry_time=None)
+    assert t._runner_triggered(pos, _md_bars(10000, [10200, 10600])) is True   # +6% ≥ TP5
+    assert t._runner_triggered(pos, _md_bars(10000, [10200, 10400])) is False  # +4% < TP5, 상한가/갭 아님
+
+
+def test_runner_trigger_limit_up():
+    t = _trader({}, universe=[], config=SupertrendAutoConfig(take_profit_pct=0.0, runner_limit_up_pct=29.0))
+    pos = _NS(entry_price=10000.0, entry_time=None)
+    assert t._runner_triggered(pos, _md_bars(10000, [11000, 13000])) is True   # +30% 상한가
+    assert t._runner_triggered(pos, _md_bars(10000, [11000, 11500])) is False  # +15% < 29%
+
+
+def test_runner_trigger_gap_up():
+    t = _trader({}, universe=[], config=SupertrendAutoConfig(take_profit_pct=0.0, runner_gap_up_pct=5.0))
+    pos = _NS(entry_price=10000.0, entry_time=None)
+    # 전일 10000 → 당일 시가 10600(+6% 갭), TP/상한가 아님
+    assert t._runner_triggered(pos, _md_bars(10000, [10600, 10550], today_open=10600)) is True
+    assert t._runner_triggered(pos, _md_bars(10000, [10300, 10250], today_open=10300)) is False  # +3% 갭 < 5%
+
+
+# ── 청산 판정 단위 테스트 ────────────────────────────────────────────────────
+def test_runner_exit_limit_up_holds():
+    """상한가권이면 되돌림 무시하고 홀딩(최고점에서 안 판다)."""
+    t = _trader({}, universe=[], config=SupertrendAutoConfig(runner_limit_up_pct=29.0, runner_giveback_pct=3.0))
+    pos = _NS(entry_price=10000.0, entry_time=None)
+    ex, reason = t._runner_should_exit(pos, _md_bars(10000, [12000, 13000]), _NS(atr=[100]))
+    assert ex is False and reason == "상한가 홀딩"
+
+
+def test_runner_exit_profit_lock():
+    """러너 진입 후 수익잠금 floor 밑이면 청산(승자→손실 방지)."""
+    t = _trader({}, universe=[], config=SupertrendAutoConfig(runner_profit_lock_pct=2.0,
+                                                             runner_giveback_pct=3.0, runner_limit_up_pct=29.0))
+    pos = _NS(entry_price=10000.0, entry_time=None)
+    # 전일 9000(상한가 아님), cur 10100 ≤ floor 10200
+    ex, reason = t._runner_should_exit(pos, _md_bars(9000, [10500, 10100]), _NS(atr=[50]))
+    assert ex is True and reason == "러너 수익잠금"
+
+
+def test_runner_exit_giveback_trendbreak():
+    """최고점 대비 giveback% 되돌리면 추세이탈 청산."""
+    t = _trader({}, universe=[], config=SupertrendAutoConfig(runner_profit_lock_pct=2.0,
+                                                             runner_giveback_pct=3.0, runner_limit_up_pct=29.0))
+    pos = _NS(entry_price=10000.0, entry_time=None)
+    # peak 11000 → cur 10600 ≤ 11000×0.97=10670, floor 10200 미만 아님, 상한가 아님(전일 10000 +6%)
+    ex, reason = t._runner_should_exit(pos, _md_bars(10000, [10500, 10800, 11000, 10600]), _NS(atr=[50]))
+    assert ex is True and reason == "추세이탈(고점되돌림)"
+
+
+def test_runner_exit_holds_while_trending():
+    """floor 위 + giveback 미달이면 홀딩(추세 유지)."""
+    t = _trader({}, universe=[], config=SupertrendAutoConfig(runner_profit_lock_pct=2.0,
+                                                             runner_giveback_pct=3.0, runner_limit_up_pct=29.0))
+    pos = _NS(entry_price=10000.0, entry_time=None)
+    # peak 11000, cur 10900 > 10670 → 홀딩
+    ex, reason = t._runner_should_exit(pos, _md_bars(10000, [10500, 10800, 11000, 10900]), _NS(atr=[50]))
+    assert ex is False and reason == "러너 홀딩"
+
+
+# ── 통합: run_cycle 에서 러너가 TP 도달 후 홀딩하다 추세이탈 시 청산 ──────────
+_RUN_HOLD = [10000 + i * 15 for i in range(60)]            # 단조 상승, cur=10885(+8.85%, peak=cur)
+_RUN_RETRACE = [10000 + i * 20 for i in range(50)] + [10800, 10650, 10550]  # peak 10980 → cur 10550
+
+
+@pytest.mark.asyncio
+async def test_runner_holds_past_tp_no_sell():
+    """runner ON: TP(+5%) 도달해도 최고점 근처면 매도 안 함(승자 보유). 기본(off)이면 익절 매도."""
+    cfg = _base_config(runner_enabled=True, take_profit_pct=5.0, runner_giveback_pct=3.0)
+    gate = _FakeGate(); pos = _FakePosStore(); pos._inject("459550", qty=1851)
+    t = _trader({"459550": _RUN_HOLD}, universe=[], gate=gate, pos=pos, config=cfg)
+    r = await t.run_cycle()
+    assert gate.sells == []                 # 고정 익절 대신 러너 홀딩
+    assert pos.get("459550") is not None
+    assert r["exited"] == []
+
+
+@pytest.mark.asyncio
+async def test_runner_exits_on_trendbreak():
+    """runner ON: 최고점 대비 giveback 되돌리면 추세이탈로 청산(최고점 부근 매도)."""
+    cfg = _base_config(runner_enabled=True, take_profit_pct=5.0, runner_giveback_pct=3.0,
+                       runner_profit_lock_pct=2.0)
+    gate = _FakeGate(); pos = _FakePosStore(); pos._inject("459550", qty=1851)
+    t = _trader({"459550": _RUN_RETRACE}, universe=[], gate=gate, pos=pos, config=cfg)
+    r = await t.run_cycle()
+    assert any(s[0] == "459550" for s in gate.sells)
+    assert r["exited"] and r["exited"][0]["reason"] == "추세이탈(고점되돌림)"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# BAR-OPS-36 익일 시가 갭 부분익절 (runner_gap_partial). default OFF.
+# 분석(상한가 익일 531건): 79% 갭상승·평균 +8.3%이나 47% 장중 페이드 → 시가갭 일부 확정.
+# ════════════════════════════════════════════════════════════════════════════
+class _StoreU(_FakePosStore):
+    """upsert 지원 fake (부분익절 후 잔량 영속)."""
+    def upsert(self, pos):
+        self._d[pos.symbol] = pos
+
+
+class _MDCandles:
+    """미리 만든 멀티데이 봉을 반환하는 fake (run_cycle 통합용)."""
+    def __init__(self, bars):
+        self._b = bars
+    async def fetch_minute(self, symbol, tic_scope="5"):
+        return list(self._b)
+
+
+def _gap_cfg(**kw):
+    d = dict(runner_enabled=True, runner_gap_partial_ratio=0.5,
+             runner_gap_partial_min_pct=3.0, runner_gap_partial_window_bars=6,
+             entry_start_time="", min_adx=0.0, min_flip_atr_mult=0.0,
+             max_order_qty=0, max_order_value=0.0, trail_atr_mult=0.0,
+             take_profit_pct=0.0, max_intraday_range_pos=0.0)
+    d.update(kw)
+    return SupertrendAutoConfig(**d)
+
+
+def _pos_overnight(qty=1000, entry=10000.0, done=False, entry_date="2026-06-08"):
+    return _NS(symbol="X", name="X", strategy="supertrend", entry_price=entry,
+               entry_time=f"{entry_date}T01:00:00+00:00", total_recommended_qty=qty,
+               partial_tp_done=done, filled_qty=lambda: qty)
+
+
+@pytest.mark.asyncio
+async def test_gap_partial_success():
+    """익일 시가갭 +8% → 절반(500/1000) 확정, 잔량 500 러너 보유 + 마킹."""
+    gate = _FakeGate(); store = _StoreU()
+    t = _trader({}, universe=[], gate=gate, pos=store, config=_gap_cfg())
+    pos = _pos_overnight()
+    res = {"entered": [], "exited": []}
+    ok = await t._maybe_gap_partial("X", pos, _md_bars(10000, [10850], today_open=10800),
+                                    Decimal("0"), res)
+    assert ok is True
+    assert gate.sells == [("X", 500, "supertrend")]   # 절반 확정
+    assert pos.total_recommended_qty == 500           # 잔량 갱신
+    assert pos.partial_tp_done is True                # 재발 방지 마킹
+    assert res["exited"][0]["partial"] is True and res["exited"][0]["reason"] == "익일갭 부분익절"
+
+
+@pytest.mark.asyncio
+async def test_gap_partial_skips_when_gap_too_small():
+    gate = _FakeGate()
+    t = _trader({}, universe=[], gate=gate, pos=_StoreU(), config=_gap_cfg())
+    # 갭 +1% < min 3%
+    ok = await t._maybe_gap_partial("X", _pos_overnight(),
+                                    _md_bars(10000, [10120], today_open=10100), Decimal("0"),
+                                    {"entered": [], "exited": []})
+    assert ok is False and gate.sells == []
+
+
+@pytest.mark.asyncio
+async def test_gap_partial_skips_outside_open_window():
+    gate = _FakeGate()
+    t = _trader({}, universe=[], gate=gate, pos=_StoreU(), config=_gap_cfg(runner_gap_partial_window_bars=2))
+    # 오늘 3봉 > window 2 → 개장 윈도우 밖
+    ok = await t._maybe_gap_partial("X", _pos_overnight(),
+                                    _md_bars(10000, [10800, 10850, 10820], today_open=10800),
+                                    Decimal("0"), {"entered": [], "exited": []})
+    assert ok is False and gate.sells == []
+
+
+@pytest.mark.asyncio
+async def test_gap_partial_skips_intraday_entry():
+    """당일 진입(오버나잇 아님)은 갭 부분익절 대상 아님."""
+    gate = _FakeGate()
+    t = _trader({}, universe=[], gate=gate, pos=_StoreU(), config=_gap_cfg())
+    pos = _pos_overnight(entry_date="2026-06-09")  # 오늘 진입
+    ok = await t._maybe_gap_partial("X", pos, _md_bars(10000, [10850], today_open=10800),
+                                    Decimal("0"), {"entered": [], "exited": []})
+    assert ok is False and gate.sells == []
+
+
+@pytest.mark.asyncio
+async def test_gap_partial_skips_when_already_done():
+    gate = _FakeGate()
+    t = _trader({}, universe=[], gate=gate, pos=_StoreU(), config=_gap_cfg())
+    ok = await t._maybe_gap_partial("X", _pos_overnight(done=True),
+                                    _md_bars(10000, [10850], today_open=10800),
+                                    Decimal("0"), {"entered": [], "exited": []})
+    assert ok is False and gate.sells == []
+
+
+@pytest.mark.asyncio
+async def test_gap_partial_disabled_by_default():
+    """runner OFF(기본) → 부분익절 미작동(회귀 보호)."""
+    gate = _FakeGate()
+    t = _trader({}, universe=[], gate=gate, pos=_StoreU(),
+                config=_gap_cfg(runner_enabled=False))
+    ok = await t._maybe_gap_partial("X", _pos_overnight(),
+                                    _md_bars(10000, [10850], today_open=10800),
+                                    Decimal("0"), {"entered": [], "exited": []})
+    assert ok is False and gate.sells == []
+
+
+@pytest.mark.asyncio
+async def test_gap_partial_integration_run_cycle():
+    """run_cycle 통합 — 보유종목 익일 갭상승 → 부분익절 후 잔량 보유(러너)."""
+    # 전일(06-08) 30봉 상승→종가 10000, 당일(06-09) 3봉 갭상승(시가 10800)
+    bars = []
+    base8 = datetime(2026, 6, 8, 9, 0)
+    rise = [9700 + i * 10 for i in range(29)] + [10000]   # 30봉, 종가 10000
+    for i, c in enumerate(rise):
+        o = rise[i - 1] if i else c
+        bars.append(OHLCV(symbol="X", timestamp=base8 + timedelta(minutes=5 * i),
+                          open=o, high=max(o, c), low=min(o, c), close=c,
+                          volume=1000 + i, market_type=MarketType.STOCK))
+    base9 = datetime(2026, 6, 9, 9, 0)
+    today = [(10800, 10800), (10800, 10850), (10850, 10820)]  # (open, close)
+    for i, (o, c) in enumerate(today):
+        bars.append(OHLCV(symbol="X", timestamp=base9 + timedelta(minutes=5 * i),
+                          open=o, high=max(o, c), low=min(o, c), close=c,
+                          volume=2000 + i, market_type=MarketType.STOCK))
+    gate = _FakeGate(); store = _StoreU()
+    store._d["X"] = _pos_overnight()
+
+    async def _uni():
+        return []
+    t = SupertrendAutoTrader(candle_fetcher=_MDCandles(bars), account_fetcher=_FakeAccount(),
+                             order_gate=gate, pos_store=store, universe_provider=_uni,
+                             config=_gap_cfg(), session_service=_FakeSession(TradingSession.REGULAR))
+    r = await t.run_cycle()
+    assert ("X", 500, "supertrend") in gate.sells       # 절반 확정
+    assert store.get("X") is not None                   # 잔량 보유(remove 아님)
+    assert store.get("X").total_recommended_qty == 500
+    assert any(x.get("partial") for x in r["exited"])
