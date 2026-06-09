@@ -534,6 +534,17 @@ def _revalidate_entry(strategy_id: str, symbol: str, name: str, minute_bars: lis
     return True, "통과"
 
 
+def _is_leverage_or_inverse(symbol: str, name: str) -> bool:
+    """레버리지/인버스 ETF 또는 ETN 판정 — zone 진입 제외용.
+    backend SupertrendAutoTrader._is_leverage_or_inverse 와 동일 로직(데몬 복제)."""
+    nm = name or ""
+    if any(k in nm for k in ("레버리지", "인버스", "곱버스", "2X", "2x")):
+        return True
+    if any(ch.isalpha() for ch in (symbol or "")):  # ETN: 코드에 영문자
+        return True
+    return False
+
+
 async def _scan_and_buy(
     args, oauth, session_bought: set[str],
     recent_buys: dict[str, datetime] | None = None,
@@ -624,8 +635,10 @@ async def _scan_and_buy(
     # 2026-06-01: 25.0→30.0 완화. 강세장(코스피 급등)에서 +29%대 주도주(LG전자·
     # 두산로보틱스 등)가 25% 게이트에 막혀 진입 기회를 전부 놓치던 문제. 상한가(+30%)
     # 직전까지는 진입 허용하되, 상한가 도달분만 차단(추격매수 손실 위험 한계선).
+    _excl_lev = _env_truthy("SUPERTREND_AUTO_EXCLUDE_LEVERAGE")
     filtered = [c for c in leaders if c.symbol not in excluded
-                and c.flu_rate < _MAX_FLU_RATE and c.cur_price >= 5_000]
+                and c.flu_rate < _MAX_FLU_RATE and c.cur_price >= 5_000
+                and not (_excl_lev and _is_leverage_or_inverse(c.symbol, c.name))]
 
     if not filtered:
         return 0
