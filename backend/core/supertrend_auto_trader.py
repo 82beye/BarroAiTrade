@@ -159,6 +159,10 @@ class SupertrendAutoConfig:
     #   0=비활성. 예 3.0.
     max_entry_gap_pct: float = 0.0
 
+    # [BAR-OPS 2026-06-09] 시초가 갭 가드 — 현재가가 '전일 종가' 대비 +이값% 초과면 진입 스킵.
+    #   max_entry_gap_pct(봉간)와 달리 전일종가 기준 오픈갭 → 시초가 급등주(089030류) 추격 차단. 0=비활성. 예 15.0.
+    max_open_gap_pct: float = 0.0
+
     # ── BAR-OPS-36 (2026-06-09) Runner — 승자 보유 강화 → 최고점 청산 ─────────────
     # 근거: reports/2026-06-08. 459550 1차를 고점(2,385)까지 들었으면 +101K 추가. 고정 익절(+5%)이
     #   상한가·강한 추세의 초과 수익을 잘라먹음. 러너 모드는 익절가를 '즉시 매도'가 아니라 '최고점 추적
@@ -420,6 +424,15 @@ class SupertrendAutoTrader:
                         if gap > self.config.max_entry_gap_pct:
                             logger.debug("슈퍼트렌드 진입 제외(추격): %s 갭=%.2f%% > %.2f%%",
                                          symbol, gap, self.config.max_entry_gap_pct)
+                            continue
+                # [BAR-OPS] 시초가 갭 가드 — 전일종가 대비 오픈갭 급등이면 스킵(시초가 급등주 추격 방지).
+                if self.config.max_open_gap_pct > 0:
+                    _pc = self._prev_close(bars)
+                    if _pc and _pc > 0:
+                        _og = (float(bars[-1].close) - _pc) / _pc * 100.0
+                        if _og > self.config.max_open_gap_pct:
+                            logger.debug("슈퍼트렌드 진입 제외(시초가갭): %s 전일종가比 %.1f%% > %.1f%%",
+                                         symbol, _og, self.config.max_open_gap_pct)
                             continue
                 atr_pct_by_symbol[symbol] = atr_pct
                 candidates.append((symbol, name, price))
@@ -843,10 +856,20 @@ class SupertrendAutoTrader:
         return bars
 
     async def _account_pnl_pct(self) -> Decimal:
-        """계좌 평가수익률(%) — LiveOrderGate 매수 차단 입력. 조회 실패 시 0(매수 허용)."""
+        """계좌 대비 평가손익률(%) — LiveOrderGate 매수 차단 입력. 조회 실패 시 0(매수 허용).
+
+        주의(BAR-OPS): balance.total_pnl_rate(키움 tot_prft_rt)는 '매입금액' 대비라
+        소액·고변동 보유에서 과대(예: -299,968/7,749,640 = -3.87%)로 잡혀 일일손실
+        게이트(-3.0)를 오발동시킨다. 게이트 의미(계좌 대비 일손실)에 맞게
+        총평가손익 / 추정예탁자산(prsm_dpst_aset_amt) 으로 계산한다.
+        """
         try:
             balance = await self._account.fetch_balance()
-            return Decimal(str(getattr(balance, "total_pnl_rate", 0) or 0))
+            total_pnl = Decimal(str(getattr(balance, "total_pnl", 0) or 0))
+            base = Decimal(str(getattr(balance, "estimated_deposit", 0) or 0))
+            if base <= 0:
+                return Decimal("0.0")
+            return (total_pnl / base) * Decimal("100")
         except Exception:
             return Decimal("0.0")
 

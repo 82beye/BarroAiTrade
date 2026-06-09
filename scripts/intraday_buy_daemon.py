@@ -890,7 +890,7 @@ def _get_supertrend_trader(args, oauth, notifier) -> "SupertrendAutoTrader":
     executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
     gate = LiveOrderGate(
         executor=executor, audit_path=args.audit_log,
-        policy=GatePolicy(daily_max_orders=50),
+        policy=GatePolicy(daily_max_orders=int(os.environ.get("SUPERTREND_AUTO_MAX_ORDERS", "50"))),  # [0609 임시해제]
         notifier=notifier,
     )
     pos_store = ActivePositionStore(args.pos_log)

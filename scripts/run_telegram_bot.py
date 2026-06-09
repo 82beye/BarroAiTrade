@@ -577,6 +577,7 @@ def _build_supertrend_auto_trader(notifier):
         executor=order_executor, audit_path=_AUDIT_PATH,
         policy=GatePolicy(
             daily_loss_limit_pct=Decimal(os.environ.get("SUPERTREND_AUTO_DAILY_LOSS_LIMIT", "-3.0")),
+            daily_max_orders=int(os.environ.get("SUPERTREND_AUTO_MAX_ORDERS", "50")),  # 0=무제한
             # ── BAR-OPS-35 env 토글 (기본 OFF — env 미설정 시 동작 불변) ──
             daily_loss_latch=_env_truthy("SUPERTREND_AUTO_LOSS_LATCH"),
             order_retry_count=int(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY", "0")),
@@ -628,6 +629,7 @@ def _build_supertrend_auto_trader(notifier):
         vol_halve_atr_pct=float(os.environ.get("SUPERTREND_AUTO_VOL_HALVE_ATR", "0")),
         single_tranche=_env_truthy("SUPERTREND_AUTO_SINGLE_TRANCHE"),
         max_entry_gap_pct=float(os.environ.get("SUPERTREND_AUTO_MAX_ENTRY_GAP", "0")),
+        max_open_gap_pct=float(os.environ.get("SUPERTREND_AUTO_MAX_OPEN_GAP", "0")),
         # ── BAR-OPS-36 Runner env 토글 ──
         runner_enabled=_env_truthy("SUPERTREND_AUTO_RUNNER"),
         runner_limit_up_pct=float(os.environ.get("SUPERTREND_AUTO_RUNNER_LIMIT_UP", "29")),
