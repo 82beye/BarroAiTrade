@@ -163,6 +163,9 @@ class SupertrendAutoConfig:
     #   max_entry_gap_pct(봉간)와 달리 전일종가 기준 오픈갭 → 시초가 급등주(089030류) 추격 차단. 0=비활성. 예 15.0.
     max_open_gap_pct: float = 0.0
 
+    # [BAR-OPS 2026-06-09] 레버리지/인버스/ETN 진입 제외 — 변동성 증폭상품 추격 방지. False=비활성.
+    exclude_leverage: bool = False
+
     # ── BAR-OPS-36 (2026-06-09) Runner — 승자 보유 강화 → 최고점 청산 ─────────────
     # 근거: reports/2026-06-08. 459550 1차를 고점(2,385)까지 들었으면 +101K 추가. 고정 익절(+5%)이
     #   상한가·강한 추세의 초과 수익을 잘라먹음. 러너 모드는 익절가를 '즉시 매도'가 아니라 '최고점 추적
@@ -382,6 +385,10 @@ class SupertrendAutoTrader:
             _rb = self._reentry_blocked(symbol)
             if _rb:
                 logger.debug("슈퍼트렌드 진입 제외(재진입가드): %s — %s", symbol, _rb)
+                continue
+            # [BAR-OPS] 레버리지/인버스/ETN 제외 (config-gated)
+            if self.config.exclude_leverage and self._is_leverage_or_inverse(symbol, name):
+                logger.debug("슈퍼트렌드 진입 제외(레버리지/ETN): %s %s", symbol, name)
                 continue
             try:
                 bars = await self._fetch_bars(symbol)
@@ -725,6 +732,17 @@ class SupertrendAutoTrader:
         cur_date = bars[-1].timestamp.date()
         today = [b for b in bars if b.timestamp.date() == cur_date]
         return float(today[0].open) if today else None
+
+    @staticmethod
+    def _is_leverage_or_inverse(symbol: str, name: str) -> bool:
+        """레버리지/인버스 ETF 또는 ETN 판정 — 진입 제외용(이름 키워드 + ETN 코드 영문자).
+        예: KODEX 레버리지(122630), KODEX 코스닥150레버리지(233740), 인버스2X, ETN(0193T0)."""
+        nm = name or ""
+        if any(k in nm for k in ("레버리지", "인버스", "곱버스", "2X", "2x")):
+            return True
+        if any(c.isalpha() for c in (symbol or "")):  # ETN: 코드에 영문자
+            return True
+        return False
 
     def _is_limit_up(self, bars) -> bool:
         """현재가가 전일종가 대비 runner_limit_up_pct% 이상 = 상한가권."""
