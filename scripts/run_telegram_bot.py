@@ -231,7 +231,8 @@ async def _cmd_confirm(bot: TelegramBot, msg: dict) -> str:
     lines = [f"🚀 *매수 실행* (dry\\_run={dry_run})"]
     for o in batch.orders:
         try:
-            r = await gate.place_buy(symbol=o.symbol, qty=o.qty)
+            r = await gate.place_buy(symbol=o.symbol, qty=o.qty,
+                                     strategy_id="manual")  # [BAR-OPS-38 P1] 수동 주문 귀속
             tag = "🧪 DRY_RUN" if r.dry_run else "✅ ORDERED"
             lines.append(f"{tag} `{o.symbol}` qty={o.qty}")
         except Exception as e:
@@ -583,10 +584,12 @@ def _build_supertrend_auto_trader(notifier):
         policy=GatePolicy(
             daily_loss_limit_pct=Decimal(os.environ.get("SUPERTREND_AUTO_DAILY_LOSS_LIMIT", "-3.0")),
             daily_max_orders=int(os.environ.get("SUPERTREND_AUTO_MAX_ORDERS", "50")),  # 0=무제한
-            # ── BAR-OPS-35 env 토글 (기본 OFF — env 미설정 시 동작 불변) ──
-            daily_loss_latch=_env_truthy("SUPERTREND_AUTO_LOSS_LATCH"),
-            order_retry_count=int(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY", "0")),
-            order_retry_backoff_sec=float(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY_BACKOFF", "0")),
+            # ── BAR-OPS-35 env 토글 → [BAR-OPS-38] 기본 ON 전환 + latch 파일 영속(데몬과 공유) ──
+            daily_loss_latch=_env_truthy("SUPERTREND_AUTO_LOSS_LATCH", "1"),
+            latch_state_path=str(_DATA_DIR / "daily_gate_state.json"),
+            loss_metric_label="당일실현+보유평가/추정예탁자산",
+            order_retry_count=int(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY", "2")),
+            order_retry_backoff_sec=float(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY_BACKOFF", "2.0")),
             retry_sell_only=_env_truthy("SUPERTREND_AUTO_RETRY_SELL_ONLY", "1"),
         ), notifier=notifier,
     )
@@ -624,17 +627,22 @@ def _build_supertrend_auto_trader(notifier):
         # ATR 트레일링 청산(샹들리에) — 기본 0(OFF). 활성: SUPERTREND_AUTO_TRAIL_ATR=4
         #   (백테스트 권장 4×ATR: 최악 단일손실 캡, 단 총수익 일부 희생 — opt-in).
         trail_atr_mult=float(os.environ.get("SUPERTREND_AUTO_TRAIL_ATR", "0")),
-        # ── BAR-OPS-35 가드 env 토글 (전부 기본 OFF/dataclass 기본 → env 미설정 시 동작 불변) ──
-        hard_stop_pct=float(os.environ.get("SUPERTREND_AUTO_HARD_STOP", "0")),
+        # ── BAR-OPS-35 가드 env 토글 — [BAR-OPS-38] 데몬(_get_supertrend_trader)과 동일하게
+        #    일부 기본 ON 전환(hard_stop -6 / single_tranche / max_open_gap 15). 두 경로의
+        #    가드 정책 비대칭(봇만 무가드)을 제거. 끄려면 env=0 명시.
+        hard_stop_pct=float(os.environ.get("SUPERTREND_AUTO_HARD_STOP", "-6.0")),
         max_entries_per_symbol_day=int(os.environ.get("SUPERTREND_AUTO_MAX_ENTRIES", "0")),
         reentry_cooldown_min=int(os.environ.get("SUPERTREND_AUTO_REENTRY_COOLDOWN", "0")),
         block_reentry_after_loss=_env_truthy("SUPERTREND_AUTO_BLOCK_REENTRY_LOSS"),
         max_atr_pct_for_entry=float(os.environ.get("SUPERTREND_AUTO_MAX_ATR_PCT", "0")),
         take_profit_trail_only=_env_truthy("SUPERTREND_AUTO_TP_TRAIL_ONLY"),
         vol_halve_atr_pct=float(os.environ.get("SUPERTREND_AUTO_VOL_HALVE_ATR", "0")),
-        single_tranche=_env_truthy("SUPERTREND_AUTO_SINGLE_TRANCHE"),
+        single_tranche=_env_truthy("SUPERTREND_AUTO_SINGLE_TRANCHE", "1"),
         max_entry_gap_pct=float(os.environ.get("SUPERTREND_AUTO_MAX_ENTRY_GAP", "0")),
-        max_open_gap_pct=float(os.environ.get("SUPERTREND_AUTO_MAX_OPEN_GAP", "0")),
+        max_open_gap_pct=float(os.environ.get("SUPERTREND_AUTO_MAX_OPEN_GAP", "15.0")),
+        # ── [BAR-OPS-38 P0#4] 이월(오버나이트) 정책 ──
+        entry_cutoff_time=os.environ.get("SUPERTREND_AUTO_ENTRY_CUTOFF", "14:30"),
+        carry_gap_stop_pct=float(os.environ.get("SUPERTREND_AUTO_CARRY_GAP_STOP", "-3.0")),
         exclude_leverage=_env_truthy("SUPERTREND_AUTO_EXCLUDE_LEVERAGE"),
         exclude_etf=_env_truthy("SUPERTREND_AUTO_EXCLUDE_ETF"),
         # ── BAR-OPS-36 Runner env 토글 ──

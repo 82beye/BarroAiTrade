@@ -153,8 +153,10 @@ class SupertrendAutoConfig:
     # [P1] 변동성 조정 사이징 — ATR/price > 이 값이면 진입 수량 절반(고변동주 비중 축소). 0=비활성. 예 0.05.
     vol_halve_atr_pct: float = 0.0
     # [P1] DCA tranche 미사용 — supertrend 는 전량 단일주문 진입인데 create_from_order 가 178/118 분할로
-    #   모델링해 sync-loss(보유≠tracker) 유발. True 면 전량을 단일 filled tranche 로 기록(일치). False=기존.
-    single_tranche: bool = False
+    #   모델링해 sync-loss(보유≠tracker) 유발. True 면 전량을 단일 filled tranche 로 기록(일치).
+    # [BAR-OPS-38 P0#2, 2026-06-10 매매복기] default True 전환 — 6/10 319660 에서 가짜 tranche2(9주)를
+    #   데몬 DCA 가 실주문으로 추가 발사해 실보유가 권고의 139%(장부 23 vs 브로커 32)가 된 사고 실증.
+    single_tranche: bool = True
     # [P2] 추격 매수 가드 — 진입봉 종가가 직전봉 종가 대비 +이값% 초과 급등이면 진입 스킵(고점추격 방지).
     #   0=비활성. 예 3.0.
     max_entry_gap_pct: float = 0.0
@@ -192,6 +194,18 @@ class SupertrendAutoConfig:
     runner_gap_partial_ratio: float = 0.0       # 익일 시가갭에서 매도할 비율(0.5=절반). 0=비활성
     runner_gap_partial_min_pct: float = 3.0     # 익일 시가갭(전일종가比)이 이 % 이상이어야 부분익절
     runner_gap_partial_window_bars: int = 6     # 개장 후 이 봉수(×5분) 이내만(갭은 개장 현상). 6=30분
+
+    # ── BAR-OPS-38 (2026-06-10 매매복기 P0#4) 이월(오버나이트) 정책 ──────────────
+    # 근거: 6/9 막판(13:23~14:09) 진입 5종 + gold 1종 이월 → 6/10 갭하락 직격 -845K
+    #   (6/9 벌이 +1,585K 의 37% 반납). 이월 자체가 아니라 '무정책 이월'이 문제.
+    #
+    # [①] 진입 컷오프 — KST HH:MM 이후 신규 진입 금지(늦은 진입 = 짧은 검증시간 + 이월 후보).
+    #   빈 문자열이면 비활성. 청산은 시각 무관.
+    entry_cutoff_time: str = "14:30"
+    # [③] 이월 갭하락 스탑 — 전일 이전 진입(이월) 포지션이 당일 전일종가 대비 이 % 이하로
+    #   하락하면 flip 신호 대기 없이 즉시 청산(음수, 0=비활성). 6/10 은 flip 이 09:02 에
+    #   작동했지만, dir 유지 중 갭 폭락(459550 패턴)이면 보호장치가 전무했다.
+    carry_gap_stop_pct: float = -3.0
 
 
 class SupertrendAutoTrader:
@@ -306,19 +320,23 @@ class SupertrendAutoTrader:
                 trailed = self._trail_hit(pos, bars, res)
                 # [P0#3] catastrophic 하드 손절 — 트레일보다 먼저 평가(OR, 신호 무관 즉시 청산).
                 hard_hit = self._hard_stop_hit(pos, bars) if not trailed else False
+                # [BAR-OPS-38 P0#4③] 이월 갭하락 스탑 — 이월 포지션의 당일(전일종가比) 폭락 보호.
+                carry_gap_hit = (self._carry_gap_stop_hit(pos, bars)
+                                 if not (trailed or hard_hit) else False)
                 # [BAR-OPS-36] 러너 — 상한가/시초갭/TP도달 시 고정 익절 대신 최고점 추적.
                 #   하드/트레일(외곽 안전망)이 먼저 잡으면 러너 평가 생략.
-                runner_on = (self.config.runner_enabled and not (trailed or hard_hit)
+                runner_on = (self.config.runner_enabled
+                             and not (trailed or hard_hit or carry_gap_hit)
                              and self._runner_triggered(pos, bars))
                 runner_exit, runner_reason = (False, "")
                 if runner_on:
                     runner_exit, runner_reason = self._runner_should_exit(pos, bars, res)
                 # [P1] take_profit_trail_only 또는 러너 진행 중이면 고정 익절 비활성(러너가 대체).
                 tp_hit = (self._take_profit_hit(pos, bars)
-                          if not (trailed or hard_hit or runner_on
+                          if not (trailed or hard_hit or carry_gap_hit or runner_on
                                   or self.config.take_profit_trail_only)
                           else False)
-                if not (trailed or hard_hit or tp_hit or runner_exit):
+                if not (trailed or hard_hit or carry_gap_hit or tp_hit or runner_exit):
                     # 청산 = 슈퍼트렌드 SELL(기준·필수). RSI 단독 청산 없음.
                     #   러너 홀딩 중에도 ST SELL(추세 반전)은 추세이탈 청산으로 인정.
                     st_exit = bool(res.sell_signals) and any(res.sell_signals[-lb:])
@@ -352,8 +370,9 @@ class SupertrendAutoTrader:
                     self._loss_locked.add(symbol)
                 _xreason = ("트레일청산" if trailed else
                             ("하드손절" if hard_hit else
-                             (runner_reason if runner_exit else
-                              ("익절" if tp_hit else "SELL 전환"))))
+                             ("이월갭스탑" if carry_gap_hit else
+                              (runner_reason if runner_exit else
+                               ("익절" if tp_hit else "SELL 전환")))))
                 result["exited"].append({"symbol": symbol, "qty": qty, "reason": _xreason,
                                          "order_no": getattr(r, "order_no", ""),
                                          "dry_run": getattr(r, "dry_run", False)})
@@ -367,6 +386,12 @@ class SupertrendAutoTrader:
         if not self._entry_time_open():
             logger.debug("슈퍼트렌드 진입 보류 — 장초반(< %s) 변동성 구간",
                          self.config.entry_start_time)
+            return result
+
+        # ── [BAR-OPS-38 P0#4①] 진입 컷오프 — 늦은 진입(이월 후보) 금지 ──────
+        if self._entry_cutoff_passed():
+            logger.debug("슈퍼트렌드 진입 보류 — 컷오프(≥ %s) 이후(이월 리스크)",
+                         self.config.entry_cutoff_time)
             return result
 
         # ── 진입: 유니버스 BUY 전환 (미보유만, 상한 준수) ────────────────────
@@ -531,6 +556,53 @@ class SupertrendAutoTrader:
             return now >= dtime(int(hh), int(mm))
         except Exception:
             return True  # 파싱 실패 시 보수적으로 허용(기존 동작)
+
+    def _entry_cutoff_passed(self) -> bool:
+        """[BAR-OPS-38 P0#4①] KST 현재시각이 entry_cutoff_time 이후면 True(신규 진입 금지).
+
+        늦은 진입 = 짧은 검증시간 + 이월(오버나이트 갭 리스크) 후보 — 6/9 막판(13:23~14:09)
+        진입 5종이 6/10 갭하락 -845K 의 주성분. 빈 문자열이면 비활성. 청산은 시각 무관.
+        """
+        cutoff = (self.config.entry_cutoff_time or "").strip()
+        if not cutoff:
+            return False
+        try:
+            from datetime import datetime, timezone, timedelta
+            now = datetime.now(timezone(timedelta(hours=9))).time()
+            hh, mm = cutoff.split(":")
+            from datetime import time as dtime
+            return now >= dtime(int(hh), int(mm))
+        except Exception:
+            return False  # 파싱 실패 시 진입 차단하지 않음(기존 동작 보존)
+
+    def _carry_gap_stop_hit(self, pos: Any, bars) -> bool:
+        """[BAR-OPS-38 P0#4③] 이월 포지션 갭하락 스탑 — 전일종가 대비 ≤ carry_gap_stop_pct(음수) 시 True.
+
+        이월 판정: entry_time(UTC)의 KST 일자 < 마지막 봉 일자. 당일 진입엔 미적용(하드손절이 담당).
+        flip 신호 대기 없이 즉시 청산 — dir 유지 중 갭 폭락(459550 패턴) 보호. 0=비활성.
+        """
+        gs = self.config.carry_gap_stop_pct
+        if gs >= 0 or not bars:
+            return False
+        et = getattr(pos, "entry_time", None)
+        if not et:
+            return False
+        try:
+            from datetime import datetime, timezone, timedelta
+            entry_kst_date = (datetime.fromisoformat(str(et))
+                              .astimezone(timezone(timedelta(hours=9))).date())
+        except (ValueError, TypeError):
+            return False
+        try:
+            if entry_kst_date >= bars[-1].timestamp.date():
+                return False  # 당일 진입 — 이월 아님
+        except (AttributeError, TypeError):
+            return False
+        pc = self._prev_close(bars)
+        if not pc or pc <= 0:
+            return False
+        cur = float(bars[-1].close)
+        return (cur - pc) / pc * 100.0 <= gs
 
     def _whipsaw_pass(self, bars, res, symbol: str) -> bool:
         """[개선2/BAR-OPS-10] ADX + FLIP + 멀티 TF RSI 게이트. 모두 통과 시 True.
@@ -924,20 +996,16 @@ class SupertrendAutoTrader:
         return bars
 
     async def _account_pnl_pct(self) -> Decimal:
-        """계좌 대비 평가손익률(%) — LiveOrderGate 매수 차단 입력. 조회 실패 시 0(매수 허용).
+        """일일손실 게이트 입력(%) — LiveOrderGate 매수 차단 입력. 조회 실패 시 0(매수 허용).
 
-        주의(BAR-OPS): balance.total_pnl_rate(키움 tot_prft_rt)는 '매입금액' 대비라
-        소액·고변동 보유에서 과대(예: -299,968/7,749,640 = -3.87%)로 잡혀 일일손실
-        게이트(-3.0)를 오발동시킨다. 게이트 의미(계좌 대비 일손실)에 맞게
-        총평가손익 / 추정예탁자산(prsm_dpst_aset_amt) 으로 계산한다.
+        [BAR-OPS-38, 2026-06-10 매매복기 P0#1] 종전 '보유 평가손익/추정예탁자산'은
+        ①당일 실현손실 미반영 ②보유가 비면 0% 리셋 — 청산 직후 게이트가 무력화됐다.
+        공용 compute_daily_gate_input(당일 실현 net(ka10074) + 보유 평가손익, 분모
+        추정예탁자산)으로 데몬 스캔 경로와 입력을 통일한다.
         """
         try:
-            balance = await self._account.fetch_balance()
-            total_pnl = Decimal(str(getattr(balance, "total_pnl", 0) or 0))
-            base = Decimal(str(getattr(balance, "estimated_deposit", 0) or 0))
-            if base <= 0:
-                return Decimal("0.0")
-            return (total_pnl / base) * Decimal("100")
+            from backend.core.risk.daily_gate_input import compute_daily_gate_input
+            return await compute_daily_gate_input(self._account)
         except Exception:
             return Decimal("0.0")
 

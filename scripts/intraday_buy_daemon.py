@@ -40,6 +40,7 @@ from backend.core.risk.holding_evaluator import (
     ExitPolicy, PositionContext, SellSignal, STRATEGY_EXIT_PROFILES,
     evaluate_all, resolve_policy,
 )
+from backend.core.risk.daily_gate_input import compute_daily_gate_input
 from backend.core.risk.live_order_gate import (
     GatePolicy, LiveOrderGate, DailyOrderLimitExceeded,
 )
@@ -62,8 +63,12 @@ MIN_HOLD_MINUTES = 15          # 매수 후 최소 보유 (P7 5/20: 10→15, 노
 MAX_BUY_PER_CYCLE = 2          # 사이클당 최대 매수 2종목
 BUY_REENTRY_COOLDOWN_MIN = 30  # P6 (2026-05-20): 매수 후 동일 종목 재진입 금지 (30분)
 HARD_SL_PCT = -5.0             # P7 (2026-05-20): cooldown 안 극한 SL 우회 임계
-_MAX_FLU_RATE = 30.0           # 급등 추격매수 차단 등락률 상한(%). 2026-06-01 25→30
-                               #   완화 — 강세장 +29%대 주도주 진입 허용, 상한가만 차단.
+# 급등 추격매수 차단 등락률 상한(%). 2026-06-01 25→30 완화(강세장 +29%대 주도주 허용,
+#   상한가만 차단 의도) → [BAR-OPS-38 P0#3] 29.5 로 조정: 상한가 잠김 종목은 등락률이
+#   +29.8~29.9% 로 표시돼 30.0 게이트를 통과했다(6/10 475150 +29.9% 시장가 매수 → 매도잔량
+#   없는 상한가 잠김으로 미체결). 29.5 가 '상한가(근접 잠김 포함)만 차단'이라는 6/1 의
+#   원래 의도를 실제로 구현한다. env BARRO_MAX_FLU_RATE 로 조정.
+_MAX_FLU_RATE = float(os.environ.get("BARRO_MAX_FLU_RATE", "29.5"))
 
 
 def _env_truthy(name: str, default: str = "") -> bool:
@@ -174,7 +179,8 @@ def _build_oauth() -> KiwoomNativeOAuth:
 
 
 async def _sync_positions(pos_store: ActivePositionStore, held_symbols: set[str],
-                          pending_symbols: "set[str] | None" = None) -> int:
+                          pending_symbols: "set[str] | None" = None,
+                          audit_path: "str | None" = None) -> int:
     """브로커 잔고와 active_positions 동기화. 잔고에 없는 종목은 제거.
 
     2026-06-08: 발주 직후 '접수' 상태로 아직 미체결인 주문(ka10075 oso)이 있는
@@ -191,11 +197,84 @@ async def _sync_positions(pos_store: ActivePositionStore, held_symbols: set[str]
             ts = _now_kst().strftime("%H:%M:%S")
             print(f"  [{ts}][SYNC] {sym} {active[sym].name} — 잔고엔 없으나 미체결(접수) 존재 → 보존")
             continue
+        pos = active[sym]
         pos_store.remove(sym)
         ts = _now_kst().strftime("%H:%M:%S")
-        print(f"  [{ts}][SYNC] {sym} {active[sym].name} — 잔고에 없음, active_positions 제거")
+        print(f"  [{ts}][SYNC] {sym} {pos.name} — 잔고에 없음, active_positions 제거")
+        # [BAR-OPS-38 P0#5] 당일 진입 포지션의 퍼지 = 미체결 추정 — audit 에 자가설명 행 기록.
+        #   6/10 475150: 상한가 잠김 시장가 매수 49주가 접수(rc=0)만 되고 미체결 → SYNC 퍼지.
+        #   audit 엔 ORDERED 만 남아 원장 분석이 '체결'로 오인(매매복기 인시던트 1). UNFILLED
+        #   행이 있으면 손익 재구성이 해당 주문을 자동 제외할 수 있다.
+        if audit_path is not None:
+            _append_unfilled_audit(audit_path, pos)
         removed += 1
     return removed
+
+
+def _append_unfilled_audit(audit_path, pos) -> None:
+    """[BAR-OPS-38 P0#5] SYNC 퍼지 시 미체결 추정 audit 행 — 당일 진입 포지션만 기록.
+
+    트랜치별로 1행씩(order_no 포함) 기록해, 일일감사(_daily_strategy_audit.load_orders)가
+    원 ORDERED 행을 order_no 로 정확히 상쇄할 수 있게 한다(6/10 475150 49주 사례).
+    """
+    try:
+        entry_dt = datetime.fromisoformat(str(pos.entry_time))
+        if entry_dt.tzinfo is None:
+            entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+        if entry_dt.astimezone(KST).date() != _now_kst().date():
+            return  # 당일 진입이 아니면(레거시 sync-loss 등) 미체결 단정 불가 — 기록 생략
+        path = Path(audit_path)
+        if not path.exists():
+            return  # audit 파일이 없으면(테스트 등) 생성하지 않음 — 게이트가 헤더 소유
+        filled = [t for t in pos.tranches if getattr(t, "status", "") == "filled"]
+        if not filled:
+            return
+        with path.open("a", encoding="utf-8", newline="") as f:
+            w = _csv.writer(f)
+            for t in filled:
+                w.writerow([
+                    datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "UNFILLED", "buy", pos.symbol, int(t.qty), "MKT",
+                    getattr(t, "order_no", "") or "", "", "0",
+                    "SYNC 퍼지 — 잔고 부재(미체결 추정, 접수 ORDERED 무효)",
+                    pos.strategy or "", "0", "",
+                ])
+    except Exception as exc:  # noqa: BLE001 — 감사 기록 실패가 SYNC 를 막으면 안 됨
+        print(f"  [SYNC] UNFILLED audit 기록 실패: {type(exc).__name__}")
+
+
+def _reconcile_position_qty(pos, broker_qty: int) -> bool:
+    """[BAR-OPS-38 P0#5] 장부 filled 수량을 브로커 보유수량으로 보정. 변경 시 True.
+
+    - 증가(이중매수 잔재 등): 마지막 filled tranche 에 delta 가산.
+    - 감소(부분체결 등): filled tranche 뒤에서부터 차감(0 이 되면 제거).
+    - pending tranche(미래 DCA 의도)는 유지.
+    - total_recommended_qty 도 브로커 수량으로 갱신 — supertrend 청산이 이 필드를
+      전량 매도 수량으로 쓰므로(장부 23 vs 브로커 32 면 9주 고아) 진실원천 일치 필수.
+    """
+    if broker_qty <= 0:
+        return False
+    filled = [t for t in pos.tranches if getattr(t, "status", "") == "filled"]
+    book_qty = sum(int(t.qty) for t in filled)
+    if not filled or book_qty == broker_qty:
+        return False
+    delta = broker_qty - book_qty
+    if delta > 0:
+        filled[-1].qty = int(filled[-1].qty) + delta
+    else:
+        need = -delta
+        for t in reversed(filled):
+            take = min(int(t.qty), need)
+            t.qty = int(t.qty) - take
+            need -= take
+            if need <= 0:
+                break
+        pos.tranches = [
+            t for t in pos.tranches
+            if int(t.qty) > 0 or getattr(t, "status", "") != "filled"
+        ]
+    pos.total_recommended_qty = broker_qty
+    return True
 
 
 async def _evaluate_and_sell(args, oauth, notifier) -> int:
@@ -214,7 +293,8 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     try:
         _open = await account.fetch_open_orders()   # ka10075 oso
         pending_symbols = {o.symbol for o in _open if o.pending_qty > 0}
-        await _sync_positions(pos_store, held_symbols, pending_symbols)
+        await _sync_positions(pos_store, held_symbols, pending_symbols,
+                              audit_path=args.audit_log)
     except Exception as _e:
         # 미체결 조회 실패 → 접수정체를 잘못 지울 위험. 이번 사이클 SYNC 제거 보류.
         print(f"  [SYNC-SKIP] 미체결 조회 실패({type(_e).__name__}) — 제거 보류")
@@ -245,6 +325,13 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     for h in balance.holdings:
         pos = active_positions.get(h.symbol)
         if pos:
+            # [BAR-OPS-38 P0#5] 브로커 보유수량 ↔ 장부 filled 수량 보정 — 브로커가 진실.
+            #   부분체결(접수 ORDERED ≠ 체결)·이중매수 잔재(6/10 319660 장부 23 vs 실보유 32)
+            #   를 사이클마다 대사해 청산 수량 사고(초과매도/고아 잔량)를 예방.
+            if _reconcile_position_qty(pos, int(h.qty)):
+                ts_rc = _now_kst().strftime("%H:%M:%S")
+                print(f"  [{ts_rc}][FILL-SYNC] {h.symbol} {h.name} 장부수량 보정 → 브로커 {int(h.qty)}주")
+                pos_store.upsert(pos)
             cur_rate = float(h.pnl_rate)
             now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
             dirty = False
@@ -492,7 +579,18 @@ _REVAL_MIN_ATR = 0.01          # 분봉 적정 변동성 임계
 _MEANREV_STRATEGIES = {"gold_zone"}
 # BAR-OPS-33: 데몬 DCA(물타기) 무조건 비활성 전략 — swing_38 은 자체 2차분할(add_on_signal)을
 #   사용하므로 데몬 tranche DCA 와 겹치면 이중 분할이 된다. 따라서 데몬 DCA 에서 제외.
-_NO_DCA_STRATEGIES = {"swing_38"}
+# [BAR-OPS-38 P0#2] supertrend 추가 — 트레이더가 전량 단일주문 진입인데 장부가 60/40 트랜치로
+#   기록돼, 데몬 DCA 가 가짜 tranche2 를 실주문으로 추가 발사(6/10 319660: 23+9=32주, 권고의
+#   139%). single_tranche=True 전환으로 신규 포지션은 pending 이 없지만, 전환 전 생성된
+#   레거시 포지션(재시작 시 잔존)을 위한 이중 방어선.
+_NO_DCA_STRATEGIES = {"swing_38", "supertrend"}
+
+# [BAR-OPS-38 P0#3] 되돌림(gold)·눌림(f) 전략 시초갭 상한(%) — 갭상승 폭등주에는 바닥/눌림
+#   신호가 고점에서 발화한다(6/10 gold 추격 3종 전패 -461K: SK오션플랜트 시가갭 +22.8% 등.
+#   5/29·6/8 에 이은 세 번째 'gold 고점매수'). 전일종가 대비 등락률(flu_rate)이 임계 이상이면
+#   해당 전략 진입 금지. env BARRO_ZONE_MAX_FLU 로 조정, 0=비활성.
+_ZONE_MAX_FLU = float(os.environ.get("BARRO_ZONE_MAX_FLU", "15.0"))
+_GAP_GUARD_STRATEGIES = _MEANREV_STRATEGIES | {"f_zone"}
 
 
 def _build_reval_strategy(strategy_id: str):
@@ -744,6 +842,15 @@ async def _scan_and_buy(
             # P8 — BEARISH 시 best_pnl 임계 (강한 신호만)
             if bearish_min_pnl > 0 and best_pnl < bearish_min_pnl:
                 continue
+            # [BAR-OPS-38 P0#3] 되돌림(gold)·눌림(f) 시초갭 가드 — 갭상승 폭등주 추격 차단.
+            if (_ZONE_MAX_FLU > 0 and best_strategy in _GAP_GUARD_STRATEGIES
+                    and float(c.flu_rate) >= _ZONE_MAX_FLU):
+                ts_g = _now_kst().strftime("%H:%M:%S")
+                print(
+                    f"  [{ts_g}][SKIP-GAP] {c.symbol} {c.name:<14} 전략={best_strategy} "
+                    f"등락률 +{float(c.flu_rate):.1f}% ≥ {_ZONE_MAX_FLU}% — 갭상승 추격 차단"
+                )
+                continue
             # 2026-05-19 P4 fix — 고점 진입 회피.
             # 5/18 122630 entry 161,690 vs H 162,955 (0.78%) → 즉시 하락,
             # 069500 entry 119,220 vs H 119,900 (0.57%) → 미청산 손실 보유.
@@ -785,7 +892,13 @@ async def _scan_and_buy(
                     # ⑦ (2026-05-30): momentum 예외는 모멘텀형(f/sf)에만 적용. gold(되돌림/바닥
                     #   전략)는 고점근접 시 momentum 이어도 무조건 차단 — 바닥전략의 고점진입 방지.
                     #   #6 의 보조 방어선(분봉 fetch/analyze 실패 시에도 작동). --entry-revalidate 활성.
-                    if getattr(args, "entry_revalidate", False) and best_strategy in _MEANREV_STRATEGIES:
+                    # [BAR-OPS-38 P0#3] #7 을 #6 과 분리해 standalone 기본 ON — 6/10 gold 가
+                    #   233740 을 일중 고가 1틱 밑(12,060/H 12,110)에서 매수하는 등 3종 전패.
+                    #   #6(재검증, 매수 0건화 위험)은 여전히 --entry-revalidate 로만 enforce.
+                    #   끄려면 BARRO_GOLD_HIGH_GUARD=0.
+                    if best_strategy in _MEANREV_STRATEGIES and (
+                            getattr(args, "entry_revalidate", False)
+                            or _env_truthy("BARRO_GOLD_HIGH_GUARD", "1")):
                         momentum_active = False
                     if proximity_pct < MIN_HIGH_PROXIMITY_PCT and not momentum_active:
                         ts_p = _now_kst().strftime("%H:%M:%S")
@@ -840,16 +953,14 @@ async def _scan_and_buy(
     if not buyable:
         return 0
 
-    # 일일손실 게이트 입력 — 브로커 실시간 계좌 평가수익률(total_pnl_rate)을 사용.
-    # 2026-06-02 근본수정: 종전 balance_history.json(파일 스냅샷) 기반
-    #   _compute_daily_pnl_pct 는 마감 스냅샷이 미청산 평가/주말갭/강제청산 타이밍으로
-    #   오염되면 가짜 손실(-8.45%·-26.24% 등)로 KillSwitch 를 오발동시켜 사흘 연속
-    #   (5/29·6/1·6/2) 매수 전면차단 사고를 냈다. 파일 의존을 끊고, 잔고 조회의
-    #   total_pnl_rate(계좌 전체 평가수익률 %)로 일원화한다. SupertrendAutoTrader
-    #   (_account_pnl_pct)가 이미 쓰는 방식과 동일 — 두 매매 경로 게이트 입력 통일.
-    #   '누적 평가수익률'이라 엄밀한 당일손익과는 다르나, 손실 시 매수 차단이라는
-    #   안전 방향엔 부합하며 파일 오염 리스크가 없다(보수적·결정적).
-    daily_pnl_pct = Decimal(str(getattr(balance, "total_pnl_rate", 0) or 0))
+    # 일일손실 게이트 입력 — [BAR-OPS-38 P0#1, 2026-06-10 매매복기] 입력 교체.
+    # 종전 total_pnl_rate(kt00018 tot_prft_rt)는 '현 보유 매입금액 대비 누적 평가수익률'로
+    #   ①당일 손익이 아니고 ②보유가 비는 순간 0% 리셋된다 — 6/10 09:05 차단(-5.76% 표기)
+    #   → 09:07 이월 매도 체결 후 0% → 31건 무차단, 차단된 100090 을 3분 뒤 그대로 매수.
+    # 새 입력 = (당일 실현 net 합(ka10074) + 보유 평가손익(kt00018)) / 추정예탁자산.
+    #   브로커 권위 데이터만 사용(2026-06-02 사고 원인이었던 파일 스냅샷 의존 없음),
+    #   조회 실패 시 0% fail-open(과차단 방지) + latch 는 파일 영속로 별도 유지.
+    daily_pnl_pct = await compute_daily_gate_input(account, balance)
 
     # 주문 실행
     notifier = TelegramNotifier.from_env() if args.telegram else None
@@ -859,10 +970,14 @@ async def _scan_and_buy(
         policy=GatePolicy(
             daily_loss_limit_pct=Decimal(str(cfg.daily_loss_limit)),
             daily_max_orders=cfg.daily_max_orders,
-            # ── BAR-OPS-35 env 토글 (전부 기본 OFF — env 미설정 시 동작 불변) ──
-            daily_loss_latch=_env_truthy("SUPERTREND_AUTO_LOSS_LATCH"),
-            order_retry_count=int(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY", "0")),
-            order_retry_backoff_sec=float(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY_BACKOFF", "0")),
+            # ── BAR-OPS-35 env 토글 → [BAR-OPS-38] 기본 ON 전환(2026-06-10 매매복기 P0).
+            #    latch: 입력이 당일 기준으로 교체됐으므로 활성(off 는 env=0 명시).
+            #    재시도: 매도(청산)만 — 6/8 매도 HTTPStatusError 5분 지연(-509K 악화) 처방.
+            daily_loss_latch=_env_truthy("SUPERTREND_AUTO_LOSS_LATCH", "1"),
+            latch_state_path=str(_DATA_DIR / "daily_gate_state.json"),
+            loss_metric_label="당일실현+보유평가/추정예탁자산",
+            order_retry_count=int(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY", "2")),
+            order_retry_backoff_sec=float(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY_BACKOFF", "2.0")),
             retry_sell_only=_env_truthy("SUPERTREND_AUTO_RETRY_SELL_ONLY", "1"),
         ),
         notifier=notifier,
@@ -947,7 +1062,16 @@ def _get_supertrend_trader(args, oauth, notifier) -> "SupertrendAutoTrader":
     executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
     gate = LiveOrderGate(
         executor=executor, audit_path=args.audit_log,
-        policy=GatePolicy(daily_max_orders=int(os.environ.get("SUPERTREND_AUTO_MAX_ORDERS", "50"))),  # [0609 임시해제]
+        policy=GatePolicy(
+            daily_max_orders=int(os.environ.get("SUPERTREND_AUTO_MAX_ORDERS", "50")),  # [0609 임시해제]
+            # [BAR-OPS-38 P0#1] 데몬 스캔 경로와 동일 — latch 기본 ON + 파일 영속 + 매도 재시도.
+            daily_loss_latch=_env_truthy("SUPERTREND_AUTO_LOSS_LATCH", "1"),
+            latch_state_path=str(_DATA_DIR / "daily_gate_state.json"),
+            loss_metric_label="당일실현+보유평가/추정예탁자산",
+            order_retry_count=int(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY", "2")),
+            order_retry_backoff_sec=float(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY_BACKOFF", "2.0")),
+            retry_sell_only=_env_truthy("SUPERTREND_AUTO_RETRY_SELL_ONLY", "1"),
+        ),
         notifier=notifier,
     )
     pos_store = ActivePositionStore(args.pos_log)
@@ -981,16 +1105,24 @@ def _get_supertrend_trader(args, oauth, notifier) -> "SupertrendAutoTrader":
             max_positions=args.supertrend_max_pos,
             universe_max=args.supertrend_top,
             market_hours_only=True,  # 정규장(09:00~15:20) 에서만 — 09:00 개장 즉시 진입
-            # ── BAR-OPS-35 가드 env 토글 (전부 기본 OFF/dataclass 기본 → env 미설정 시 동작 불변) ──
-            hard_stop_pct=float(os.environ.get("SUPERTREND_AUTO_HARD_STOP", "0")),
+            # ── BAR-OPS-35 가드 env 토글 — [BAR-OPS-38, 2026-06-10 매매복기 P0] 일부 기본 ON 전환.
+            #    hard_stop -6%: 6/8 459550 -12.63% 방치(P0#3, 메모리 미수정 P0②) 처방.
+            #    single_tranche: 6/10 319660 이중매수 실증(장부 23 vs 실보유 32, 권고의 139%) 처방.
+            #    max_open_gap 15%: 시초가 갭 급등주 추격 차단(6/9 신설 가드 활성).
+            #    끄려면 env 로 명시(예 SUPERTREND_AUTO_SINGLE_TRANCHE=0).
+            hard_stop_pct=float(os.environ.get("SUPERTREND_AUTO_HARD_STOP", "-6.0")),
             max_entries_per_symbol_day=int(os.environ.get("SUPERTREND_AUTO_MAX_ENTRIES", "0")),
             reentry_cooldown_min=int(os.environ.get("SUPERTREND_AUTO_REENTRY_COOLDOWN", "0")),
             block_reentry_after_loss=_env_truthy("SUPERTREND_AUTO_BLOCK_REENTRY_LOSS"),
             max_atr_pct_for_entry=float(os.environ.get("SUPERTREND_AUTO_MAX_ATR_PCT", "0")),
             take_profit_trail_only=_env_truthy("SUPERTREND_AUTO_TP_TRAIL_ONLY"),
             vol_halve_atr_pct=float(os.environ.get("SUPERTREND_AUTO_VOL_HALVE_ATR", "0")),
-            single_tranche=_env_truthy("SUPERTREND_AUTO_SINGLE_TRANCHE"),
+            single_tranche=_env_truthy("SUPERTREND_AUTO_SINGLE_TRANCHE", "1"),
             max_entry_gap_pct=float(os.environ.get("SUPERTREND_AUTO_MAX_ENTRY_GAP", "0")),
+            max_open_gap_pct=float(os.environ.get("SUPERTREND_AUTO_MAX_OPEN_GAP", "15.0")),
+            # ── [BAR-OPS-38 P0#4] 이월(오버나이트) 정책 ──
+            entry_cutoff_time=os.environ.get("SUPERTREND_AUTO_ENTRY_CUTOFF", "14:30"),
+            carry_gap_stop_pct=float(os.environ.get("SUPERTREND_AUTO_CARRY_GAP_STOP", "-3.0")),
             # ── BAR-OPS-36 Runner env 토글 ──
             runner_enabled=_env_truthy("SUPERTREND_AUTO_RUNNER"),
             runner_limit_up_pct=float(os.environ.get("SUPERTREND_AUTO_RUNNER_LIMIT_UP", "29")),
@@ -1031,6 +1163,126 @@ async def _run_supertrend_cycle(args, oauth, notifier) -> dict:
     return result
 
 
+async def _eod_carry_limit(args, oauth, notifier) -> int:
+    """[BAR-OPS-38 P0#4②] EOD 이월(오버나이트) 총액 한도 — 초과분 평가액 큰 순 청산.
+
+    이월 예정(현 보유) 평가합이 추정예탁자산 × BARRO_CARRY_LIMIT_RATIO(기본 0.20)를
+    넘으면 평가액 큰 포지션부터 전량 매도해 한도 아래로 낮춘다. 근거: 6/9 이월 21.8M
+    (계좌의 43.7%)이 6/10 갭하락 -845K 의 주성분(2026-06-10 매매복기) — 이월 자체가
+    아니라 '무제한 이월'이 문제(001740 이월은 +695K). 0 이면 비활성. 매도 건수 반환.
+    """
+    ratio = float(os.environ.get("BARRO_CARRY_LIMIT_RATIO", "0.20"))
+    if ratio <= 0:
+        return 0
+    account = KiwoomNativeAccountFetcher(oauth=oauth)
+    balance = await account.fetch_balance()
+    holdings = list(balance.holdings or [])
+    if not holdings:
+        return 0
+    base = float(balance.estimated_deposit or 0)
+    if base <= 0:
+        deposit = await account.fetch_deposit()
+        base = float(deposit.cash) + float(balance.total_eval or 0)
+    if base <= 0:
+        print("  [CARRY-LIMIT] 기준자산 산출 실패 — 스킵")
+        return 0
+    limit_value = base * ratio
+    eval_sum = sum(float(h.eval_amount) for h in holdings)
+    if eval_sum <= limit_value:
+        return 0
+
+    ts = _now_kst().strftime("%H:%M:%S")
+    print(f"  [{ts}][CARRY-LIMIT] 이월 예정 {eval_sum:,.0f}원 > 한도 {limit_value:,.0f}원"
+          f"({ratio:.0%}) — 초과분 청산 개시")
+    cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
+    executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
+    gate = LiveOrderGate(
+        executor=executor, audit_path=args.audit_log,
+        # 매도 전용 경로 — 일일손실 게이트는 매수만 차단하므로 기본 정책으로 충분.
+        policy=GatePolicy(daily_max_orders=cfg.daily_max_orders,
+                          order_retry_count=int(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY", "2")),
+                          order_retry_backoff_sec=float(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY_BACKOFF", "2.0"))),
+        notifier=notifier,
+    )
+    pos_store = ActivePositionStore(args.pos_log)
+    book = pos_store.load_all()
+    sold = 0
+    for h in sorted(holdings, key=lambda x: float(x.eval_amount), reverse=True):
+        if eval_sum <= limit_value:
+            break
+        strategy = getattr(book.get(h.symbol), "strategy", None) if book else None
+        try:
+            r = await gate.place_sell(symbol=h.symbol, qty=int(h.qty),
+                                      strategy_id=strategy)
+            ts = _now_kst().strftime("%H:%M:%S")
+            tag = "DRY_RUN" if r.dry_run else "SOLD"
+            print(f"  [{ts}][CARRY-LIMIT-{tag}] {h.symbol} {h.name} {int(h.qty)}주 "
+                  f"평가 {float(h.eval_amount):,.0f}원 청산")
+            pos_store.remove(h.symbol)
+            eval_sum -= float(h.eval_amount)
+            sold += 1
+            if notifier:
+                try:
+                    await notifier.send(
+                        f"[이월한도] {h.symbol} {h.name} {int(h.qty)}주 EOD 청산 "
+                        f"(이월 {eval_sum:,.0f}/{limit_value:,.0f}원)")
+                except Exception:
+                    pass
+        except Exception as e:  # noqa: BLE001 — 종목 단위 격리
+            print(f"  [CARRY-LIMIT-ERR] {h.symbol}: {type(e).__name__}: {e}")
+    return sold
+
+
+async def _eod_fill_backfill(oauth) -> None:
+    """[BAR-OPS-38 P0#5] 장마감 후 당일 실현(체결) 내역 백필 — ka10073 → data/fill_audit.csv.
+
+    order_audit 는 시장가 접수만 기록(체결가 없음) → 브로커 권위 체결 데이터(종목별 실현손익,
+    체결가·수수료·세금 포함)를 일 단위로 적재해 매매복기/일일감사의 추정을 실측으로 대체.
+    """
+    import csv as _c
+    try:
+        account = KiwoomNativeAccountFetcher(oauth=oauth)
+        today = _now_kst().strftime("%Y%m%d")
+        entries = await account.fetch_realized_pnl(today, today)
+        if not entries:
+            print("  [FILL-BACKFILL] 당일 실현 내역 없음")
+            return
+        path = _DATA_DIR / "fill_audit.csv"
+        headers = ["date", "symbol", "name", "qty", "buy_price", "sell_price",
+                   "pnl", "pnl_rate", "commission", "tax"]
+        existing: set[tuple] = set()
+        if path.exists():
+            try:
+                with path.open(newline="", encoding="utf-8") as f:
+                    for row in _c.DictReader(f):
+                        existing.add((row.get("date", ""), row.get("symbol", ""),
+                                      row.get("qty", ""), row.get("sell_price", ""),
+                                      row.get("pnl", "")))
+            except Exception:
+                pass
+        new_rows = []
+        for e in entries:
+            key = (e.date, e.symbol, str(e.qty), str(e.sell_price), str(e.pnl))
+            if key in existing:
+                continue
+            new_rows.append([e.date, e.symbol, e.name, e.qty, str(e.buy_price),
+                             str(e.sell_price), str(e.pnl), str(e.pnl_rate),
+                             str(e.commission), str(e.tax)])
+        if not new_rows:
+            print("  [FILL-BACKFILL] 신규 체결 행 없음 (이미 적재됨)")
+            return
+        is_new = not path.exists()
+        with path.open("a", encoding="utf-8", newline="") as f:
+            w = _c.writer(f)
+            if is_new:
+                w.writerow(headers)
+            w.writerows(new_rows)
+        net = sum(float(r[6]) for r in new_rows)
+        print(f"  [FILL-BACKFILL] 당일 체결 {len(new_rows)}행 적재 (실현손익 합 {net:+,.0f}원) → {path.name}")
+    except Exception as e:  # noqa: BLE001 — EOD 부가 루틴 실패가 데몬 종료를 막으면 안 됨
+        print(f"  [FILL-BACKFILL-ERR] {type(e).__name__}: {e}")
+
+
 async def _save_balance_snapshot(oauth) -> None:
     """잔고 스냅샷을 balance_history.json에 추가 (일 1회)."""
     import json
@@ -1062,6 +1314,11 @@ async def _save_balance_snapshot(oauth) -> None:
             "cash": cash,
             "eval_total": eval_total,
             "total": total,
+            # [BAR-OPS-38 P1] 추정예탁자산(kt00018 prsm_dpst_aset_amt, D+2 정산 반영) 병기.
+            #   cash(d+0 예수금)는 당일 매수대금을 차감하지 않아 total 이 매수 이월일에
+            #   과대표시된다(6/9 71.4M 사례 — 2026-06-10 매매복기 인시던트 6). 일손익은
+            #   estimated_asset 차분으로 읽을 것.
+            "estimated_asset": float(balance.estimated_deposit or 0),
             "position_count": pos_count,
             "updated_at": now_str,
         }
@@ -1103,6 +1360,8 @@ async def _daemon(args):
     # 전략 호출과 겹쳐 Kiwoom API rate-limit(429)을 유발. 5분봉은 5분마다 1봉만
     # 갱신되므로 supertrend 평가를 supertrend_interval(기본 300s)마다로 throttle 한다.
     last_st_run: datetime | None = None
+    # [BAR-OPS-38 P0#4②] EOD 이월 한도 — 당일 1회만 실행.
+    eod_carry_done = False
 
     # 장 시작 전이면 대기
     while not _daemon_hours():
@@ -1155,12 +1414,26 @@ async def _daemon(args):
                 except Exception as e:
                     print(f"  [{ts}][ST-ERROR] {type(e).__name__}: {e}")
 
+        # 4) [BAR-OPS-38 P0#4②] EOD 이월 한도 — 15:10~15:19 당일 1회. 이월 예정 평가합이
+        #    추정예탁자산 × BARRO_CARRY_LIMIT_RATIO 초과 시 평가액 큰 순 청산(갭 리스크 캡).
+        if not eod_carry_done and time(15, 10) <= _now_kst().time() <= time(15, 19):
+            eod_carry_done = True
+            try:
+                n = await _eod_carry_limit(args, oauth, notifier)
+                if n > 0:
+                    total_sold += n
+                    print(f"  [{ts}] 이월 한도 초과분 {n}건 청산 (누적 매도 {total_sold}건)")
+            except Exception as e:
+                print(f"  [{ts}][CARRY-LIMIT-ERROR] {type(e).__name__}: {e}")
+
         # 다음 사이클까지 대기
         if _daemon_hours():
             await asyncio.sleep(args.interval)
 
     # 장 마감 잔고 스냅샷
     await _save_balance_snapshot(oauth)
+    # [BAR-OPS-38 P0#5] 당일 체결(실현) 내역 백필 — ka10073 → fill_audit.csv (브로커 권위 체결가)
+    await _eod_fill_backfill(oauth)
     print(f"\n== 장 마감 — 데몬 종료 (매수 {total_bought}건, 매도 {total_sold}건) ==")
 
 

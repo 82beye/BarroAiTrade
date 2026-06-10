@@ -57,16 +57,29 @@ class _FakeCandles:
 
 
 class _FakeAccount:
-    def __init__(self, cash=10_000_000.0, pnl_rate=0.0):
+    # [BAR-OPS-38] 게이트 입력 계약 갱신 — compute_daily_gate_input 은
+    #   (당일 실현 net(ka10074) + 보유 평가손익) / 추정예탁자산 을 쓴다.
+    #   pnl_rate 파라미터는 구계약(total_pnl_rate) 잔재로 미사용(시그니처 호환 유지).
+    def __init__(self, cash=10_000_000.0, pnl_rate=0.0,
+                 total_pnl=0.0, daily_realized=0.0):
         self._cash = cash
         self._pnl_rate = pnl_rate
+        self._total_pnl = total_pnl
+        self._daily_realized = daily_realized
     async def fetch_deposit(self):
         return AccountDeposit(cash=Decimal(str(self._cash)), margin_cash=Decimal("0"),
                               bond_margin_cash=Decimal("0"), next_day_settlement=Decimal("0"))
     async def fetch_balance(self):
         return AccountBalance(total_purchase=Decimal("0"), total_eval=Decimal("0"),
-                              total_pnl=Decimal("0"), total_pnl_rate=Decimal(str(self._pnl_rate)),
+                              total_pnl=Decimal(str(self._total_pnl)),
+                              total_pnl_rate=Decimal(str(self._pnl_rate)),
                               estimated_deposit=Decimal(str(self._cash)), holdings=[])
+    async def fetch_daily_pnl(self, start_date, end_date):
+        from types import SimpleNamespace
+        if not self._daily_realized:
+            return []
+        return [SimpleNamespace(date=start_date,
+                                net_pnl=Decimal(str(self._daily_realized)))]
 
 
 class _OrderRec:
@@ -127,7 +140,9 @@ def _base_config(**kw):
     defaults = dict(entry_start_time="", min_adx=0.0, min_flip_atr_mult=0.0,
                     max_order_qty=0, max_order_value=0.0,
                     trail_atr_mult=0.0, take_profit_pct=0.0,
-                    max_intraday_range_pos=0.0, max_day_change_pct=0.0)
+                    max_intraday_range_pos=0.0, max_day_change_pct=0.0,
+                    # [BAR-OPS-38] 신규 시간/이월 게이트도 기본 무력화(시각 비의존 테스트).
+                    entry_cutoff_time="", carry_gap_stop_pct=0.0)
     defaults.update(kw)
     return SupertrendAutoConfig(**defaults)
 
@@ -249,11 +264,14 @@ async def test_disabled_does_nothing():
 # ── 9) 일일손실 게이트 입력 전달 (place_buy 에 daily_pnl_pct 전파) ───────────
 @pytest.mark.asyncio
 async def test_daily_pnl_passed_to_gate():
+    # [BAR-OPS-38] 새 게이트 입력: (당일실현 -100k + 평가 -50k) / 1천만 = -1.50%
+    #   (구계약 pnl_rate 픽스처는 입력이 총평가손익/추정예탁으로 바뀐 시점부터 0을
+    #    반환해 이 테스트가 main 에서도 깨져 있었음 — 현행 계약으로 갱신.)
     gate = _FakeGate()
-    acct = _FakeAccount(cash=10_000_000.0, pnl_rate=-1.5)
+    acct = _FakeAccount(cash=10_000_000.0, total_pnl=-50_000.0, daily_realized=-100_000.0)
     t = _trader({"005930": _BUY}, universe=[("005930", "삼성전자")], gate=gate, account=acct)
     await t.run_cycle()
-    assert gate.buys[0][3] == Decimal("-1.5")   # daily_pnl_pct 전달됨
+    assert gate.buys[0][3] == Decimal("-1.50")   # daily_pnl_pct 전달됨
 
 
 # ── 10) 진입 주문 실패해도 다음 종목 계속 (예외 격리) ────────────────────────
