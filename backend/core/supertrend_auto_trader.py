@@ -166,6 +166,9 @@ class SupertrendAutoConfig:
     # [BAR-OPS 2026-06-09] 레버리지/인버스/ETN 진입 제외 — 변동성 증폭상품 추격 방지. False=비활성.
     exclude_leverage: bool = False
 
+    # [BAR-OPS 2026-06-10] ETF/ETN/리츠 전면 진입 제외(개별주만 허용). False=비활성.
+    exclude_etf: bool = False
+
     # ── BAR-OPS-36 (2026-06-09) Runner — 승자 보유 강화 → 최고점 청산 ─────────────
     # 근거: reports/2026-06-08. 459550 1차를 고점(2,385)까지 들었으면 +101K 추가. 고정 익절(+5%)이
     #   상한가·강한 추세의 초과 수익을 잘라먹음. 러너 모드는 익절가를 '즉시 매도'가 아니라 '최고점 추적
@@ -389,6 +392,10 @@ class SupertrendAutoTrader:
             # [BAR-OPS] 레버리지/인버스/ETN 제외 (config-gated)
             if self.config.exclude_leverage and self._is_leverage_or_inverse(symbol, name):
                 logger.debug("슈퍼트렌드 진입 제외(레버리지/ETN): %s %s", symbol, name)
+                continue
+            # [BAR-OPS 2026-06-10] ETF/ETN/리츠 전면 제외(개별주만 허용)
+            if self.config.exclude_etf and self._is_etf_or_etn(symbol, name):
+                logger.debug("슈퍼트렌드 진입 제외(ETF/ETN 전면): %s %s", symbol, name)
                 continue
             try:
                 bars = await self._fetch_bars(symbol)
@@ -741,6 +748,49 @@ class SupertrendAutoTrader:
         if any(k in nm for k in ("레버리지", "인버스", "곱버스", "2X", "2x")):
             return True
         if any(c.isalpha() for c in (symbol or "")):  # ETN: 코드에 영문자
+            return True
+        return False
+
+    @staticmethod
+    def _is_etf_or_etn(symbol: str, name: str) -> bool:
+        """KRX ETF/ETN/리츠 등 펀드형 판정 — 개별주만 허용(ETF류 전면 차단)용.
+        True=펀드형(ETF/ETN/레버리지/인버스/지수/섹터/채권/리츠/인프라) → 차단.
+        False=개별 회사주(스팩/우선주 포함) → 허용. 이름/코드 기반·대소문자/공백 무시.
+        BAR-OPS 2026-06-10: 적대적검증 반영(메리츠/HK이노엔/합성수지 오차단 제거, KoAct/WOORI/흥국/다올 보강)."""
+        raw = name or ""
+        up = raw.upper()
+        up_ns = "".join(up.split())
+        sym = (symbol or "").strip().upper()
+        if "스팩" in raw or "기업인수목적" in raw:
+            return False
+        if (raw.endswith("우") or up.endswith("우B") or up.endswith("우C")
+                or raw.endswith("우(전환)") or raw.endswith("(전환우)")):
+            return False
+        pref_code = (len(sym) == 6 and sym[:5].isdigit() and sym[5] in ("K", "L", "M"))
+        _ETF_BRANDS = (
+            "KODEX", "TIGER", "KBSTAR", "ARIRANG", "KOSEF", "HANARO", "KINDEX",
+            "TIMEFOLIO", "KIWOOM", "TREX", "TRUSTON", "KCGI", "KOACT", "UNICORN",
+            "WOORI", "FREEDOM", "VITA", "에셋플러스", "마이다스", "히어로즈",
+            "ACE", "PLUS", "SOL", "RISE", "SMART", "FOCUS", "BNK", "WON",
+            "1Q", "ITF", "마이티", "파워",
+        )
+        for b in _ETF_BRANDS:
+            if up.startswith(b):
+                rest = up[len(b):]
+                if rest == "" or rest[0] == " " or rest[0].isdigit():
+                    return True
+        _FUND_TOKENS = (
+            "ETN", "ETF", "레버리지", "인버스", "곱버스", "선물", "국고채",
+            "통안채", "회사채", "물가채", "단기채", "종합채", "혼합채",
+            "커버드콜", "양매도", "MSCI", "S&P", "나스닥", "코스피200", "코스닥150",
+        )
+        for t in _FUND_TOKENS:
+            if t.replace(" ", "") in up_ns:
+                return True
+        if (raw.endswith("리츠") or "맥쿼리" in raw or "리얼티" in raw
+                or "부동산투자회사" in raw or "REIT" in up):
+            return True
+        if (not pref_code) and any(c.isalpha() for c in sym):
             return True
         return False
 

@@ -51,6 +51,53 @@ from backend.core.risk.balance_gate import evaluate_risk_gate
 from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
 
 
+def _env_truthy(name: str, default: str = "") -> bool:
+    """env 토글(1/true/yes/on 이면 True)."""
+    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_etf_or_etn(symbol: str, name: str) -> bool:
+    """KRX ETF/ETN/리츠 등 펀드형 판정 — 개별주만 허용(ETF류 전면 차단)용.
+    backend SupertrendAutoTrader._is_etf_or_etn 와 동일 로직(복제).
+    True=펀드형 → 차단 / False=개별주(스팩·우선주 포함) → 허용."""
+    raw = name or ""
+    up = raw.upper()
+    up_ns = "".join(up.split())
+    sym = (symbol or "").strip().upper()
+    if "스팩" in raw or "기업인수목적" in raw:
+        return False
+    if (raw.endswith("우") or up.endswith("우B") or up.endswith("우C")
+            or raw.endswith("우(전환)") or raw.endswith("(전환우)")):
+        return False
+    pref_code = (len(sym) == 6 and sym[:5].isdigit() and sym[5] in ("K", "L", "M"))
+    _ETF_BRANDS = (
+        "KODEX", "TIGER", "KBSTAR", "ARIRANG", "KOSEF", "HANARO", "KINDEX",
+        "TIMEFOLIO", "KIWOOM", "TREX", "TRUSTON", "KCGI", "KOACT", "UNICORN",
+        "WOORI", "FREEDOM", "VITA", "에셋플러스", "마이다스", "히어로즈",
+        "ACE", "PLUS", "SOL", "RISE", "SMART", "FOCUS", "BNK", "WON",
+        "1Q", "ITF", "마이티", "파워",
+    )
+    for b in _ETF_BRANDS:
+        if up.startswith(b):
+            rest = up[len(b):]
+            if rest == "" or rest[0] == " " or rest[0].isdigit():
+                return True
+    _FUND_TOKENS = (
+        "ETN", "ETF", "레버리지", "인버스", "곱버스", "선물", "국고채",
+        "통안채", "회사채", "물가채", "단기채", "종합채", "혼합채",
+        "커버드콜", "양매도", "MSCI", "S&P", "나스닥", "코스피200", "코스닥150",
+    )
+    for t in _FUND_TOKENS:
+        if t.replace(" ", "") in up_ns:
+            return True
+    if (raw.endswith("리츠") or "맥쿼리" in raw or "리얼티" in raw
+            or "부동산투자회사" in raw or "REIT" in up):
+        return True
+    if (not pref_code) and any(c.isalpha() for c in sym):
+        return True
+    return False
+
+
 def _compute_daily_pnl_pct(current_total: float) -> Decimal:
     """전일 잔고 대비 당일 손익률(%) 계산. 데이터 없으면 Decimal("0.0") 반환."""
     import json as _json
@@ -247,6 +294,9 @@ async def _run(args) -> int:
                 continue
             if c.symbol in already_held:
                 print(f"  [PRE-SKIP] {c.symbol} {c.name:<16} 이미 보유 중")
+                continue
+            if _env_truthy("SUPERTREND_AUTO_EXCLUDE_ETF") and _is_etf_or_etn(c.symbol, c.name):
+                print(f"  [PRE-SKIP] {c.symbol} {c.name:<16} ETF/ETN 제외(개별주만 허용)")
                 continue
             filtered_leaders.append(c)
 

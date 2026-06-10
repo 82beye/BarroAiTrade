@@ -631,6 +631,7 @@ def _build_supertrend_auto_trader(notifier):
         max_entry_gap_pct=float(os.environ.get("SUPERTREND_AUTO_MAX_ENTRY_GAP", "0")),
         max_open_gap_pct=float(os.environ.get("SUPERTREND_AUTO_MAX_OPEN_GAP", "0")),
         exclude_leverage=_env_truthy("SUPERTREND_AUTO_EXCLUDE_LEVERAGE"),
+        exclude_etf=_env_truthy("SUPERTREND_AUTO_EXCLUDE_ETF"),
         # ── BAR-OPS-36 Runner env 토글 ──
         runner_enabled=_env_truthy("SUPERTREND_AUTO_RUNNER"),
         runner_limit_up_pct=float(os.environ.get("SUPERTREND_AUTO_RUNNER_LIMIT_UP", "29")),

@@ -545,6 +545,48 @@ def _is_leverage_or_inverse(symbol: str, name: str) -> bool:
     return False
 
 
+def _is_etf_or_etn(symbol: str, name: str) -> bool:
+    """KRX ETF/ETN/리츠 등 펀드형 판정 — 개별주만 허용(ETF류 전면 차단)용.
+    backend SupertrendAutoTrader._is_etf_or_etn 와 동일 로직(데몬 복제).
+    True=펀드형 → 차단 / False=개별주(스팩·우선주 포함) → 허용."""
+    raw = name or ""
+    up = raw.upper()
+    up_ns = "".join(up.split())
+    sym = (symbol or "").strip().upper()
+    if "스팩" in raw or "기업인수목적" in raw:
+        return False
+    if (raw.endswith("우") or up.endswith("우B") or up.endswith("우C")
+            or raw.endswith("우(전환)") or raw.endswith("(전환우)")):
+        return False
+    pref_code = (len(sym) == 6 and sym[:5].isdigit() and sym[5] in ("K", "L", "M"))
+    _ETF_BRANDS = (
+        "KODEX", "TIGER", "KBSTAR", "ARIRANG", "KOSEF", "HANARO", "KINDEX",
+        "TIMEFOLIO", "KIWOOM", "TREX", "TRUSTON", "KCGI", "KOACT", "UNICORN",
+        "WOORI", "FREEDOM", "VITA", "에셋플러스", "마이다스", "히어로즈",
+        "ACE", "PLUS", "SOL", "RISE", "SMART", "FOCUS", "BNK", "WON",
+        "1Q", "ITF", "마이티", "파워",
+    )
+    for b in _ETF_BRANDS:
+        if up.startswith(b):
+            rest = up[len(b):]
+            if rest == "" or rest[0] == " " or rest[0].isdigit():
+                return True
+    _FUND_TOKENS = (
+        "ETN", "ETF", "레버리지", "인버스", "곱버스", "선물", "국고채",
+        "통안채", "회사채", "물가채", "단기채", "종합채", "혼합채",
+        "커버드콜", "양매도", "MSCI", "S&P", "나스닥", "코스피200", "코스닥150",
+    )
+    for t in _FUND_TOKENS:
+        if t.replace(" ", "") in up_ns:
+            return True
+    if (raw.endswith("리츠") or "맥쿼리" in raw or "리얼티" in raw
+            or "부동산투자회사" in raw or "REIT" in up):
+        return True
+    if (not pref_code) and any(c.isalpha() for c in sym):
+        return True
+    return False
+
+
 async def _scan_and_buy(
     args, oauth, session_bought: set[str],
     recent_buys: dict[str, datetime] | None = None,
@@ -636,9 +678,11 @@ async def _scan_and_buy(
     # 두산로보틱스 등)가 25% 게이트에 막혀 진입 기회를 전부 놓치던 문제. 상한가(+30%)
     # 직전까지는 진입 허용하되, 상한가 도달분만 차단(추격매수 손실 위험 한계선).
     _excl_lev = _env_truthy("SUPERTREND_AUTO_EXCLUDE_LEVERAGE")
+    _excl_etf = _env_truthy("SUPERTREND_AUTO_EXCLUDE_ETF")
     filtered = [c for c in leaders if c.symbol not in excluded
                 and c.flu_rate < _MAX_FLU_RATE and c.cur_price >= 5_000
-                and not (_excl_lev and _is_leverage_or_inverse(c.symbol, c.name))]
+                and not (_excl_lev and _is_leverage_or_inverse(c.symbol, c.name))
+                and not (_excl_etf and _is_etf_or_etn(c.symbol, c.name))]
 
     if not filtered:
         return 0
