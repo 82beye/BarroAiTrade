@@ -32,10 +32,15 @@ from backend.core.gateway.kiwoom_native_account import KiwoomNativeAccountFetche
 from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
 from backend.core.gateway.kiwoom_native_orders import KiwoomNativeOrderExecutor
+from backend.core.gateway.kiwoom_native_orderbook import KiwoomNativeOrderbookFetcher
 from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
 from backend.core.supertrend_auto_trader import (
     SupertrendAutoConfig,
     SupertrendAutoTrader,
+)
+from backend.core.limit_up_chase_trader import (
+    LimitUpChaseConfig,
+    LimitUpChaseTrader,
 )
 from backend.core.journal.simulation_log import (
     SimulationLogger,
@@ -659,6 +664,87 @@ def _build_supertrend_auto_trader(notifier):
     )
 
 
+def _build_limit_up_chase_trader(notifier):
+    """LIMIT_UP_CHASE_ENABLED 가 truthy 면 상따(상한가 따라잡기) 트레이더 구성, 아니면 None.
+
+    supertrend 과 독립된 opt-in 경로. 진입=모멘텀 밴드+호가 매수벽, 청산=RUNNER(캡상승)
+    +오버나잇 모드. default OFF / dry_run 우선(LIMIT_UP_CHASE_DRYRUN 미설정/truthy).
+    """
+    if not _env_truthy("LIMIT_UP_CHASE_ENABLED"):
+        return None
+
+    oauth = _build_oauth()
+    dry_run = os.environ.get("LIMIT_UP_CHASE_DRYRUN", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+    candle_fetcher = KiwoomNativeCandleFetcher(oauth=oauth)
+    account_fetcher = KiwoomNativeAccountFetcher(oauth=oauth)
+    order_executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=dry_run)
+    order_gate = LiveOrderGate(
+        executor=order_executor, audit_path=_AUDIT_PATH,
+        policy=GatePolicy(
+            daily_loss_limit_pct=Decimal(os.environ.get("LIMIT_UP_DAILY_LOSS_LIMIT", "-2.0")),
+            daily_max_orders=int(os.environ.get("LIMIT_UP_MAX_ORDERS", "6")),
+        ), notifier=notifier,
+    )
+    pos_store = ActivePositionStore(_POS_LOG)
+    orderbook_fetcher = KiwoomNativeOrderbookFetcher(oauth=oauth)
+    # 상따 전용 picker — min_flu_rate 를 상따 후보 하한으로 높임(데몬 글로벌가드와 무관).
+    picker = KiwoomNativeLeaderPicker(
+        oauth=oauth, min_score=0.0,
+        min_flu_rate=float(os.environ.get("LIMIT_UP_MIN_FLU", "15")),
+    )
+
+    async def _universe():
+        n = int(os.environ.get("LIMIT_UP_UNIVERSE_TOP", "15"))
+        return await picker.pick(top_n=n)   # list[LeaderCandidate] (flu_rate 포함)
+
+    cfg = LimitUpChaseConfig(
+        enabled=True,
+        interval_sec=int(os.environ.get("LIMIT_UP_INTERVAL_SEC", "90")),
+        max_positions=int(os.environ.get("LIMIT_UP_MAX_POS", "1")),
+        min_price=Decimal(os.environ.get("LIMIT_UP_MIN_PRICE", "2000")),
+        max_per_position_ratio=Decimal(os.environ.get("LIMIT_UP_MAX_PER_POS_RATIO", "0.03")),
+        max_order_qty=int(os.environ.get("LIMIT_UP_MAX_ORDER_QTY", "5000")),
+        max_order_value=float(os.environ.get("LIMIT_UP_MAX_ORDER_VALUE", "5000000")),
+        # 상따는 supertrend whipsaw/고점 게이트 미적용(진입은 자체 모멘텀+호가벽).
+        min_adx=0.0, min_flip_atr_mult=0.0, max_intraday_range_pos=0.0,
+        # 진입 시간창
+        entry_start_time=os.environ.get("LIMIT_UP_ENTRY_START", "09:05"),
+        entry_end_time=os.environ.get("LIMIT_UP_ENTRY_END", "14:00"),
+        # 진입 — 모멘텀 밴드 + 호가 매수벽
+        entry_flu_min=float(os.environ.get("LIMIT_UP_ENTRY_FLU_MIN", "20")),
+        entry_flu_max=float(os.environ.get("LIMIT_UP_ENTRY_FLU_MAX", "27")),
+        wall_near_pct=float(os.environ.get("LIMIT_UP_WALL_NEAR_PCT", "1.0")),
+        wall_min_top_qty=int(os.environ.get("LIMIT_UP_WALL_MIN_TOP_QTY", "50000")),
+        wall_bid_ask_ratio=float(os.environ.get("LIMIT_UP_WALL_BID_ASK_RATIO", "3.0")),
+        # 손절/트레일/익절 (캡상승은 runner 가, 미상한가 구간은 trail/hard 가 보호)
+        hard_stop_pct=float(os.environ.get("LIMIT_UP_HARD_STOP", "-4.0")),
+        trail_atr_mult=float(os.environ.get("LIMIT_UP_TRAIL_ATR", "2.0")),
+        take_profit_pct=float(os.environ.get("LIMIT_UP_TAKE_PROFIT", "5.0")),
+        max_entries_per_symbol_day=int(os.environ.get("LIMIT_UP_MAX_ENTRIES", "1")),
+        # RUNNER (캡상승 수익극대화) — 상따는 항상 runner(트레이더 __init__ 에서 강제 ON)
+        runner_limit_up_pct=float(os.environ.get("LIMIT_UP_RUNNER_LIMIT_UP", "29")),
+        runner_profit_lock_pct=float(os.environ.get("LIMIT_UP_RUNNER_LOCK", "2")),
+        runner_giveback_pct=float(os.environ.get("LIMIT_UP_RUNNER_GIVEBACK", "3")),
+        # 오버나잇 (점상한가 익일 갭 부분익절)
+        overnight_mode=os.environ.get("LIMIT_UP_OVERNIGHT_MODE", "daily"),
+        eod_close_time=os.environ.get("LIMIT_UP_EOD_CLOSE", "15:15"),
+        runner_gap_partial_ratio=float(os.environ.get("LIMIT_UP_GAP_PARTIAL", "0.5")),
+        runner_gap_partial_min_pct=float(os.environ.get("LIMIT_UP_GAP_PARTIAL_MIN", "3")),
+        runner_gap_partial_window_bars=int(os.environ.get("LIMIT_UP_GAP_PARTIAL_WINDOW", "6")),
+    )
+    return LimitUpChaseTrader(
+        candle_fetcher=candle_fetcher,
+        account_fetcher=account_fetcher,
+        order_gate=order_gate,
+        pos_store=pos_store,
+        universe_provider=_universe,
+        notifier=notifier,
+        config=cfg,
+        orderbook_fetcher=orderbook_fetcher,
+    )
+
+
 def main() -> None:
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -710,10 +796,20 @@ def main() -> None:
         if dry.trail_atr_mult > 0:
             print(f"   🛡 ATR 트레일링 청산 ON — 고점종가 −{dry.trail_atr_mult:g}×ATR 이탈 시 청산(리스크 스톱)")
 
+    # 상따(상한가 따라잡기) 루프 (opt-in) — LIMIT_UP_CHASE_ENABLED 가 truthy 일 때만 가동.
+    lu_trader = _build_limit_up_chase_trader(notifier)
+    if lu_trader is not None:
+        lc = lu_trader.config
+        print(f"   🚀 상따(상한가 따라잡기) ON (interval={lc.interval_sec}s, max_pos={lc.max_positions}, "
+              f"flu={lc.entry_flu_min:g}~{lc.entry_flu_max:g}%, 호가벽잔량≥{lc.wall_min_top_qty:,}, "
+              f"dry_run={os.environ.get('LIMIT_UP_CHASE_DRYRUN','1')}, overnight={lc.overnight_mode})")
+
     async def _run_all() -> None:
         tasks = [asyncio.create_task(bot.run(), name="telegram_bot")]
         if auto_trader is not None:
             tasks.append(asyncio.create_task(auto_trader.run_forever(), name="supertrend_auto"))
+        if lu_trader is not None:
+            tasks.append(asyncio.create_task(lu_trader.run_forever(), name="limit_up_chase"))
         await asyncio.gather(*tasks)
 
     try:

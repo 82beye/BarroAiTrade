@@ -290,10 +290,10 @@ def main() -> None:
     ap.add_argument("--telegram", action="store_true",
                     help="Telegram 알림 (TELEGRAM_BOT_TOKEN/CHAT_ID 필요)")
     ap.add_argument(
-        "--exclude-strategy", default="supertrend",
-        help="강제청산/평가에서 제외할 전략(콤마구분). 기본 'supertrend' — 슈퍼트렌드는 "
-             "SELL 전환 시그널 시에만 청산하는 추세추종 전략이라 장마감 강제청산 대상이 "
-             "아님. 'none' 또는 '' 지정 시 제외 없음(전 종목 평가).",
+        "--exclude-strategy", default="supertrend,limit_up_chase",
+        help="강제청산/평가에서 제외할 전략(콤마구분). 기본 'supertrend,limit_up_chase' — "
+             "둘 다 자체 트레이더가 청산/오버나잇을 관리하므로 장마감 강제청산 대상이 아님 "
+             "(이중관리·더블셀·오버나잇 파괴 방지). 'none' 또는 '' 지정 시 제외 없음(전 종목 평가).",
     )
     args = ap.parse_args()
     sys.exit(asyncio.run(_run(args)))
