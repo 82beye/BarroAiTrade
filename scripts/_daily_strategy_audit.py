@@ -55,6 +55,13 @@ def fifo_roundtrip_pnl(
     sell_value = 0.0
     matched_basis = 0.0
     n_buys = n_sells = wins = 0
+    # [BAR-OPS-38 P2] 원가 미매칭(이월 청산) 분리 — 종전엔 lots 소진 후 잔여 매도분의
+    #   cost 가 0 으로 잡혀 매도대금 전액이 이익으로 과대계상됐다(이월 청산일 KPI 왜곡,
+    #   2026-06-10 매매복기 P2 — 6/10 아침 이월 7건이 전부 해당). 당일 원가가 있는
+    #   매칭분만 realized 에 넣고, 미매칭분은 carry_* 버킷으로 분리 보고한다.
+    carry_sell_value = 0.0
+    carry_sells = 0
+    sell_details: list[dict] = []   # 시간대 버킷용 — {"ts", "net", "carry"}
     for o in orders:
         qty = float(o["qty"])
         px = float(o["price"])
@@ -67,30 +74,42 @@ def fifo_roundtrip_pnl(
         else:  # sell
             sval = qty * px
             sell_value += sval
-            n_sells += 1
             rem = qty
             cost = 0.0
+            matched_qty = 0.0
             while rem > 1e-9 and lots:
                 lq, lp = lots[0]
                 m = min(rem, lq)
                 cost += m * lp
+                matched_qty += m
                 rem -= m
                 lq -= m
                 if lq <= 1e-9:
                     lots.pop(0)
                 else:
                     lots[0][0] = lq
-            gross = sval - cost
-            fees = (sval + cost) * commission_rate + sval * tax_rate
+            if rem > 1e-9:
+                carry_sell_value += rem * px
+                carry_sells += 1
+                sell_details.append({"ts": o.get("ts"), "net": rem * px, "carry": True})
+            if matched_qty <= 1e-9:
+                continue  # 전량 이월 청산 — 당일 실현 KPI 에서 제외(carry 버킷 보고)
+            sval_m = matched_qty * px
+            n_sells += 1
+            gross = sval_m - cost
+            fees = (sval_m + cost) * commission_rate + sval_m * tax_rate
             net = gross - fees
             realized += net
             matched_basis += cost
             if net > 0:
                 wins += 1
+            sell_details.append({"ts": o.get("ts"), "net": net, "carry": False})
     return {
         "realized": realized, "buy_value": buy_value, "sell_value": sell_value,
         "matched_basis": matched_basis, "n_buys": n_buys, "n_sells": n_sells,
         "wins": wins, "sells": n_sells,
+        "carry_sell_value": carry_sell_value, "carry_sells": carry_sells,
+        "sell_details": sell_details,
     }
 
 
@@ -121,10 +140,29 @@ def strategy_alarms(per_strategy: dict) -> list[str]:
 # ─── I/O (1분봉 fetch / order_audit / simulation_log) ─────────────────
 
 def load_orders(date_str: str) -> list[dict]:
-    out = []
     path = _REPO / "data" / "order_audit.csv"
-    for r in csv.DictReader(open(path)):
+    rows = list(csv.DictReader(open(path)))
+    # [BAR-OPS-38 P2] UNFILLED 행 반영 — SYNC 가 '접수됐으나 미체결'로 판정한 매수의
+    #   원 ORDERED 행을 제외(6/10 475150 상한가 잠김 49주: ORDERED 만 보면 체결로 오인).
+    #   1순위 order_no 매칭, order_no 없으면 (종목, 수량) 보수 매칭.
+    unfilled_nos: set[str] = set()
+    unfilled_sq: set[tuple] = set()
+    for r in rows:
+        if r["ts"].startswith(date_str) and r.get("action") == "UNFILLED":
+            ono = (r.get("order_no") or "").strip()
+            if ono:
+                unfilled_nos.add(ono)
+            else:
+                unfilled_sq.add((r["symbol"], r["qty"]))
+    out = []
+    for r in rows:
         if not r["ts"].startswith(date_str) or r["action"] != "ORDERED":
+            continue
+        ono = (r.get("order_no") or "").strip()
+        if ono and ono in unfilled_nos:
+            continue
+        if r["side"] == "buy" and (r["symbol"], r["qty"]) in unfilled_sq:
+            unfilled_sq.discard((r["symbol"], r["qty"]))  # 1회만 상쇄
             continue
         out.append({
             "ts": datetime.fromisoformat(r["ts"]),
@@ -234,7 +272,8 @@ async def run(date_str: str, save: bool):
         for o in ords:
             px = price_at(bars, o["ts"])
             if px is not None:
-                priced.append({"side": o["side"], "qty": o["qty"], "price": px})
+                priced.append({"side": o["side"], "qty": o["qty"], "price": px,
+                               "ts": o["ts"]})  # [BAR-OPS-38 P2] 시간대 버킷용
         res = fifo_roundtrip_pnl(priced)
         strat = strat_by_sym.get(sym, "unknown")
         per_sym[sym] = {**res, "strategy": strat}
@@ -256,6 +295,33 @@ async def run(date_str: str, save: bool):
         print("\n[알람]"); [print("  " + a) for a in alarms]
     else:
         print("\n[알람] 없음")
+
+    # [BAR-OPS-38 P2] 이월 청산(원가 미매칭) 분리 보고 — 2026-06-10 매매복기 P2.
+    #   전일 이전 매수분의 당일 매도는 당일 원가가 없어 §A 실현 KPI 에서 제외된다.
+    carry_v = sum(d.get("carry_sell_value", 0.0) for d in per_sym.values())
+    carry_n = sum(d.get("carry_sells", 0) for d in per_sym.values())
+    if carry_n:
+        print(f"\n[이월 청산] {carry_n}건, 매도대금 {carry_v/1e4:,.1f}만원 — 전일 이전 매수분(당일 원가 부재)")
+        print("  → §A 실현에서 제외됨. 정확 손익은 data/fill_audit.csv(ka10073 체결 백필)/매매복기 원장 참조.")
+        for sym, d in sorted(per_sym.items()):
+            if d.get("carry_sells"):
+                print(f"    {sym} ({d.get('strategy', '?')}): {d['carry_sells']}건 {d['carry_sell_value']/1e4:,.1f}만")
+
+    # [BAR-OPS-38 P2] 시간대별 실현 버킷 (KST, 당일 매칭분만) — 09시 집중 손실 패턴 추적.
+    from collections import defaultdict as _dd
+    buckets: dict = _dd(lambda: [0.0, 0])
+    for d in per_sym.values():
+        for sd in d.get("sell_details", []):
+            if sd.get("carry") or sd.get("ts") is None:
+                continue
+            hh = sd["ts"].astimezone(KST).strftime("%H")
+            buckets[hh][0] += sd["net"]
+            buckets[hh][1] += 1
+    if buckets:
+        print("\n[시간대별 실현 (KST)]")
+        for hh in sorted(buckets):
+            v, n = buckets[hh]
+            print(f"  {hh}시: {n}건 {v/1e4:+9.1f}만")
 
     # §B 진입 고점매수율 + sim-live 괴리
     print(f"\n=== §B 진입 품질 (고점매수율 0=저점~100=고점) ===")
@@ -303,7 +369,9 @@ async def run(date_str: str, save: bool):
 
     if save:
         out = {"date": date_str, "per_strategy": {s: {k: v for k, v in d.items() if k != "syms"} | {"syms": d["syms"]} for s, d in per_strat.items()},
-               "per_symbol": {s: {k: v for k, v in d.items()} for s, d in per_sym.items()},
+               # sell_details 는 datetime 포함(시간대 버킷 내부용) — JSON 직렬화 제외
+               "per_symbol": {s: {k: v for k, v in d.items() if k != "sell_details"} for s, d in per_sym.items()},
+               "carry": {"sells": carry_n, "sell_value": carry_v},
                "total_realized": tot, "alarms": alarms}
         p = _REPO / "reports" / f"strategy_audit_{date_str}.json"
         p.parent.mkdir(exist_ok=True)

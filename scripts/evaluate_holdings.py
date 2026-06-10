@@ -211,7 +211,9 @@ async def _run(args) -> int:
                     f"(trigger={tranche.trigger_drop_pct:+.0f}%)"
                 )
                 try:
-                    r = await gate.place_buy(symbol=h.symbol, qty=tranche.qty)
+                    # [BAR-OPS-38 P1] strategy_id 전파 (전략별 손익 귀속)
+                    r = await gate.place_buy(symbol=h.symbol, qty=tranche.qty,
+                                             strategy_id=pos.strategy)
                     tag = "DRY_RUN" if r.dry_run else "ORDERED"
                     print(f"    [{tag}] order_no={r.order_no}")
                     # 트랜치 상태 업데이트

@@ -38,6 +38,7 @@ from backend.core.journal.policy_config import PolicyConfigStore
 from backend.core.notify.telegram import TelegramNotifier, format_buy_alert
 from backend.core.risk.balance_gate import evaluate_risk_gate
 from backend.core.risk.holding_evaluator import STRATEGY_EXIT_PROFILES
+from backend.core.risk.daily_gate_input import compute_daily_gate_input
 from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
 
 
@@ -180,9 +181,10 @@ async def _run(args) -> int:
             print(f"  {r.symbol} {r.name:<14} 전략={strategy} qty={r.recommended_qty}")
         return 0
 
-    # BAR-166: daily_pnl_pct 계산 — 전일 대비 당일 손익률(%).
-    current_total = float(deposit.cash) + float(balance.total_eval)
-    daily_pnl_pct = _compute_daily_pnl_pct(current_total)
+    # [BAR-OPS-38 P0#1] 게이트 입력 교체 — 종전 _compute_daily_pnl_pct 는 balance_history
+    #   파일 스냅샷 기반(5/29·6/1·6/2 가짜 손실 과차단 사고 원인 — 데몬은 6/2 에 이미 이탈).
+    #   데몬·슈퍼트렌드와 동일한 공용 입력(당일 실현 ka10074 + 보유 평가 / 추정예탁자산)으로 통일.
+    daily_pnl_pct = await compute_daily_gate_input(account, balance)
 
     print(f"\n== 장중 매수 실행 ({len(buyable)}건, dry_run={args.dry_run}) ==")
     notifier = TelegramNotifier.from_env() if args.telegram else None
@@ -192,6 +194,10 @@ async def _run(args) -> int:
         policy=GatePolicy(
             daily_loss_limit_pct=Decimal(str(cfg.daily_loss_limit)),
             daily_max_orders=cfg.daily_max_orders,
+            # [BAR-OPS-38 P0#1] latch 파일 영속 — 데몬과 동일 정책(상세는 daily_gate_input.py)
+            daily_loss_latch=os.environ.get("SUPERTREND_AUTO_LOSS_LATCH", "1").strip().lower() in {"1", "true", "yes", "on"},
+            latch_state_path=str(_DATA_DIR / "daily_gate_state.json"),
+            loss_metric_label="당일실현+보유평가/추정예탁자산",
         ),
         notifier=notifier,
     )
@@ -200,8 +206,11 @@ async def _run(args) -> int:
     for r, strategy in buyable:
         tranche1_qty = max(1, round(r.recommended_qty * 0.5))
         try:
+            # [BAR-OPS-38 P1] strategy_id 전파 — 누락 시 audit 빈칸(6/9 3건·6/10 1건,
+            #   2026-06-10 매매복기 인시던트 4)으로 전략 귀속이 '미지정' 버킷에 격리됨.
             result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty,
-                                          daily_pnl_pct=daily_pnl_pct)
+                                          daily_pnl_pct=daily_pnl_pct,
+                                          strategy_id=strategy)
             tag = "DRY_RUN" if result.dry_run else "ORDERED"
             print(
                 f"  [{tag}] {r.symbol} {r.name:<14} qty={tranche1_qty}"
