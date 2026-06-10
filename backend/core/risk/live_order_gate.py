@@ -112,6 +112,13 @@ class GatePolicy:
     #   위로 회복돼도 신규매수 재개 금지). 현행 stateless 게이트는 12:30/12:35 차단 후 12:55
     #   회복으로 통과시켜 459550 2차(-509K) 재진입을 허용했음. latch 가 이를 원천 차단.
     daily_loss_latch: bool = False
+    # [BAR-OPS-38 P0#1] latch 영속 경로 — 데몬은 사이클마다 게이트를 재생성하므로 인스턴스
+    #   메모리 latch 가 사이클 간 증발한다(6/10 발견). 경로 지정 시 daily_gate_state.json 에
+    #   당일 latch 를 영속해 모든 게이트 인스턴스(데몬 스캔/슈퍼트렌드)가 공유한다. None=기존.
+    latch_state_path: Optional[str] = None
+    # [BAR-OPS-38 P0#1] 차단 사유에 입력 지표 산식 명시 — 6/10 "-5.76%" 가 일일손실이 아닌
+    #   누적 평가수익률이라 사후 분석을 오도(인시던트 5). 빈 문자열이면 기존 문구 유지.
+    loss_metric_label: str = ""
     # [P0#5] 주문 실행 재시도 — transient(HTTP 5xx/timeout) 오류 시 재시도 횟수. 0=비활성(기존).
     #   2026-06-08 매도 HTTPStatusError 가 청산을 5분 지연→저점매도(-509K 악화). 매도 우선 재시도.
     order_retry_count: int = 0
@@ -136,6 +143,14 @@ class LiveOrderGate:
         self._notifier = notifier
         # [P0#2 BAR-OPS-35] 일일 손실 한도 latch 상태 — 한도 도달한 UTC 일자(YYYY-MM-DD). 당일 sticky.
         self._loss_latch_date: Optional[str] = None
+        # [BAR-OPS-38] latch 파일 영속 — 게이트 인스턴스 간(데몬 사이클 재생성) latch 공유.
+        self._latch_store = None
+        if self._policy.daily_loss_latch and self._policy.latch_state_path:
+            try:
+                from backend.core.risk.daily_gate_input import DailyGateStateStore
+                self._latch_store = DailyGateStateStore(self._policy.latch_state_path)
+            except Exception as exc:  # noqa: BLE001 — 영속 실패 시 메모리 latch 로 동작
+                logger.warning("latch state store 초기화 실패: %s", type(exc).__name__)
 
     def _preflight(self, side: OrderSide, daily_pnl_pct: Decimal) -> None:
         # 1) ENV flag 강제 (실전 host 의 안전망)
@@ -150,22 +165,30 @@ class LiveOrderGate:
         # 2) 일일 손실 한도 — 매수만 차단 (매도는 손절 가능해야)
         if side == OrderSide.BUY:
             limit = self._policy.daily_loss_limit_pct
+            # [BAR-OPS-38] 차단 사유에 입력 지표 산식 명시(사후 분석 오도 방지).
+            _label = f"({self._policy.loss_metric_label})" if self._policy.loss_metric_label else ""
             if self._policy.daily_loss_latch:
                 # [P0#2 BAR-OPS-35] sticky latch — 한번 도달하면 당일 회복해도 잠금 유지.
+                # [BAR-OPS-38] 파일 영속 latch 우선 확인 — 다른 게이트 인스턴스가 건 latch 공유.
                 today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                if self._loss_latch_date == today:
+                if self._loss_latch_date == today or (
+                        self._latch_store is not None and self._latch_store.is_latched()):
                     raise DailyLossLimitExceeded(
                         f"일일 손실 한도 latch — 당일({today}) 신규 매수 잠금(평가 회복 무관)."
                     )
                 if daily_pnl_pct <= limit:
                     self._loss_latch_date = today
-                    raise DailyLossLimitExceeded(
-                        f"일일 손실 한도 도달(latch 설정): {daily_pnl_pct}% ≤ {limit}%. "
-                        f"당일 신규 매수 잠금."
-                    )
+                    reason = (f"일일 손실 한도 도달(latch 설정){_label}: "
+                              f"{daily_pnl_pct}% ≤ {limit}%. 당일 신규 매수 잠금.")
+                    if self._latch_store is not None:
+                        try:
+                            self._latch_store.set_latched(reason)
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("latch 영속 실패: %s", type(exc).__name__)
+                    raise DailyLossLimitExceeded(reason)
             elif daily_pnl_pct <= limit:
                 raise DailyLossLimitExceeded(
-                    f"일일 손실 한도 도달: {daily_pnl_pct}% ≤ {limit}%. 신규 매수 차단."
+                    f"일일 손실 한도 도달{_label}: {daily_pnl_pct}% ≤ {limit}%. 신규 매수 차단."
                 )
 
         # 3) 일일 매수 한도 — 매수만 차단 (매도는 손절 가능해야).
