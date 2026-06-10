@@ -104,3 +104,38 @@ class TestUnfilledExclusion:
         ])
         monkeypatch.setattr(audit, "_REPO", tmp_path)
         assert len(load_orders("2026-06-10")) == 2
+
+
+class TestSymbolNamesFallback:
+    """[BAR-OPS-38 P2] 종목명 로컬 폴백 — 소스 우선순위 + 미해결 처리."""
+
+    def _setup(self, tmp_path):
+        import json
+        d = tmp_path / "data"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "refined_signals.json").write_text(json.dumps({
+            "signals": [{"symbol": "475150", "name": "SK이터닉스"}]
+        }), encoding="utf-8")
+        (d / "active_positions.json").write_text(json.dumps({
+            "319660": {"name": "피에스케이"},
+            "475150": {"name": "구버전이름"},   # refined 가 우선이어야 함
+        }), encoding="utf-8")
+        (d / "simulation_log.csv").write_text(
+            "run_at,mode,symbol,name,strategy\n"
+            "2026-06-10T00:30:03+00:00,daily,036930,주성엔지니어링,f_zone\n",
+            encoding="utf-8")
+
+    def test_priority_and_sources(self, tmp_path, monkeypatch):
+        from scripts._daily_strategy_audit import load_symbol_names
+        self._setup(tmp_path)
+        monkeypatch.setattr(audit, "_REPO", tmp_path)
+        names = load_symbol_names({"475150", "319660", "036930", "0193T0"})
+        assert names["475150"] == "SK이터닉스"      # 1순위 refined_signals
+        assert names["319660"] == "피에스케이"      # 2순위 active_positions
+        assert names["036930"] == "주성엔지니어링"  # 3순위 simulation_log
+        assert "0193T0" not in names               # 전 소스 부재 → 미해결(코드 그대로 표시)
+
+    def test_missing_files_safe(self, tmp_path, monkeypatch):
+        from scripts._daily_strategy_audit import load_symbol_names
+        monkeypatch.setattr(audit, "_REPO", tmp_path)   # data/ 자체가 없음
+        assert load_symbol_names({"005930"}) == {}

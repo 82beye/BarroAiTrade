@@ -173,6 +173,51 @@ def load_orders(date_str: str) -> list[dict]:
     return out
 
 
+def load_symbol_names(symbols) -> dict[str, str]:
+    """[BAR-OPS-38 P2] 종목명 로컬 폴백 — 영문코드 신형우선주(0193T0 등) 포함 표시용.
+
+    소스 우선순위: refined_signals.json → active_positions.json(+히스토리 최신분)
+    → simulation_log.csv. 전부 로컬 파일(네트워크 없음). 미해결 심볼은 코드 그대로 표시.
+    """
+    names: dict[str, str] = {}
+    want = set(symbols)
+
+    def _take(sym: str, name: str) -> None:
+        if sym in want and name and sym not in names:
+            names[sym] = name
+
+    try:
+        data = json.load(open(_REPO / "data" / "refined_signals.json", encoding="utf-8"))
+        for s in data.get("signals", []):
+            _take(s.get("symbol", ""), s.get("name", ""))
+    except Exception:
+        pass
+    try:
+        ap = json.load(open(_REPO / "data" / "active_positions.json", encoding="utf-8"))
+        for sym, p in ap.items():
+            _take(sym, (p or {}).get("name", ""))
+    except Exception:
+        pass
+    try:
+        hist = sorted((_REPO / "data" / "_active_positions_history").glob("*.json"))[-200:]
+        for fp in reversed(hist):
+            if want <= set(names):
+                break
+            try:
+                for sym, p in json.load(open(fp, encoding="utf-8")).items():
+                    _take(sym, (p or {}).get("name", ""))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    try:
+        for r in csv.DictReader(open(_REPO / "data" / "simulation_log.csv", encoding="utf-8")):
+            _take(r.get("symbol", ""), r.get("name", ""))
+    except Exception:
+        pass
+    return names
+
+
 def resolve_strategy_by_symbol(orders: list[dict]) -> dict:
     """종목별 전략 결정 — 비어있지 않은 strategy_id 우선(다수결)."""
     by_sym: dict[str, dict] = {}
@@ -261,6 +306,7 @@ async def run(date_str: str, save: bool):
     sim_pred = load_sim_predictions(date_str)
     print(f"=== 1분봉 fetch ({len(symbols)}종목, 체결가 추정용) ===", file=sys.stderr)
     prices = await fetch_1m_prices(symbols)
+    names = load_symbol_names(symbols)   # [BAR-OPS-38 P2] 표시용 종목명 로컬 폴백
 
     # §A 전략별 실현손익
     per_sym = {}
@@ -305,7 +351,7 @@ async def run(date_str: str, save: bool):
         print("  → §A 실현에서 제외됨. 정확 손익은 data/fill_audit.csv(ka10073 체결 백필)/매매복기 원장 참조.")
         for sym, d in sorted(per_sym.items()):
             if d.get("carry_sells"):
-                print(f"    {sym} ({d.get('strategy', '?')}): {d['carry_sells']}건 {d['carry_sell_value']/1e4:,.1f}만")
+                print(f"    {sym} {names.get(sym, ''):<10.10} ({d.get('strategy', '?')}): {d['carry_sells']}건 {d['carry_sell_value']/1e4:,.1f}만")
 
     # [BAR-OPS-38 P2] 시간대별 실현 버킷 (KST, 당일 매칭분만) — 09시 집중 손실 패턴 추적.
     from collections import defaultdict as _dd
@@ -325,7 +371,7 @@ async def run(date_str: str, save: bool):
 
     # §B 진입 고점매수율 + sim-live 괴리
     print(f"\n=== §B 진입 품질 (고점매수율 0=저점~100=고점) ===")
-    print(f"{'종목':>7} {'전략':10} {'진입가':>8} {'일중위치':>8} {'평가'}")
+    print(f"{'종목':>7} {'종목명':<10} {'전략':10} {'진입가':>8} {'일중위치':>8} {'평가'}")
     strat_pos = {}
     for sym in symbols:
         bars = prices.get(sym, [])
@@ -350,7 +396,7 @@ async def run(date_str: str, save: bool):
         if strat == "gold_zone" and avg_pos >= 60:
             flag = "⚠️ gold(바닥전략) 고점권 진입"
         strat_pos.setdefault(strat, []).append(avg_pos)
-        print(f"{sym:>7} {strat:10} {first_px:>8,.0f} {avg_pos:>7.0f}% {flag}")
+        print(f"{sym:>7} {names.get(sym, ''):<10.10} {strat:10} {first_px:>8,.0f} {avg_pos:>7.0f}% {flag}")
     print("\n[전략별 평균 진입위치]")
     for s, ps in sorted(strat_pos.items()):
         ap = sum(ps) / len(ps)
@@ -365,7 +411,7 @@ async def run(date_str: str, save: bool):
         if pred is None:
             continue
         flip = "✗ 부호반전" if (pred > 0) != (real > 0) and abs(real) > 1e4 else ""
-        print(f"  {sym} {strat:10} 시뮬 {pred/1e4:>+7.1f}만 → 실현 {real/1e4:>+7.1f}만  {flip}")
+        print(f"  {sym} {names.get(sym, ''):<10.10} {strat:10} 시뮬 {pred/1e4:>+7.1f}만 → 실현 {real/1e4:>+7.1f}만  {flip}")
 
     if save:
         out = {"date": date_str, "per_strategy": {s: {k: v for k, v in d.items() if k != "syms"} | {"syms": d["syms"]} for s, d in per_strat.items()},
