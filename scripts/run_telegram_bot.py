@@ -724,6 +724,7 @@ def _build_limit_up_chase_trader(notifier):
         entry_flu_max=float(os.environ.get("LIMIT_UP_ENTRY_FLU_MAX", "27")),
         wall_near_pct=float(os.environ.get("LIMIT_UP_WALL_NEAR_PCT", "1.0")),
         wall_min_top_qty=int(os.environ.get("LIMIT_UP_WALL_MIN_TOP_QTY", "50000")),
+        wall_min_top_value=float(os.environ.get("LIMIT_UP_WALL_MIN_TOP_VALUE", "100000000")),
         wall_bid_ask_ratio=float(os.environ.get("LIMIT_UP_WALL_BID_ASK_RATIO", "3.0")),
         # 손절/트레일/익절 (캡상승은 runner 가, 미상한가 구간은 trail/hard 가 보호)
         hard_stop_pct=float(os.environ.get("LIMIT_UP_HARD_STOP", "-4.0")),

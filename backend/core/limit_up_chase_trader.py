@@ -44,7 +44,8 @@ class LimitUpChaseConfig(SupertrendAutoConfig):
     entry_flu_max: float = 27.0        # 등락률 밴드 상한(%) — 이미 +30% 락 추격 차단
     # ── 진입: 호가 매수벽(ka10004) ────────────────────────────────────────
     wall_near_pct: float = 1.0         # 매수1호가가 상한가가격의 이 % 이내여야
-    wall_min_top_qty: int = 50_000     # 매수1호가 절대 잔량 임계(주) — 두꺼운 벽
+    wall_min_top_qty: int = 50_000     # (deprecated·미사용) 매수1호가 절대 잔량(주)
+    wall_min_top_value: float = 100_000_000.0  # 매수1호가 잔량금액 임계(원) — 거래대금 기준(고가주 대응)
     wall_bid_ask_ratio: float = 3.0    # top-N 매수/매도 잔량 비율(매도 소진 임박)
     wall_levels: int = 3               # 비율 산정 단계수
     # ── 진입 시간대 마감(부모엔 entry_start_time 만 존재) ──────────────────
@@ -303,10 +304,11 @@ class LimitUpChaseTrader(SupertrendAutoTrader):
                 logger.debug("상따 호가벽 탈락(상한가 미근접): %s bid=%.0f < %.0f",
                              symbol, top_bid_price, limit_price)
                 return False
-        # ② 매수1호가 절대 잔량
-        if top_bid_qty < self.config.wall_min_top_qty:
-            logger.debug("상따 호가벽 탈락(잔량 부족): %s 매수1잔량=%.0f < %d",
-                         symbol, top_bid_qty, self.config.wall_min_top_qty)
+        # ② 매수1호가 잔량금액(거래대금 기준 — 고가주 대응)
+        top_bid_value = top_bid_price * top_bid_qty
+        if top_bid_value < self.config.wall_min_top_value:
+            logger.debug("상따 호가벽 탈락(잔량금액 부족): %s 매수1잔량금액=%.0f < %.0f",
+                         symbol, top_bid_value, self.config.wall_min_top_value)
             return False
         # ③ top-N 매수/매도 잔량 비율
         n = max(1, self.config.wall_levels)
