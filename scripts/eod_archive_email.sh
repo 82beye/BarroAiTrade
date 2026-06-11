@@ -10,7 +10,7 @@ cd "$REPO" || exit 9
 set -a; . "$REPO/.env.local"; set +a
 echo "==== EOD ARCHIVE+EMAIL START $(date '+%F %T') (DT=$DT) ===="
 echo "-- 일봉 업데이트 --";   ./.venv/bin/python scripts/update_ohlcv_cache.py    2>&1 | tail -2
-echo "-- 5분봉 업데이트 --";  ./.venv/bin/python scripts/update_ohlcv_cache_5m.py --days 15 2>&1 | tail -2
+echo "-- 5분봉 업데이트(최대 30분 캡) --"; perl -e 'alarm 1800; exec @ARGV' ./.venv/bin/python scripts/update_ohlcv_cache_5m.py --days 15 2>&1 | tail -3 || echo "  (5분봉 캡/오류 — 부분갱신으로 진행)"
 D="ohlcv_cache_${DT}.tar.gz"; M="ohlcv_cache_5m_${DT}.tar.gz"; T="barroaitrade_trade_data_${DT}.tar.gz"
 echo "-- 압축 → 데스크탑 --"
 tar -czf "$DESK/$D" -C "$AI" ohlcv_cache && echo "  일봉 ok"
