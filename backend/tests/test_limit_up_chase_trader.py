@@ -172,7 +172,7 @@ async def test_wall_reject_thin_top_qty():
     t = _trader({"A": _candles(_FLAT, "A")},
                 orderbook=_FakeOrderbook({"A": ([(5120, 10_000)], [(5125, 1_000)])}))
     bars = await t._fetch_bars("A")
-    assert await t._passes_orderbook_wall("A", bars) is False  # 잔량 10k < 50k
+    assert await t._passes_orderbook_wall("A", bars) is False  # 잔량금액 51.2M < 100M
 
 
 @pytest.mark.asyncio
@@ -194,13 +194,15 @@ async def test_wall_pass_no_asks_locked():
 
 
 @pytest.mark.asyncio
-async def test_wall_reject_not_near_limit_price():
-    # 2일 캔들: 전일종가 5000 → 상한가가격 6450. 매수1호가 5120 → 근접 아님 → 탈락.
+async def test_wall_pass_band_below_limit_price():
+    # 회귀: 옛 '상한가 근접' 게이트는 제거됨. 전일종가 5000 → 상한가가격 6450인데
+    # 매수1호가 5120(밴드 +24%, 상한가보다 한참 아래)이라도 매수벽(잔량금액·비율)이
+    # 충분하면 통과해야 한다. 과거엔 이 케이스가 영구 탈락 → 상따 진입 0건이었다(원익IPS).
     day2 = [5118 for _ in range(5)]
     t = _trader({"A": _candles_2d([5000] * 30, day2, "A")},
-                orderbook=_FakeOrderbook({"A": ([(5120, 80_000)], [])}))
+                orderbook=_FakeOrderbook({"A": ([(5120, 80_000)], [])}))  # 잔량금액 409.6M ≥ 100M
     bars = await t._fetch_bars("A")
-    assert await t._passes_orderbook_wall("A", bars) is False
+    assert await t._passes_orderbook_wall("A", bars) is True
 
 
 @pytest.mark.asyncio

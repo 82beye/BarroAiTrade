@@ -43,7 +43,7 @@ class LimitUpChaseConfig(SupertrendAutoConfig):
     entry_flu_min: float = 20.0        # 등락률 밴드 하한(%) — 상한가 근접 모멘텀
     entry_flu_max: float = 27.0        # 등락률 밴드 상한(%) — 이미 +30% 락 추격 차단
     # ── 진입: 호가 매수벽(ka10004) ────────────────────────────────────────
-    wall_near_pct: float = 1.0         # 매수1호가가 상한가가격의 이 % 이내여야
+    wall_near_pct: float = 1.0         # (deprecated·미사용) 옛 '상한가 근접' 게이트 — 밴드 진입과 모순되어 제거
     wall_min_top_qty: int = 50_000     # (deprecated·미사용) 매수1호가 절대 잔량(주)
     wall_min_top_value: float = 100_000_000.0  # 매수1호가 잔량금액 임계(원) — 거래대금 기준(고가주 대응)
     wall_bid_ask_ratio: float = 3.0    # top-N 매수/매도 잔량 비율(매도 소진 임박)
@@ -278,11 +278,16 @@ class LimitUpChaseTrader(SupertrendAutoTrader):
         return self.config.entry_flu_min <= flu <= self.config.entry_flu_max
 
     async def _passes_orderbook_wall(self, symbol: str, bars) -> bool:
-        """ka10004 호가로 '상한가 매수벽' 확인. 호가 미가용/실패 시 보수적으로 False.
+        """ka10004 호가로 '매수벽' 확인. 호가 미가용/실패 시 보수적으로 False.
 
-        판정(AND): ① 매수1호가가 상한가가격(전일종가×(1+limit_up%))의 wall_near_pct% 이내
-                   ② 매수1호가 절대 잔량 ≥ wall_min_top_qty
-                   ③ top-N 매수/매도 잔량 비율 ≥ wall_bid_ask_ratio (매도 전무 시 통과).
+        판정(AND): ① 매수1호가 잔량금액(가격×잔량) ≥ wall_min_top_value (거래대금 기준, 고가주 대응)
+                   ② top-N 매수/매도 잔량 비율 ≥ wall_bid_ask_ratio (매도 전무 시 통과).
+
+        NOTE: 과거 '상한가 근접' 게이트(매수1호가가 상한가가격 ±wall_near_pct% 이내)는
+        제거됨. 상따 진입 밴드(등락률 20~27%)는 정의상 상한가(+29~30%)보다 3~10%p
+        아래여서 매수1호가가 상한가가격에 닿을 수 없어, 그 게이트가 모든 밴드 종목을
+        영구 탈락시켜 상따 진입 0건을 유발했다(원익IPS 2026-06-12 사례). 밴드 자체는
+        _momentum_band_pass 가, 매수세 우위는 잔량금액·매수/매도비율이 확인한다.
         """
         if self._ob is None:
             return False
@@ -296,21 +301,13 @@ class LimitUpChaseTrader(SupertrendAutoTrader):
         if not bids:
             return False
         top_bid_price, top_bid_qty = float(bids[0][0]), float(bids[0][1])
-        # ① 상한가 근접 매수벽
-        pc = self._prev_close(bars)
-        if pc and pc > 0:
-            limit_price = pc * (1 + self.config.runner_limit_up_pct / 100.0)
-            if top_bid_price < limit_price * (1 - self.config.wall_near_pct / 100.0):
-                logger.debug("상따 호가벽 탈락(상한가 미근접): %s bid=%.0f < %.0f",
-                             symbol, top_bid_price, limit_price)
-                return False
-        # ② 매수1호가 잔량금액(거래대금 기준 — 고가주 대응)
+        # ① 매수1호가 잔량금액(거래대금 기준 — 고가주 대응)
         top_bid_value = top_bid_price * top_bid_qty
         if top_bid_value < self.config.wall_min_top_value:
             logger.debug("상따 호가벽 탈락(잔량금액 부족): %s 매수1잔량금액=%.0f < %.0f",
                          symbol, top_bid_value, self.config.wall_min_top_value)
             return False
-        # ③ top-N 매수/매도 잔량 비율
+        # ② top-N 매수/매도 잔량 비율
         n = max(1, self.config.wall_levels)
         bq = sum(float(q) for _, q in bids[:n])
         aq = sum(float(q) for _, q in asks[:n]) if asks else 0.0
