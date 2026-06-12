@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 from backend.core.strategy.base import Strategy
 from backend.core.strategy.f_zone import FZoneParams, FZoneStrategy
+from backend.core.strategy.round_figure import resolve_sl_pct
 from backend.models.market import MarketType
 from backend.models.position import Position
 from backend.models.signal import EntrySignal
@@ -75,7 +76,9 @@ class SFZoneStrategy(Strategy):
         # Phase D2.5 (B6): ExitEngine 1차 방어선 SL (단타 중 최저). HoldingEvaluator(-4%) 가 2차 fallback.
         return ExitPlan(
             take_profits=take_profits,
-            stop_loss=StopLoss(fixed_pct=Decimal("-0.015")),
+            stop_loss=StopLoss(fixed_pct=resolve_sl_pct(
+                self.STRATEGY_ID, avg, Decimal("-0.015"),
+                symbol=getattr(position, "symbol", ""))),
             time_exit=time_exit,
             breakeven_trigger=Decimal("0.01"),
         )

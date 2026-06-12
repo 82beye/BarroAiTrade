@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from backend.core.strategy.base import Strategy
+from backend.core.strategy.round_figure import resolve_sl_pct
 from backend.models.market import OHLCV, MarketType
 from backend.models.position import Position
 from backend.models.signal import EntrySignal
@@ -330,7 +331,9 @@ class FZoneStrategy(Strategy):
         # Phase D2.5 (B6): ExitEngine 1차 방어선 SL. HoldingEvaluator(-4%) 가 2차 fallback.
         return ExitPlan(
             take_profits=take_profits,
-            stop_loss=StopLoss(fixed_pct=Decimal("-0.02")),
+            stop_loss=StopLoss(fixed_pct=resolve_sl_pct(
+                self.STRATEGY_ID, avg, Decimal("-0.02"),
+                symbol=getattr(position, "symbol", ""))),
             time_exit=time_exit,
             breakeven_trigger=Decimal("0.015"),
         )

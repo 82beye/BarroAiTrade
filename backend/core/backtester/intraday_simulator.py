@@ -20,6 +20,7 @@ from typing import Any, Callable, Optional, Sequence
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.core.execution.exit_engine import ExitEngine
+from backend.core.strategy.round_figure import resolve_sl_pct
 from backend.models.exit_order import ExitOrder, ExitReason, PositionState
 from backend.models.market import MarketType, OHLCV
 from backend.models.strategy import (
@@ -747,21 +748,38 @@ def _exit_plan_for_strategy(
       _scaled_exit_plan / _sfzone_atr_exit_plan 두 분기 모두 전파.
     """
     if strategy_id == "sf_zone" or (strategy_id == "f_zone" and f_zone_atr):
-        return _sfzone_atr_exit_plan(
+        plan = _sfzone_atr_exit_plan(
             entry_price, candles_window,
             trail_stages=trail_stages,
             high_momentum_sl_mult=high_momentum_sl_mult,
             early_tp=early_tp,
         )
-    return _scaled_exit_plan(
-        entry_price,
-        time_stages=time_stages,
-        trail_stages=trail_stages,
-        high_momentum_sl_mult=_day_change_pct(candles_window)
-        if high_momentum_sl_mult else None,
-        sl_mult=high_momentum_sl_mult,
-        early_tp=early_tp,
-    )
+    else:
+        plan = _scaled_exit_plan(
+            entry_price,
+            time_stages=time_stages,
+            trail_stages=trail_stages,
+            high_momentum_sl_mult=_day_change_pct(candles_window)
+            if high_momentum_sl_mult else None,
+            sl_mult=high_momentum_sl_mult,
+            early_tp=early_tp,
+        )
+    return _apply_rf_stop(plan, strategy_id, entry_price)
+
+
+def _apply_rf_stop(plan: ExitPlan, strategy_id: str, entry_price: Decimal) -> ExitPlan:
+    """라운드피겨 손절 보정을 ExitPlan.stop_loss.fixed_pct(base)에 적용 — default OFF.
+
+    RF_STOP_ENABLED 미설정이면 plan 그대로(완전 무영향). time_stages/trailing 은 보존.
+    """
+    sl = plan.stop_loss
+    if sl is None:
+        return plan
+    new_fixed = resolve_sl_pct(strategy_id, float(entry_price), sl.fixed_pct,
+                               unit="fraction")
+    if new_fixed == sl.fixed_pct:
+        return plan
+    return plan.model_copy(update={"stop_loss": sl.model_copy(update={"fixed_pct": new_fixed})})
 
 
 # ai-trade 5단계 변동성 트레일링 (2026-05-17 권장 default — 명시 적용 시).

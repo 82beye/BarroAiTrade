@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from backend.core.strategy.base import Strategy
+from backend.core.strategy.round_figure import resolve_sl_pct
 from backend.models.market import MarketType, OHLCV
 from backend.models.position import Position
 from backend.models.signal import EntrySignal
@@ -238,7 +239,9 @@ class GoldZoneStrategy(Strategy):
                     condition="골드존 TP2 +4%",
                 ),
             ],
-            stop_loss=StopLoss(fixed_pct=Decimal("-0.015")),
+            stop_loss=StopLoss(fixed_pct=resolve_sl_pct(
+                self.STRATEGY_ID, avg, Decimal("-0.015"),
+                symbol=getattr(position, "symbol", ""))),
             time_exit=dtime(14, 50) if ctx.market_type == MarketType.STOCK else None,
             breakeven_trigger=Decimal("0.01"),
         )

@@ -22,6 +22,7 @@ from typing import Any, List, Optional
 import pandas as pd
 
 from backend.core.strategy.base import Strategy
+from backend.core.strategy.round_figure import resolve_sl_pct
 from backend.models.market import MarketType, OHLCV
 from backend.models.position import Position
 from backend.models.signal import EntrySignal
@@ -266,7 +267,9 @@ class Swing38Strategy(Strategy):
                     condition="38스윙 TP2 +50%",
                 ),
             ],
-            stop_loss=StopLoss(fixed_pct=Decimal("-0.15")),
+            stop_loss=StopLoss(fixed_pct=resolve_sl_pct(
+                self.STRATEGY_ID, avg, Decimal("-0.15"),
+                symbol=getattr(position, "symbol", ""))),
             breakeven_trigger=Decimal("0.10"),
             min_hold_days=p.min_hold_days,
             max_hold_days=p.max_hold_days,

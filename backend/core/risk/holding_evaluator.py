@@ -18,6 +18,7 @@ from enum import Enum
 from typing import Optional
 
 from backend.core.gateway.kiwoom_native_account import HoldingPosition
+from backend.core.strategy.round_figure import resolve_sl_pct
 
 
 class SellSignal(str, Enum):
@@ -346,7 +347,14 @@ def evaluate_holding(
     #   1) hold_days_tighten 이상 → tightened_sl_pct (장기 보유 강화, 기존)
     #   2) sl_time_stages 활성 → 분 단위 단계 (P5-a, 진입 직후 노이즈 흡수)
     #   3) fallback → stop_loss_pct
-    effective_sl = policy.stop_loss_pct
+    # 라운드피겨 손절 보정(RF) — default OFF. 진입단가 기준 라운드 지지선 아래로 base SL 을
+    # 넓힘. 단 보유기간 강화(tightened)·시간단계(sl_time_stages)는 그대로 우선(더 엄격 우선).
+    base_sl = policy.stop_loss_pct
+    if ctx.strategy:
+        base_sl = resolve_sl_pct(
+            ctx.strategy, float(h.avg_buy_price), base_sl,
+            unit="percent", symbol=h.symbol)
+    effective_sl = base_sl
     time_note = ""
     if days >= policy.hold_days_tighten:
         effective_sl = policy.tightened_sl_pct
