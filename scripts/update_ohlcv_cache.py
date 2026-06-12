@@ -17,7 +17,9 @@ import logging
 import os
 import sys
 import time as _time
-from datetime import date, datetime
+from datetime import date, datetime, time as dtime, timedelta, timezone
+
+KST = timezone(timedelta(hours=9))  # [BAR-OPS-39] 장중 가드용
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -106,7 +108,18 @@ async def run(cache_dir: str) -> None:
         existing = load_cache_file(filepath) or []
         gap = get_gap_days(existing)
 
-        if gap <= 1:
+        # [BAR-OPS-39] 스킵 조건 gap<=1 → gap<1 — 08:00 장전 크론 시절(b64dc03)엔
+        #   gap=1(캐시에 어제 종가)이면 받을 데이터가 없어 스킵이 옳았으나, 2bdf0b4 가
+        #   15:40 장마감後 EOD 잡으로 옮기며 당일분(gap=1)이 영구 스킵됐다(6/11 meta.json:
+        #   skipped 2954 / new_days_added 0 — 일봉 캐시 6/10 정지의 원인). 캐시 최신일이
+        #   '오늘'(gap<1)일 때만 스킵 — 같은 날 재실행 멱등성은 유지된다.
+        if gap < 1:
+            skipped += 1
+            continue
+        # [BAR-OPS-39 리뷰 반영] 장중 가드 — gap=1 인 채로 장중(15:30 이전)에 수동 실행하면
+        #   미완성 당일 봉이 캐시돼 이후 EOD 실행(gap=0 스킵)이 덮어쓰지 못하고 영구 잔존.
+        #   gap=1 은 장마감(15:30) 이후에만 fetch.
+        if gap == 1 and datetime.now(KST).time() < dtime(15, 30):
             skipped += 1
             continue
 

@@ -354,9 +354,17 @@ async def _run(args) -> int:
             # T1(60%) 수량 계산
             tranche1_qty = max(1, round(r.recommended_qty * 0.6))
 
+            # [BAR-OPS-39 P0] strategy_id 전파 — BAR-OPS-38 P1 에서 누락된 4번째 경로.
+            #   미전달 시 audit 빈칸으로 기록돼 09:30 tranche1 매수가 '미지정' 버킷에
+            #   격리되던 버그(6/9·6/10·6/11 재발). 본 스크립트가 09:30 운영 cron 의
+            #   실제 매수 경로(docs/05-paperclip/runbook-ops.md §2).
+            # BAR-169: 종목별 최적 전략 사용 (전체 합산 PnL 오용 버그 수정)
+            best_strategy = best_strategy_by_symbol.get(r.symbol, "f_zone")
+
             try:
                 result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty,
-                                              daily_pnl_pct=daily_pnl_pct)
+                                              daily_pnl_pct=daily_pnl_pct,
+                                              strategy_id=best_strategy)
                 executed += 1
                 tag = "DRY_RUN" if result.dry_run else "ORDERED"
                 print(
@@ -365,8 +373,6 @@ async def _run(args) -> int:
                 )
 
                 # active_positions 저장 (전략 정보 + 분할 계획)
-                # BAR-169: 종목별 최적 전략 사용 (전체 합산 PnL 오용 버그 수정)
-                best_strategy = best_strategy_by_symbol.get(r.symbol, "f_zone")
                 leader = next((c for c in filtered_leaders if c.symbol == r.symbol), None)
                 # 전략별 SL 자동 적용
                 from backend.core.risk.holding_evaluator import STRATEGY_EXIT_PROFILES

@@ -505,6 +505,14 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
             # Phase D2.6: strategy_id 전파 — active_positions 메타에서 조회 (없으면 None)
             _ap = active_positions.get(d.symbol) if isinstance(active_positions, dict) else None
             _strategy = getattr(_ap, "strategy", None) if _ap else None
+            # [BAR-OPS-39 P1] 매도 직전 장부 재확인 — 사이클 시작 스냅샷과 주문 사이에
+            #   st 트레이더가 같은 종목을 선청산(remove)하면 중복 매도가 발사돼 브로커
+            #   거부 FAILED 가 남는다(6/9 3건·6/11 1건). 스냅샷엔 있었는데 지금 장부에
+            #   없으면 = 타 액터가 방금 청산 → skip. (장부 외 보유는 기존대로 매도 진행.)
+            if _ap is not None and pos_store.get(d.symbol) is None:
+                ts = _now_kst().strftime("%H:%M:%S")
+                print(f"  [{ts}][SELL-SKIP] {d.symbol} — 타 액터 선청산 감지(장부 부재), 중복 매도 회피")
+                continue
             r = await gate.place_sell(symbol=d.symbol, qty=sell_qty,
                                       strategy_id=_strategy)
             tag = "DRY_RUN" if r.dry_run else "SOLD"
@@ -589,8 +597,28 @@ _NO_DCA_STRATEGIES = {"swing_38", "supertrend"}
 #   신호가 고점에서 발화한다(6/10 gold 추격 3종 전패 -461K: SK오션플랜트 시가갭 +22.8% 등.
 #   5/29·6/8 에 이은 세 번째 'gold 고점매수'). 전일종가 대비 등락률(flu_rate)이 임계 이상이면
 #   해당 전략 진입 금지. env BARRO_ZONE_MAX_FLU 로 조정, 0=비활성.
+#   ※ 6/11 실증: 임계 15% 바로 아래(13.1~13.5%) 진입 3건 전패 -353K — 임계 조정은
+#   일일감사의 갭 분포 누적 측정(BAR-OPS-39) 후 데이터 기반으로.
 _ZONE_MAX_FLU = float(os.environ.get("BARRO_ZONE_MAX_FLU", "15.0"))
 _GAP_GUARD_STRATEGIES = _MEANREV_STRATEGIES | {"f_zone"}
+
+# [BAR-OPS-39 P0] 일반(데몬) 전략 진입 컷오프 — st 트레이더에만 있던 14:30 컷오프(BAR-OPS-38
+#   P0#4①)의 사각지대 봉합: 6/11 f_zone 이 14:33/14:38 현대무벡스 매수 → 이월 발생.
+#   늦은 진입 = 짧은 검증시간 + 오버나이트 갭 리스크 후보. 빈 문자열이면 비활성.
+#   다일보유가 설계인 swing_38 은 예외(이월이 의도 — 이월 총액 한도 20%가 별도 캡).
+_ZONE_ENTRY_CUTOFF = os.environ.get("BARRO_ZONE_ENTRY_CUTOFF", "14:30").strip()
+_CUTOFF_EXEMPT_STRATEGIES = {"swing_38"}
+
+
+def _zone_entry_cutoff_passed() -> bool:
+    """[BAR-OPS-39 P0] KST 현재시각이 일반 전략 진입 컷오프 이후면 True."""
+    if not _ZONE_ENTRY_CUTOFF:
+        return False
+    try:
+        hh, mm = _ZONE_ENTRY_CUTOFF.split(":")
+        return _now_kst().time() >= time(int(hh), int(mm))
+    except (ValueError, TypeError):
+        return False  # 파싱 실패 시 차단하지 않음(기존 동작 보존)
 
 
 def _build_reval_strategy(strategy_id: str):
@@ -696,6 +724,10 @@ async def _scan_and_buy(
     # 일반 매수 전략 비활성(--strategies 빈 값) → 스캔 자체를 건너뜀(슈퍼트렌드 단독 운영).
     zone_strategies = getattr(args, "zone_strategies", DEFAULT_ZONE_STRATEGIES)
     if not zone_strategies:
+        return 0
+    # [BAR-OPS-39 P0] 진입 컷오프 — 컷오프 경과 + 면제 전략(swing_38) 미운영이면 스캔 자체 생략
+    #   (API 호출 절약). 면제 전략 운영 중이면 시그널 단계에서 전략별로 차단.
+    if _zone_entry_cutoff_passed() and not (set(zone_strategies) & _CUTOFF_EXEMPT_STRATEGIES):
         return 0
 
     cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
@@ -849,6 +881,16 @@ async def _scan_and_buy(
                 print(
                     f"  [{ts_g}][SKIP-GAP] {c.symbol} {c.name:<14} 전략={best_strategy} "
                     f"등락률 +{float(c.flu_rate):.1f}% ≥ {_ZONE_MAX_FLU}% — 갭상승 추격 차단"
+                )
+                continue
+            # [BAR-OPS-39 P0] 진입 컷오프 — 늦은 진입(이월 후보) 차단. swing_38(다일보유)은 예외.
+            #   6/11 f_zone 14:33 현대무벡스 진입 이월이 실증(st 전용 컷오프의 사각지대).
+            if (_zone_entry_cutoff_passed()
+                    and best_strategy not in _CUTOFF_EXEMPT_STRATEGIES):
+                ts_c = _now_kst().strftime("%H:%M:%S")
+                print(
+                    f"  [{ts_c}][SKIP-CUTOFF] {c.symbol} {c.name:<14} 전략={best_strategy} "
+                    f"— 진입 컷오프(≥ {_ZONE_ENTRY_CUTOFF}) 이후(이월 리스크)"
                 )
                 continue
             # 2026-05-19 P4 fix — 고점 진입 회피.
@@ -1114,6 +1156,9 @@ def _get_supertrend_trader(args, oauth, notifier) -> "SupertrendAutoTrader":
             max_entries_per_symbol_day=int(os.environ.get("SUPERTREND_AUTO_MAX_ENTRIES", "0")),
             reentry_cooldown_min=int(os.environ.get("SUPERTREND_AUTO_REENTRY_COOLDOWN", "0")),
             block_reentry_after_loss=_env_truthy("SUPERTREND_AUTO_BLOCK_REENTRY_LOSS"),
+            # [BAR-OPS-39 P1] 재진입 가격조건(직전 진입가 이하만) — 측정 후 활성 판단, 기본 OFF
+            reentry_only_below_prev_entry=_env_truthy("SUPERTREND_AUTO_REENTRY_BELOW_ENTRY"),
+            reentry_below_tolerance_pct=float(os.environ.get("SUPERTREND_AUTO_REENTRY_BELOW_TOL", "0")),
             max_atr_pct_for_entry=float(os.environ.get("SUPERTREND_AUTO_MAX_ATR_PCT", "0")),
             take_profit_trail_only=_env_truthy("SUPERTREND_AUTO_TP_TRAIL_ONLY"),
             vol_halve_atr_pct=float(os.environ.get("SUPERTREND_AUTO_VOL_HALVE_ATR", "0")),
@@ -1283,6 +1328,50 @@ async def _eod_fill_backfill(oauth) -> None:
         print(f"  [FILL-BACKFILL-ERR] {type(e).__name__}: {e}")
 
 
+async def _eod_buy_snapshot(oauth) -> None:
+    """[BAR-OPS-39 P1] EOD 보유 종목 매수 스냅샷 — fill_audit(ka10073)는 '매도 실현'만
+    기록하므로 매수 체결의 독립 감사 소스가 없었다(6/11 검증자 지적: 매수가가
+    매도 행에 자기참조). 당일 청산분의 매수평단은 ka10073 행에 이미 있고, EOD 보유
+    종목의 매수평단은 브로커 잔고(kt00018 avg_buy_price)로 보완 — 커버리지 완성.
+
+    ※ _eod_fill_backfill 과 별도 함수 — 매도 0건(전량 이월 보유)인 날에도 반드시
+    실행돼야 한다(리뷰 지적: backfill 의 early return 에 묶이면 가장 필요한 날 스킵).
+    """
+    import csv as _c
+    try:
+        account2 = KiwoomNativeAccountFetcher(oauth=oauth)
+        balance2 = await account2.fetch_balance()
+        holdings = list(balance2.holdings or [])
+        if holdings:
+            bpath = _DATA_DIR / "buy_audit.csv"
+            bheaders = ["date", "symbol", "name", "qty", "avg_buy_price", "source"]
+            today2 = _now_kst().strftime("%Y%m%d")
+            existing2: set[tuple] = set()
+            if bpath.exists():
+                try:
+                    with bpath.open(newline="", encoding="utf-8") as f:
+                        for row in _c.DictReader(f):
+                            existing2.add((row.get("date", ""), row.get("symbol", "")))
+                except Exception:
+                    pass
+            rows2 = []
+            for h in holdings:
+                if (today2, h.symbol) in existing2:
+                    continue
+                rows2.append([today2, h.symbol, h.name, int(h.qty),
+                              str(h.avg_buy_price), "kt00018"])
+            if rows2:
+                new_file2 = not bpath.exists()
+                with bpath.open("a", encoding="utf-8", newline="") as f:
+                    w2 = _c.writer(f)
+                    if new_file2:
+                        w2.writerow(bheaders)
+                    w2.writerows(rows2)
+                print(f"  [BUY-SNAPSHOT] EOD 보유 {len(rows2)}종목 매수평단 적재 → {bpath.name}")
+    except Exception as e:  # noqa: BLE001
+        print(f"  [BUY-SNAPSHOT-ERR] {type(e).__name__}: {e}")
+
+
 async def _save_balance_snapshot(oauth) -> None:
     """잔고 스냅샷을 balance_history.json에 추가 (일 1회)."""
     import json
@@ -1434,6 +1523,8 @@ async def _daemon(args):
     await _save_balance_snapshot(oauth)
     # [BAR-OPS-38 P0#5] 당일 체결(실현) 내역 백필 — ka10073 → fill_audit.csv (브로커 권위 체결가)
     await _eod_fill_backfill(oauth)
+    # [BAR-OPS-39 P1] EOD 보유 매수평단 스냅샷 — 매도 0건인 날에도 반드시 실행(별도 함수)
+    await _eod_buy_snapshot(oauth)
     print(f"\n== 장 마감 — 데몬 종료 (매수 {total_bought}건, 매도 {total_sold}건) ==")
 
 

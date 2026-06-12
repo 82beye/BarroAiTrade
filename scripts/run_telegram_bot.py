@@ -634,6 +634,9 @@ def _build_supertrend_auto_trader(notifier):
         max_entries_per_symbol_day=int(os.environ.get("SUPERTREND_AUTO_MAX_ENTRIES", "0")),
         reentry_cooldown_min=int(os.environ.get("SUPERTREND_AUTO_REENTRY_COOLDOWN", "0")),
         block_reentry_after_loss=_env_truthy("SUPERTREND_AUTO_BLOCK_REENTRY_LOSS"),
+        # [BAR-OPS-39 P1] 재진입 가격조건(직전 진입가 이하만) — 측정 후 활성 판단, 기본 OFF
+        reentry_only_below_prev_entry=_env_truthy("SUPERTREND_AUTO_REENTRY_BELOW_ENTRY"),
+        reentry_below_tolerance_pct=float(os.environ.get("SUPERTREND_AUTO_REENTRY_BELOW_TOL", "0")),
         max_atr_pct_for_entry=float(os.environ.get("SUPERTREND_AUTO_MAX_ATR_PCT", "0")),
         take_profit_trail_only=_env_truthy("SUPERTREND_AUTO_TP_TRAIL_ONLY"),
         vol_halve_atr_pct=float(os.environ.get("SUPERTREND_AUTO_VOL_HALVE_ATR", "0")),

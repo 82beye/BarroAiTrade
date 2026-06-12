@@ -957,6 +957,7 @@ async def test_gap_partial_success():
     gate = _FakeGate(); store = _StoreU()
     t = _trader({}, universe=[], gate=gate, pos=store, config=_gap_cfg())
     pos = _pos_overnight()
+    store._d["X"] = pos   # [BAR-OPS-39] 매도 직전 장부 재확인 가드 — 실제 흐름처럼 장부에 존재해야 함
     res = {"entered": [], "exited": []}
     ok = await t._maybe_gap_partial("X", pos, _md_bars(10000, [10850], today_open=10800),
                                     Decimal("0"), res)

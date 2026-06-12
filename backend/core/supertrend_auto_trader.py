@@ -145,6 +145,13 @@ class SupertrendAutoConfig:
     reentry_cooldown_min: int = 0
     # [P0#1] 당일 손절(실현손실) 종목 재진입 금지 — 손절난 종목 추격 차단. False=비활성.
     block_reentry_after_loss: bool = False
+    # [BAR-OPS-39 P1] 재진입 가격조건 — 당일 동일종목 재진입은 '직전 진입가 이하'에서만 허용.
+    #   6/11 자연실험: 티엠씨 st 재진입(직전 f 진입가 25,730 보다 높은 25,850, +25% 급등
+    #   고가권) -123K vs 미래에셋 st 재진입(직전 gold 진입가 25,631 보다 낮은 24,650) +115K
+    #   — '재진입 가격의 위치'가 변수. 459550(6/8) 류 익절 후 고점 재추격을 정밀 차단하고
+    #   눌림목 재진입은 허용한다. 표본 누적 전이므로 default OFF(측정 후 활성 판단).
+    reentry_only_below_prev_entry: bool = False
+    reentry_below_tolerance_pct: float = 0.0   # 직전 진입가 ×(1+이값/100) 까지 허용 여유
     # [P1] 고변동(테마) 종목 진입 억제 — ATR/price 비율이 임계 초과면 supertrend 진입 스킵.
     #   고변동일수록 ATR 밴드가 넓어 신호 지연(459550·두산 밴드폭 9~11%)→음의 기대값. 0=비활성. 예 0.05.
     max_atr_pct_for_entry: float = 0.0
@@ -249,6 +256,7 @@ class SupertrendAutoTrader:
         self._entries_today: dict[str, int] = {}   # symbol -> 당일 진입 횟수
         self._last_exit: dict[str, datetime] = {}   # symbol -> 마지막 청산 시각(UTC)
         self._loss_locked: set[str] = set()         # 당일 손절(실현손실) 종목
+        self._last_entry_px: dict[str, float] = {}  # [BAR-OPS-39] symbol -> 당일 직전 진입가
 
     # ── 라이프사이클 ──────────────────────────────────────────────────────────
     async def run_forever(self) -> None:
@@ -358,6 +366,11 @@ class SupertrendAutoTrader:
                 qty = int(getattr(pos, "total_recommended_qty", 0)) or self._filled_qty(pos)
                 if qty <= 0:
                     continue
+                # [BAR-OPS-39 P1] 매도 직전 장부 재확인 — 데몬 매도평가가 같은 종목을
+                #   선청산했으면(remove) 중복 매도 회피(대칭 방어, 데몬 쪽과 동일).
+                if self._pos.get(symbol) is None:
+                    logger.info("슈퍼트렌드 청산 skip: %s — 타 액터 선청산(장부 부재)", symbol)
+                    continue
                 r = await self._gate.place_sell(
                     symbol=symbol, qty=qty,
                     daily_pnl_pct=daily_pnl_pct, strategy_id=_STRATEGY_ID,
@@ -449,6 +462,16 @@ class SupertrendAutoTrader:
                     logger.debug("슈퍼트렌드 진입 제외(저가주): %s @%s < min_price %s",
                                  symbol, price, self.config.min_price)
                     continue
+                # [BAR-OPS-39 P1] 재진입 가격조건 — 직전 진입가 ×(1+tol) 초과 재진입 차단.
+                #   익절/손절 후 더 높은 가격 재추격(459550·티엠씨 패턴)만 정밀 차단,
+                #   눌림목(직전 진입가 이하) 재진입은 허용. default OFF.
+                if self.config.reentry_only_below_prev_entry:
+                    _prev_px = self._last_entry_px.get(symbol, 0.0)
+                    _tol = self.config.reentry_below_tolerance_pct
+                    if _prev_px > 0 and float(price) > _prev_px * (1 + _tol / 100.0):
+                        logger.debug("슈퍼트렌드 진입 제외(재진입가격): %s @%s > 직전 진입가 %.0f×(1+%.1f%%)",
+                                     symbol, price, _prev_px, _tol)
+                        continue
                 # [P1] 고변동(테마) 필터 — ATR/price 과대 종목 진입 스킵(신호 지연으로 음의 기대값).
                 atr_pct = self._atr_pct(res, float(price))
                 if self.config.max_atr_pct_for_entry > 0 and atr_pct > self.config.max_atr_pct_for_entry:
@@ -526,6 +549,8 @@ class SupertrendAutoTrader:
                 placed += 1
                 # [P0#1] 당일 진입 횟수 기록 — 동일종목 재진입 상한 평가용.
                 self._entries_today[rec.symbol] = self._entries_today.get(rec.symbol, 0) + 1
+                # [BAR-OPS-39] 재진입 가격조건용 직전 진입가 기록.
+                self._last_entry_px[rec.symbol] = float(rec.cur_price)
                 result["entered"].append({"symbol": rec.symbol, "qty": rec.recommended_qty,
                                           "price": float(rec.cur_price),
                                           "order_no": getattr(r, "order_no", ""),
@@ -744,6 +769,7 @@ class SupertrendAutoTrader:
             self._entries_today = {}
             self._loss_locked = set()
             self._last_exit = {}
+            self._last_entry_px = {}  # [BAR-OPS-39] 재진입 가격조건도 당일 단위
 
     def _reentry_blocked(self, symbol: str) -> Optional[str]:
         """[P0#1] 동일종목 재진입 차단 사유(없으면 None). 전부 default OFF."""
@@ -965,6 +991,10 @@ class SupertrendAutoTrader:
         held = int(getattr(pos, "total_recommended_qty", 0)) or self._filled_qty(pos)
         part = int(held * c.runner_gap_partial_ratio)
         if part <= 0 or part >= held:
+            return False
+        # [BAR-OPS-39 P1] 매도 직전 장부 재확인 — 전량 청산 경로와 동일한 경합 가드(대칭 완성).
+        if self._pos.get(symbol) is None:
+            logger.info("갭 부분익절 skip: %s — 타 액터 선청산(장부 부재)", symbol)
             return False
         r = await self._gate.place_sell(
             symbol=symbol, qty=part, daily_pnl_pct=daily_pnl_pct, strategy_id=_STRATEGY_ID,
