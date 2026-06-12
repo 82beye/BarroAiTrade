@@ -33,8 +33,8 @@ sys.path.insert(0, str(_REPO_ROOT))
 from backend.core.journal.active_positions import ActivePositionStore
 
 STRATEGY_NAMES = ["f_zone", "sf_zone", "gold_zone", "swing_38", "scalping_consensus"]
-COMMISSION_RATE = Decimal("0.00015")   # 매수·매도 각 0.015% (키움 위탁 표준)
-TAX_RATE = Decimal("0.0018")           # 매도 시 0.18% (증권거래세+농특세)
+from backend.core.trading_costs import COMMISSION_RATE  # [BAR-OPS-39] 실측(Decimal 0.00175)
+from backend.core.trading_costs import TAX_RATE_SELL as TAX_RATE  # [BAR-OPS-39] 실측(0.0020)
 
 IMPORTS_ROOT = _REPO_ROOT / "analysis" / "imports"
 LEDGER_PATH = _REPO_ROOT / "analysis" / "strategy_ledger.csv"

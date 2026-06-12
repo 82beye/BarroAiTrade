@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 import scripts._daily_strategy_audit as audit
 from scripts._daily_strategy_audit import fifo_roundtrip_pnl, load_orders
 
-COMM = 0.00015
-TAX = 0.0018
+# [BAR-OPS-39] 중앙 비용(실측) 자동 추종 — 감사 스크립트와 동일 소스
+from scripts._daily_strategy_audit import COMMISSION_RATE as COMM, TAX_RATE as TAX
 
 
 class TestCarrySplit:

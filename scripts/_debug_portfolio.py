@@ -14,6 +14,8 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 from backend.core.backtester import PortfolioSimulator
 from backend.models.market import MarketType, OHLCV
+from backend.core.trading_costs import COMMISSION_PCT, TAX_PCT_ON_SELL  # [BAR-OPS-39] 실측
+from backend.core.trading_costs import COMMISSION_RATE as COMMISSION_RATE_DEC, TAX_RATE_SELL as TAX_RATE_SELL_DEC
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -39,8 +41,8 @@ psim = PortfolioSimulator(
     max_per_position=Decimal("0.1"),
     max_total_position=Decimal("0.9"),
     max_concurrent=10,
-    commission_pct=0.015,
-    tax_pct_on_sell=0.18,
+    commission_pct=COMMISSION_PCT,
+    tax_pct_on_sell=TAX_PCT_ON_SELL,
 )
 r = psim.run(
     candles_by,
@@ -69,8 +71,8 @@ for sym in SYMS:
 print()
 
 # cash 재구성 — 거래 기록만으로
-rate = Decimal("0.00015")
-tax_rate = Decimal("0.0018")
+rate = COMMISSION_RATE_DEC  # [BAR-OPS-39] 실측 — 시뮬레이터와 동일 소스
+tax_rate = TAX_RATE_SELL_DEC  # [BAR-OPS-39] 실측
 cash_check = r.initial_capital
 for t in r.trades:
     notional = t.price * t.qty

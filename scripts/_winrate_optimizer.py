@@ -20,8 +20,10 @@ sys.path.insert(0, str(_REPO))
 
 from scripts._oos_validation import select_random_universe, load_daily
 
-COMMISSION = 0.00015
-TAX = 0.0018
+# [BAR-OPS-39] 브로커 실측 비용
+from backend.core.trading_costs import COMMISSION_RATE as _CR39, TAX_RATE_SELL as _TR39
+COMMISSION = float(_CR39)
+TAX = float(_TR39)
 STRATEGIES = ["f_zone", "sf_zone", "gold_zone"]
 MIN_TRADES = 30
 

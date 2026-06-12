@@ -1,6 +1,8 @@
 """호가 스캘핑 전략 (ob_scalp) — 마이크로구조 신호 + 진입판정 + ka10004 파서 테스트."""
 from __future__ import annotations
 
+import pytest
+
 from datetime import datetime, timezone
 
 from backend.core.gateway.kiwoom_native_orderbook import parse_orderbook, _abs_int
@@ -34,6 +36,19 @@ BALANCED = _book(bids=[(10000, 100), (9990, 100), (9980, 100)],
                  asks=[(10010, 100), (10020, 100), (10030, 100)])
 # 넓은 스프레드 → 미진입
 WIDE = _book(bids=[(10000, 500), (9990, 400)], asks=[(10100, 50), (10110, 40)])
+
+
+
+@pytest.fixture(autouse=True)
+def _legacy_costs(monkeypatch):
+    """[BAR-OPS-39] 비용 상수가 브로커 실측(왕복 0.55%)으로 교체됨 — 본 파일의 메커니즘
+    테스트들은 설계 당시 요율(0.015%/0.18%) 기준 시나리오(2.1틱 본전 등)라, 요율을 고정해
+    '비용 게이트/TP 내재화 메커니즘'만 검증한다. 실측 요율 검증은 test_bar_ops_39.py.
+    (함수들은 모듈 전역을 호출 시점에 읽으므로 monkeypatch 가 적용된다.)"""
+    import backend.core.strategy.ob_scalp as ob
+    monkeypatch.setattr(ob, "COMMISSION_RATE", 0.00015)
+    monkeypatch.setattr(ob, "TAX_RATE", 0.0018)
+    monkeypatch.setattr(ob, "ROUND_TRIP_COST_PCT", 2 * 0.00015 + 0.0018)
 
 
 class TestTickSize:
@@ -112,8 +127,9 @@ class TestCostModel:
     """수수료+제세금 내재화 — 스캘핑 생존의 핵심."""
 
     def test_round_trip_cost(self):
-        # 수수료 0.015%×2 + 거래세 0.18% ≈ 0.21%
-        assert abs(ROUND_TRIP_COST_PCT - 0.0021) < 1e-9
+        # [BAR-OPS-39] 브로커 실측: 수수료 0.175%×2 + 거래세 0.20% = 0.55%
+        #   (import-time 바인딩 상수 — legacy fixture 와 무관하게 실측값이어야 함)
+        assert abs(ROUND_TRIP_COST_PCT - 0.0055) < 1e-9
 
     def test_breakeven_ticks(self):
         assert abs(breakeven_ticks(10000, 10) - 2.1) < 0.01   # 0.21%×10000/10

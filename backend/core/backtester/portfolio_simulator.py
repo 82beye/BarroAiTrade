@@ -31,6 +31,7 @@ from backend.core.backtester.performance import PerformanceMetrics, compute_metr
 from backend.models.exit_order import PositionState
 from backend.models.market import MarketType, OHLCV
 from backend.models.strategy import AnalysisContext, ExitPlan
+from backend.core import trading_costs  # [BAR-OPS-39] 실측 비용 단일 진실원천
 
 
 @dataclass(frozen=True)
@@ -108,8 +109,9 @@ class PortfolioSimulator:
         max_total_position: Decimal = Decimal("0.90"),
         max_concurrent: int = 10,
         warmup_candles: int = 31,
-        commission_pct: float = 0.015,
-        tax_pct_on_sell: float = 0.18,
+        # [BAR-OPS-39] 브로커 실측 비용 default (종전 0.015/0.18 가정 — 실측의 1/11.6)
+        commission_pct: float = trading_costs.COMMISSION_PCT,
+        tax_pct_on_sell: float = trading_costs.TAX_PCT_ON_SELL,
         slippage_pct: float = 0.0,
         entry_on_next_open: bool = True,
         exit_on_intrabar: bool = True,

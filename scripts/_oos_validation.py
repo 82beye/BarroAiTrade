@@ -29,8 +29,8 @@ sys.path.insert(0, str(_REPO))
 
 DAILY_CACHE = _REPO / "data" / "ohlcv_cache"
 STRATEGIES = ["f_zone", "sf_zone", "gold_zone"]
-COMMISSION_PCT = 0.015
-TAX_PCT = 0.18
+# [BAR-OPS-39] 브로커 실측 비용 — OOS 관문 판정이 실측 기준으로 보수화됨(의도).
+from backend.core.trading_costs import COMMISSION_PCT, TAX_PCT_ON_SELL as TAX_PCT
 
 # 판정 기준 (grid-backtest §4-6)
 MIN_ACTIVE_SYMBOLS = 15

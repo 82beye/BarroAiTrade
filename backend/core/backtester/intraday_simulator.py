@@ -28,6 +28,7 @@ from backend.models.strategy import (
     StopLoss,
     TakeProfitTier,
 )
+from backend.core import trading_costs  # [BAR-OPS-39] 실측 비용 단일 진실원천
 
 logger = logging.getLogger(__name__)
 
@@ -301,8 +302,11 @@ class IntradaySimulator:
         *,
         entry_on_next_open: bool = True,
         exit_on_intrabar: bool = True,
-        commission_pct: float = 0.0,
-        tax_pct_on_sell: float = 0.0,
+        # [BAR-OPS-39] default 를 브로커 실측 비용으로 (종전 0.0/0.0 — 라이브 선정
+        #   경로 3곳이 무인자 생성이라 '비용 0(gross) 기준 best_pnl>0 게이트'로 동작했음.
+        #   6/11 실측: 편도 0.175% + 매도세 0.20%). gross 가 필요한 곳은 명시적 0.0 주입.
+        commission_pct: float = trading_costs.COMMISSION_PCT,
+        tax_pct_on_sell: float = trading_costs.TAX_PCT_ON_SELL,
         slippage_pct: float = 0.0,
         scalping_provider: Optional[ScalpingProvider] = None,
         position_value: Optional[Decimal] = None,

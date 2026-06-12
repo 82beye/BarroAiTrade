@@ -17,6 +17,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 from backend.core.backtester import IntradaySimulator
 from backend.models.market import MarketType, OHLCV
+from backend.core.trading_costs import COMMISSION_PCT, TAX_PCT_ON_SELL  # [BAR-OPS-39] 실측
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "data" / "ohlcv_cache"
@@ -56,7 +57,7 @@ def run_group(name: str, symbols: list[str]) -> None:
         sim_fixed = IntradaySimulator(
             warmup_candles=31, position_qty=Decimal("100"),
             entry_on_next_open=True, exit_on_intrabar=True,
-            commission_pct=0.015, tax_pct_on_sell=0.18,
+            commission_pct=COMMISSION_PCT, tax_pct_on_sell=TAX_PCT_ON_SELL,
             f_zone_atr_exit=False,
         )
         r_fix = sim_fixed.run(candles, symbol=sym, strategies=["f_zone"])
@@ -64,7 +65,7 @@ def run_group(name: str, symbols: list[str]) -> None:
         sim_atr = IntradaySimulator(
             warmup_candles=31, position_qty=Decimal("100"),
             entry_on_next_open=True, exit_on_intrabar=True,
-            commission_pct=0.015, tax_pct_on_sell=0.18,
+            commission_pct=COMMISSION_PCT, tax_pct_on_sell=TAX_PCT_ON_SELL,
             f_zone_atr_exit=True,
         )
         r_atr = sim_atr.run(candles, symbol=sym, strategies=["f_zone"])

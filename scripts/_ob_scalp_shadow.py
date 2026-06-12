@@ -148,7 +148,7 @@ async def run_shadow(args: argparse.Namespace) -> int:
     from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
     from backend.core.gateway.kiwoom_native_orderbook import KiwoomNativeOrderbookFetcher
     from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
-    from backend.core.strategy.ob_scalp import OBScalpStrategy, OBScalpParams, krx_tick_size, net_return_pct
+    from backend.core.strategy.ob_scalp import OBScalpStrategy, OBScalpParams, krx_tick_size, net_return_pct, ROUND_TRIP_COST_PCT
     from backend.models.market import OHLCV, OrderBook, MarketType
     from backend.models.strategy import AnalysisContext
 
@@ -376,7 +376,7 @@ async def run_shadow(args: argparse.Namespace) -> int:
             "tp_hits": stats.tp_hits, "sl_hits": stats.sl_hits, "time_exits": stats.time_exits,
             "win_rate_pct": round(stats.win_rate(), 2),
             "expectancy_net_pct": round(stats.expectancy(), 4),
-            "round_trip_cost_pct": 0.21,
+            "round_trip_cost_pct": round(ROUND_TRIP_COST_PCT * 100, 4),  # [BAR-OPS-39] 실측 연동
         }
         logger.write("session_summary", summary)
         print("\n" + "═" * 60)

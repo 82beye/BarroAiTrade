@@ -32,6 +32,7 @@ from pydantic import SecretStr
 from backend.core.backtester import IntradaySimulator, compute_metrics
 from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
+from backend.core.trading_costs import COMMISSION_PCT, TAX_PCT_ON_SELL  # [BAR-OPS-39] 실측
 
 # 2026-05-14 자금 게이트(균등 분배, top 15) 통과 10종목 + 추천 qty
 RECOMMENDED = [
@@ -101,8 +102,8 @@ async def main() -> None:
             position_qty=Decimal(str(qty)),
             entry_on_next_open=True,
             exit_on_intrabar=True,
-            commission_pct=0.015,
-            tax_pct_on_sell=0.18,
+            commission_pct=COMMISSION_PCT,
+            tax_pct_on_sell=TAX_PCT_ON_SELL,
         )
         result = sim.run(candles, symbol=sym, strategies=STRATEGIES)
 

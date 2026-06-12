@@ -50,9 +50,14 @@ def krx_tick_size(price: float) -> int:
 
 
 # ─── 비용 모델 (수수료 + 제세금) — 스캘핑 생존의 핵심 ─────────────────────
-COMMISSION_RATE = 0.00015   # 매수·매도 각 0.015% (키움 위탁)
-TAX_RATE = 0.0018           # 매도 0.18% (증권거래세+농특세)
-ROUND_TRIP_COST_PCT = 2 * COMMISSION_RATE + TAX_RATE   # ≈ 0.21% (동가 근사)
+# [BAR-OPS-39] 브로커 실측 비용(trading_costs)으로 교체 — 종전 가정(왕복 ≈0.21%)의
+#   2.6배(≈0.55%). breakeven_ticks 가 그만큼 늘어 진입 게이트·TP 가 보수화된다(의도).
+from backend.core.trading_costs import (
+    COMMISSION_RATE as _CR, TAX_RATE_SELL as _TR, ROUND_TRIP_COST_RATE as _RT,
+)
+COMMISSION_RATE = float(_CR)   # 매수·매도 각 (실측 0.175%)
+TAX_RATE = float(_TR)          # 매도 (실측 0.20%)
+ROUND_TRIP_COST_PCT = float(_RT)   # 왕복 ≈ 0.55% (동가 근사)
 
 
 def net_return_pct(buy_price: float, sell_price: float) -> float:

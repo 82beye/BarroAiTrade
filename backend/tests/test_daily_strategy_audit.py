@@ -10,8 +10,8 @@ from scripts._daily_strategy_audit import (
     strategy_alarms,
 )
 
-COMM = 0.00015
-TAX = 0.0018
+# [BAR-OPS-39] 중앙 비용(실측) 자동 추종 — 감사 스크립트와 동일 소스
+from scripts._daily_strategy_audit import COMMISSION_RATE as COMM, TAX_RATE as TAX
 
 
 def _cost(sell_value: float, basis: float) -> float:

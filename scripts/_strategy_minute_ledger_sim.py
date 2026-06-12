@@ -44,8 +44,8 @@ from backend.models.strategy import AnalysisContext
 STRATEGIES = ["f_zone", "sf_zone", "gold_zone", "swing_38"]
 WARMUP = 31
 QTY = Decimal("100")
-COMMISSION_RATE = Decimal("0.00015")
-TAX_RATE = Decimal("0.0018")
+# [BAR-OPS-39] 브로커 실측 비용
+from backend.core.trading_costs import COMMISSION_RATE, TAX_RATE_SELL as TAX_RATE
 TIME_EXIT_H, TIME_EXIT_M = 14, 50
 
 TIME_SL_STAGES = [

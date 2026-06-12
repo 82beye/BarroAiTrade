@@ -21,6 +21,7 @@ from backend.core.backtester import IntradaySimulator, compute_metrics
 from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
 from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
+from backend.core.trading_costs import COMMISSION_PCT, TAX_PCT_ON_SELL  # [BAR-OPS-39] 실측
 
 STRATEGIES = ["f_zone", "sf_zone", "gold_zone", "swing_38", "scalping_consensus"]
 
@@ -53,7 +54,7 @@ async def main() -> None:
         sim = IntradaySimulator(
             warmup_candles=31, position_qty=Decimal("100"),
             entry_on_next_open=True, exit_on_intrabar=True,
-            commission_pct=0.015, tax_pct_on_sell=0.18,
+            commission_pct=COMMISSION_PCT, tax_pct_on_sell=TAX_PCT_ON_SELL,
         )
         result = sim.run(candles, symbol=c.symbol, strategies=STRATEGIES)
         last_date = candles[-1].timestamp.date()

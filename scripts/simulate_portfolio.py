@@ -34,6 +34,7 @@ from backend.core.backtester import (
 from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
 from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
+from backend.core.trading_costs import COMMISSION_PCT, TAX_PCT_ON_SELL  # [BAR-OPS-39] 실측
 
 
 async def main() -> None:
@@ -148,8 +149,8 @@ async def main() -> None:
         max_total_position=Decimal(str(args.max_total)),
         max_concurrent=args.max_concurrent,
         warmup_candles=31,
-        commission_pct=0.015,
-        tax_pct_on_sell=0.18,
+        commission_pct=COMMISSION_PCT,
+        tax_pct_on_sell=TAX_PCT_ON_SELL,
         slippage_pct=args.slippage,
         strategy_weights=weights or None,
         f_zone_atr_exit=f_zone_atr_final,

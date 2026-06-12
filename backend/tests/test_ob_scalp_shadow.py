@@ -6,6 +6,8 @@ L2 호가 이력이 없어 ob_scalp 은 백테스트 불가 → shadow 실시간
 """
 from __future__ import annotations
 
+import pytest
+
 from datetime import datetime, timedelta, timezone
 
 from scripts._ob_scalp_shadow import Observation, ShadowStats
@@ -22,6 +24,19 @@ def _obs(entry_ask=10010.0, tp_target=10060.0, sl_price=9980.0, horizon_s=60):
         breakeven_ticks=2.1, ofi=0.7, spread_ticks=1.0, net_tp_pct=0.3,
         resolve_at=T0 + timedelta(seconds=horizon_s), min_bid=entry_ask, max_bid=entry_ask,
     )
+
+
+
+@pytest.fixture(autouse=True)
+def _legacy_costs(monkeypatch):
+    """[BAR-OPS-39] 비용 상수가 브로커 실측(왕복 0.55%)으로 교체됨 — 본 파일의 메커니즘
+    테스트들은 설계 당시 요율(0.015%/0.18%) 기준 시나리오(2.1틱 본전 등)라, 요율을 고정해
+    '비용 게이트/TP 내재화 메커니즘'만 검증한다. 실측 요율 검증은 test_bar_ops_39.py.
+    (함수들은 모듈 전역을 호출 시점에 읽으므로 monkeypatch 가 적용된다.)"""
+    import backend.core.strategy.ob_scalp as ob
+    monkeypatch.setattr(ob, "COMMISSION_RATE", 0.00015)
+    monkeypatch.setattr(ob, "TAX_RATE", 0.0018)
+    monkeypatch.setattr(ob, "ROUND_TRIP_COST_PCT", 2 * 0.00015 + 0.0018)
 
 
 class TestFirstTouch:
