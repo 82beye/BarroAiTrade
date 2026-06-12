@@ -1,0 +1,703 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>2026-06-11_매매복기</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<h1 id="barroaitrade-2026-06-11">BarroAiTrade 매매복기 — 2026-06-11 (상세)</h1>
+<p><em>생성: 2026-06-12 / 소스: <strong>fill_audit.csv(브로커 체결 실측, ka10073)</strong> · order_audit.csv · active_positions.json · balance_history.json · 네이버 1분봉·일봉(10종목)</em></p>
+<blockquote>
+<p><strong>데이터 신뢰도 노트</strong>: BAR-OPS-38 배포로 이날부터 <strong>체결가·수수료·세금이 브로커 실측</strong>이다(추정 아님 — 6/8~6/10 리포트와의 결정적 차이). 독립 검증 에이전트 2개(산술 재계산·데이터 정합성)가 전 수치를 원본에서 재계산해 <strong>산술 전 항목 일치</strong>(±0.01원 부동소수 잔차), 수량 수지(매수 1,046 − 매도 991 = EOD 보유 55주) 정합 확인. 유일한 비검증 항목은 보유종목 종가 40,800원(네이버 시세 — 일봉 캐시가 6/10에서 멈춰 로컬 검증 불가)으로, 15:20 잔고 스냅샷 기준(41,200원)을 병기한다. 매수 체결 행이 fill_audit에 없어 매수가는 매도 행의 브로커 제공 평단에 의존(검증 노트 참조).</p>
+</blockquote>
+<h2 id="_1">한 줄 요약</h2>
+<blockquote>
+<p><strong>리스크 가드(BAR-OPS-38) 가동 첫날 + 초폭등 테마장</strong>(거래 10종목 중 5개가 +15%~상한가 마감). 트레이딩 자체는 좋았다 — 16트립 승률 68.8%, 매매차익(gross) <strong>+67,255원 흑자</strong>. 그런데 <strong>실측 수수료가 비용 모델의 11.6배</strong>(왕복 0.349% vs 0.03%)로 드러나며 비용 -187,207원이 이를 삼켜 실현 <strong>-119,952원(-0.24%)</strong>. 보유평가 +38,500원(현대무벡스 이월) 합산 당일 종합 <strong>-81,452원(-0.16%)</strong> — 사실상 본전. 손실은 또 09시 갭 위 진입 3건(-353K)에 집중됐고, 가드 갭 임계(15%) <strong>바로 아래(13.1~13.5%)로 전부 통과</strong>했다. 이날의 최대 수확은 손익이 아니라 <strong>측정</strong>이다: 실측 체결 데이터로 ①비용 구조 ②추정 방법론의 낙관 편향(-1.79M 누적, 85%가 비용 모델) ③T+2 예측 95.6% 적중이 전부 정량화됐다.</p>
+</blockquote>
+<h2 id="kpi">KPI</h2>
+<table>
+<thead>
+<tr>
+<th>지표</th>
+<th style="text-align: right;">값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>실현손익 (브로커 실측)</td>
+<td style="text-align: right;"><strong>-119,952원 (-0.24%)</strong> = gross +67,255 − 수수료 145,520 − 세금 41,687</td>
+</tr>
+<tr>
+<td>보유 평가손익 (현대무벡스 55주)</td>
+<td style="text-align: right;">+38,500원 (종가 40,800 기준) / +60,500원 (15:20 잔고 기준 41,200)</td>
+</tr>
+<tr>
+<td><strong>당일 종합 (실현+평가)</strong></td>
+<td style="text-align: right;"><strong>-81,452원 (-0.16%)</strong> (잔고 기준 -59,452원)</td>
+</tr>
+<tr>
+<td>청산 라운드트립</td>
+<td style="text-align: right;">16건 · 승 11 / 패 5 · <strong>승률 68.8%</strong></td>
+</tr>
+<tr>
+<td>실측 비용률</td>
+<td style="text-align: right;">수수료 <strong>왕복 0.349%</strong> + 거래세 매도 0.200% (모델 가정: 0.03%+0.18%)</td>
+</tr>
+<tr>
+<td>주문</td>
+<td style="text-align: right;">ORDERED 33 / FAILED 1(중복 매도, 무피해) / BLOCKED 0 / UNFILLED 0</td>
+</tr>
+<tr>
+<td>시간대별</td>
+<td style="text-align: right;">09시 <strong>-314,971</strong>(7건) / 10시 +151,663(4건) / 11시 +43,356(5건)</td>
+</tr>
+<tr>
+<td>추정예탁자산 (EOD)</td>
+<td style="text-align: right;"><strong>47,974,914원</strong> — 6/8 재투입 후 4일 누적 -1,631,595원(-3.3%)</td>
+</tr>
+<tr>
+<td>T+2 검증 (6/10 리포트 예측)</td>
+<td style="text-align: right;">예수금 예측 29,132,716 vs 실측 27,840,458 — <strong>95.6% 적중</strong> (잔차는 비용·슬리피지)</td>
+</tr>
+<tr>
+<td>가드 작동</td>
+<td style="text-align: right;">이월한도 통과(2.2M &lt; 한도 9.6M)·EOD 체결백필 ✓·차단 0건(당일손실 -3% 미도달 정상)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_2">거래 요약 — 라운드트립 (매도주문 단위, 브로커 실측가)</h2>
+<table>
+<thead>
+<tr>
+<th>종목</th>
+<th style="text-align: right;">수량</th>
+<th style="text-align: right;">매수가</th>
+<th style="text-align: right;">매도가</th>
+<th style="text-align: right;">net손익</th>
+<th style="text-align: right;">수익률</th>
+<th>전략</th>
+<th>보유(KST)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>대명에너지(389260)</td>
+<td style="text-align: right;">84</td>
+<td style="text-align: right;">15,840</td>
+<td style="text-align: right;">15,011</td>
+<td style="text-align: right;"><strong>-81,191</strong></td>
+<td style="text-align: right;">-5.23%</td>
+<td>gold_zone</td>
+<td>09:06→09:11</td>
+</tr>
+<tr>
+<td>SK이터닉스(475150)</td>
+<td style="text-align: right;">44</td>
+<td style="text-align: right;">50,333</td>
+<td style="text-align: right;">47,200</td>
+<td style="text-align: right;"><strong>-157,010</strong></td>
+<td style="text-align: right;">-6.22%</td>
+<td>gold_zone</td>
+<td>09:09→09:20</td>
+</tr>
+<tr>
+<td>삼양컴텍(484590)</td>
+<td style="text-align: right;">79</td>
+<td style="text-align: right;">8,400</td>
+<td style="text-align: right;">8,780</td>
+<td style="text-align: right;">+23,915</td>
+<td style="text-align: right;">+4.53%</td>
+<td>gold_zone</td>
+<td>09:14→09:20</td>
+</tr>
+<tr>
+<td>스피어(347700)</td>
+<td style="text-align: right;">67</td>
+<td style="text-align: right;">32,822</td>
+<td style="text-align: right;">31,150</td>
+<td style="text-align: right;"><strong>-131,163</strong></td>
+<td style="text-align: right;">-5.09%</td>
+<td>f_zone</td>
+<td>09:08→09:21</td>
+</tr>
+<tr>
+<td>삼양컴텍</td>
+<td style="text-align: right;">80</td>
+<td style="text-align: right;">8,400</td>
+<td style="text-align: right;">8,949</td>
+<td style="text-align: right;">+37,641</td>
+<td style="text-align: right;">+6.53%</td>
+<td>gold_zone</td>
+<td>09:14→09:21</td>
+</tr>
+<tr>
+<td>티엠씨(217590)</td>
+<td style="text-align: right;">87</td>
+<td style="text-align: right;">25,730</td>
+<td style="text-align: right;">27,297</td>
+<td style="text-align: right;"><strong>+115,475</strong></td>
+<td style="text-align: right;">+6.09%</td>
+<td>f_zone</td>
+<td>09:30→09:41</td>
+</tr>
+<tr>
+<td>티엠씨</td>
+<td style="text-align: right;">86</td>
+<td style="text-align: right;">25,850</td>
+<td style="text-align: right;">24,650</td>
+<td style="text-align: right;"><strong>-122,638</strong></td>
+<td style="text-align: right;">-4.64%</td>
+<td>supertrend</td>
+<td>09:51→09:57</td>
+</tr>
+<tr>
+<td>원익IPS(240810)</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">130,400</td>
+<td style="text-align: right;">135,900</td>
+<td style="text-align: right;">+12,895</td>
+<td style="text-align: right;">+4.22%</td>
+<td><strong>sf_zone</strong></td>
+<td>09:48→10:05</td>
+</tr>
+<tr>
+<td>원익IPS</td>
+<td style="text-align: right;">7</td>
+<td style="text-align: right;">130,400</td>
+<td style="text-align: right;">135,529</td>
+<td style="text-align: right;">+27,493</td>
+<td style="text-align: right;">+3.93%</td>
+<td><strong>sf_zone</strong></td>
+<td>09:48→10:06</td>
+</tr>
+<tr>
+<td>라이콤(388790)</td>
+<td style="text-align: right;">136</td>
+<td style="text-align: right;">8,142</td>
+<td style="text-align: right;">8,560</td>
+<td style="text-align: right;">+46,593</td>
+<td style="text-align: right;">+5.14%</td>
+<td>supertrend</td>
+<td>09:36→10:14</td>
+</tr>
+<tr>
+<td>라이콤</td>
+<td style="text-align: right;">137</td>
+<td style="text-align: right;">8,142</td>
+<td style="text-align: right;">8,690</td>
+<td style="text-align: right;">+64,682</td>
+<td style="text-align: right;">+6.73%</td>
+<td>supertrend</td>
+<td>09:36→10:17</td>
+</tr>
+<tr>
+<td>미래에셋생명(085620)</td>
+<td style="text-align: right;">86</td>
+<td style="text-align: right;">25,631</td>
+<td style="text-align: right;">24,527</td>
+<td style="text-align: right;"><strong>-114,272</strong></td>
+<td style="text-align: right;">-4.31%</td>
+<td>gold_zone</td>
+<td>11:12→11:21</td>
+</tr>
+<tr>
+<td>미래에셋생명</td>
+<td style="text-align: right;">44</td>
+<td style="text-align: right;">24,650</td>
+<td style="text-align: right;">26,042</td>
+<td style="text-align: right;">+51,190</td>
+<td style="text-align: right;">+5.65%</td>
+<td>supertrend</td>
+<td>11:23→11:30</td>
+</tr>
+<tr>
+<td>미래에셋생명</td>
+<td style="text-align: right;">45</td>
+<td style="text-align: right;">24,650</td>
+<td style="text-align: right;">26,300</td>
+<td style="text-align: right;">+63,876</td>
+<td style="text-align: right;">+6.69%</td>
+<td>supertrend</td>
+<td>11:23→11:35</td>
+</tr>
+<tr>
+<td>주성엔지니어링(036930)</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">220,750</td>
+<td style="text-align: right;">229,250</td>
+<td style="text-align: right;">+19,405</td>
+<td style="text-align: right;">+3.85%</td>
+<td>f_zone</td>
+<td>11:21→11:56</td>
+</tr>
+<tr>
+<td>주성엔지니어링</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">220,750</td>
+<td style="text-align: right;">230,500</td>
+<td style="text-align: right;">+23,157</td>
+<td style="text-align: right;">+4.42%</td>
+<td>f_zone</td>
+<td>11:21→11:57</td>
+</tr>
+</tbody>
+</table>
+<p><strong>보유 미청산</strong>: 현대무벡스(319400) <strong>55주</strong> 평단 40,100 (f_zone, <strong>14:33/14:38 진입</strong> — 컷오프 사각지대, 인시던트 2) → 종가 40,800 평가 <strong>+38,500원 (+1.75%)</strong>.</p>
+<h2 id="_3">전략별 집계</h2>
+<table>
+<thead>
+<tr>
+<th>전략</th>
+<th style="text-align: right;">청산</th>
+<th style="text-align: right;">승</th>
+<th style="text-align: right;">패</th>
+<th style="text-align: right;">승률</th>
+<th style="text-align: right;">실현손익</th>
+<th style="text-align: right;">비용</th>
+<th>KPI 대조</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>gold_zone</strong></td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">40.0%</td>
+<td style="text-align: right;"><strong>-290,917</strong></td>
+<td style="text-align: right;">62,412</td>
+<td>❌ 45% 미달</td>
+<td>갭 위(+13%대) 진입 3건 전패 -353K</td>
+</tr>
+<tr>
+<td>supertrend</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">80.0%</td>
+<td style="text-align: right;"><strong>+103,703</strong></td>
+<td style="text-align: right;">60,557</td>
+<td>—</td>
+<td>085620 재진입 +115K가 백미</td>
+</tr>
+<tr>
+<td>f_zone</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">75.0%</td>
+<td style="text-align: right;">+26,874</td>
+<td style="text-align: right;">52,226</td>
+<td>✅ 60% 충족</td>
+<td>티엠씨 +115K vs 스피어 -131K</td>
+</tr>
+<tr>
+<td>sf_zone</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100%</td>
+<td style="text-align: right;">+40,388</td>
+<td style="text-align: right;">12,012</td>
+<td>✅ 주1회 발동+승</td>
+<td><strong>첫 실전 발동</strong> (원익IPS)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="611-10-5-15">종목 일봉 맥락 (6/11 = 초폭등 테마장 — 10종목 중 5개 +15%~상한가)</h2>
+<table>
+<thead>
+<tr>
+<th>종목</th>
+<th style="text-align: right;">전일종가</th>
+<th style="text-align: right;">시가(갭)</th>
+<th style="text-align: right;">고가</th>
+<th style="text-align: right;">저가</th>
+<th style="text-align: right;">종가(등락)</th>
+<th>시스템 결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>389260 대명에너지</td>
+<td style="text-align: right;">14,000</td>
+<td style="text-align: right;">16,200 (+15.7%)</td>
+<td style="text-align: right;">16,400</td>
+<td style="text-align: right;">13,350</td>
+<td style="text-align: right;">14,020 (+0.1%)</td>
+<td>gold 갭 위 진입 -81K, 손절 정당(왕복 붕괴)</td>
+</tr>
+<tr>
+<td>347700 스피어</td>
+<td style="text-align: right;">29,650</td>
+<td style="text-align: right;">31,800 (+7.3%)</td>
+<td style="text-align: right;">38,500</td>
+<td style="text-align: right;">30,350</td>
+<td style="text-align: right;"><strong>38,500 (+29.8% 상한가)</strong></td>
+<td>f -131K 손절 <strong>직후 상한가 직행</strong></td>
+</tr>
+<tr>
+<td>475150 SK이터닉스</td>
+<td style="text-align: right;">44,350</td>
+<td style="text-align: right;">50,400 (+13.6%)</td>
+<td style="text-align: right;">54,000</td>
+<td style="text-align: right;">40,050</td>
+<td style="text-align: right;">40,550 (-8.6%)</td>
+<td>gold 갭 위 진입 -157K, 손절 정당(갭 붕괴)</td>
+</tr>
+<tr>
+<td>484590 삼양컴텍</td>
+<td style="text-align: right;">7,340</td>
+<td style="text-align: right;">9,100 (+24.0%)</td>
+<td style="text-align: right;">9,150</td>
+<td style="text-align: right;">7,880</td>
+<td style="text-align: right;">7,900 (+7.6%)</td>
+<td>gold +62K 익절 — 고점권 탈출 성공</td>
+</tr>
+<tr>
+<td>217590 티엠씨</td>
+<td style="text-align: right;">22,600</td>
+<td style="text-align: right;">24,500 (+8.4%)</td>
+<td style="text-align: right;">28,400</td>
+<td style="text-align: right;">21,500</td>
+<td style="text-align: right;">22,250 (-1.5%)</td>
+<td>f +115K 익절 정당 / st 고가 재진입 -123K</td>
+</tr>
+<tr>
+<td>388790 라이콤</td>
+<td style="text-align: right;">7,080</td>
+<td style="text-align: right;">7,080 (0%)</td>
+<td style="text-align: right;">9,200</td>
+<td style="text-align: right;">7,080</td>
+<td style="text-align: right;">8,790 (+24.2%)</td>
+<td>st +111K — 그러나 +5.8%에서 하차</td>
+</tr>
+<tr>
+<td>240810 원익IPS</td>
+<td style="text-align: right;">116,700</td>
+<td style="text-align: right;">116,700 (0%)</td>
+<td style="text-align: right;">142,900</td>
+<td style="text-align: right;">116,100</td>
+<td style="text-align: right;">141,000 (+20.8%)</td>
+<td>sf +40K — +3%대에서 하차</td>
+</tr>
+<tr>
+<td>085620 미래에셋생명</td>
+<td style="text-align: right;">22,600</td>
+<td style="text-align: right;">22,300 (-1.3%)</td>
+<td style="text-align: right;">29,350</td>
+<td style="text-align: right;">19,500</td>
+<td style="text-align: right;"><strong>29,350 (+29.9% 상한가)</strong></td>
+<td>gold -114K → st 재진입 +115K → 상한가는 못 탐</td>
+</tr>
+<tr>
+<td>036930 주성엔지니어링</td>
+<td style="text-align: right;">199,000</td>
+<td style="text-align: right;">197,300 (-0.9%)</td>
+<td style="text-align: right;">254,000</td>
+<td style="text-align: right;">183,000</td>
+<td style="text-align: right;">245,500 (+23.4%)</td>
+<td>f +43K — +4%대에서 하차</td>
+</tr>
+<tr>
+<td>319400 현대무벡스</td>
+<td style="text-align: right;">35,400</td>
+<td style="text-align: right;">35,600 (+0.6%)</td>
+<td style="text-align: right;">41,450</td>
+<td style="text-align: right;">32,800</td>
+<td style="text-align: right;">40,800 (+15.3%)</td>
+<td>f 14:33 진입 이월 +38K 평가</td>
+</tr>
+</tbody>
+</table>
+<h2 id="kst">타임라인 (KST)</h2>
+<table>
+<thead>
+<tr>
+<th>시각</th>
+<th>이벤트</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>09:06~09:14</td>
+<td><strong>gold/f 갭 위 진입 러시</strong></td>
+<td>대명에너지(전일比 +13.1%)·SK이터닉스(+13.5%)·스피어(+10%대)·삼양컴텍(+14.4%) — 전부 갭 가드 임계(15%) 아래로 통과.</td>
+</tr>
+<tr>
+<td>09:11~09:21</td>
+<td>손절 3건 + 익절 1건</td>
+<td>대명 -5.2%(5분 만에)·SK이터닉스 -6.2%·스피어 -5.1% = <strong>-369K</strong>. 삼양컴텍만 +4.5/6.5% 익절. 스피어는 직후 반등해 <strong>상한가 마감</strong>.</td>
+</tr>
+<tr>
+<td>09:30</td>
+<td>시뮬 원샷 매수</td>
+<td>티엠씨 52주 — <strong>strategy_id 빈칸 재발</strong>(미수정 4번째 경로 추정, 인시던트 1) → 09:41 +6.1% 익절 +115K. 이후 고가 +25.7% 찍고 종가 -1.5% — <strong>익절이 정확히 옳았던 케이스</strong>.</td>
+</tr>
+<tr>
+<td>09:36~10:17</td>
+<td>supertrend 라이콤</td>
+<td>273주 진입 → +5.1/+6.7% 분할 익절 +111K. 종가 +24.2% — 러너였으면 추가 ~+27K.</td>
+</tr>
+<tr>
+<td>09:48~10:06</td>
+<td><strong>sf_zone 첫 실전 발동</strong></td>
+<td>원익IPS 10주 → +3.9~4.2% 익절 +40K (2승 0패). 종가 +20.8% — 일찍 하차.</td>
+</tr>
+<tr>
+<td>09:51~09:57</td>
+<td>st 티엠씨 고가 재진입</td>
+<td>f 익절 10분 뒤 고가권(+14.4%) 재진입 86주 → -4.6% 손절 -123K. <strong>6/8 459550 패턴의 축소판</strong>(재진입 가드 OFF 상태).</td>
+</tr>
+<tr>
+<td>09:58</td>
+<td><strong>FAILED (중복 매도)</strong></td>
+<td>09:57 매도 성공 직후 동일 86주 매도 재시도 → RuntimeError. 보유 0이라 거부 = 무피해. st 트레이더·데몬 이중 청산 경합 추정(인시던트 3).</td>
+</tr>
+<tr>
+<td>11:12~11:35</td>
+<td><strong>미래에셋생명 — 손절 후 재진입 성공 실험</strong></td>
+<td>gold 86주 @25,631(고점권) → -4.3% 손절. <strong>2분 뒤 st가 더 싸게(24,650) 재진입</strong> → +5.7/+6.7% 익절 +115K. 합산 +794원으로 복구. 종목은 상한가(+29.9%) 마감.</td>
+</tr>
+<tr>
+<td>14:33/14:38</td>
+<td><strong>f_zone 이월 진입 (컷오프 사각)</strong></td>
+<td>현대무벡스 33+22주 — 진입 컷오프(14:30)가 supertrend 트레이더에만 구현돼 데몬 gold/f 경로는 무방비. 6/10 -845K 패턴의 재발 가능 경로(이번엔 +38K 평가익).</td>
+</tr>
+<tr>
+<td>15:10</td>
+<td>이월 한도 체크 통과</td>
+<td>보유 평가 2.2M &lt; 한도 9.6M(20%) — 청산 없음(설계대로).</td>
+</tr>
+<tr>
+<td>15:20</td>
+<td><strong>EOD 신규 루틴 가동 확인</strong></td>
+<td>잔고 스냅샷에 estimated_asset 첫 기록(47,974,914) + fill_audit.csv 51행 백필(ka10073) ✓.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_4">핵심 사건 심층 분석</h2>
+<h3 id="1-gross-12">1. 비용 구조 발견 — gross 흑자를 적자로 만든 12배 수수료 (이날의 최대 수확)</h3>
+<p>브로커 실측: 매매차익(gross) <strong>+67,255원</strong>, 수수료 <strong>-145,520원</strong>, 거래세 <strong>-41,687원</strong> → net <strong>-119,952원</strong>. 실측 수수료율은 <strong>왕복 거래대금의 0.349%</strong>(편도 ~0.175%)로, 모든 백테스트·기대값 계산·기존 복기가 가정해온 0.015%/편도의 <strong>11.6배</strong>다. 세금도 0.20%(가정 0.18%).</p>
+<ul>
+<li><strong>하루 회전 41.6M에 비용 187K = 회전액의 0.45%</strong>. gold +3%/f +5% 익절 구조에서 트립당 ~0.55% 비용은 마진의 절반 가까이를 상시 잠식한다.</li>
+<li>소급 효과: 추정예탁자산 실측(47.97M)과 일별 손익 합산의 누적 괴리 <strong>-1,786K 중 -1,514K(85%)가 비용 모델 과소</strong>로 분해됐다(3일 왕복 440M × 0.32%p). 잔여 -272K는 440M의 0.06% = 1분봉 종가 근사의 정상 오차. <strong>기존 추정치 소급 보정: 6/8 -336K→약 -643K, 6/9 +1,585K→약 +708K, 6/10 -1,013K→약 -1,344K.</strong></li>
+<li>함의: ①그간의 "흑자 백테스트"(gold 일봉 +1.76% 등 OOS 포함)는 전부 저비용 가정 — <strong>실측 비용으로 전면 재검증 필요</strong> ②<strong>수수료 우대 계좌/요율 협의가 코드 개선보다 큰 알파</strong>일 수 있다(연환산 시 일 187K × 거래일 ≈ 월 ~4M).</li>
+</ul>
+<h3 id="2-bar-ops-38-7-2">2. BAR-OPS-38 가드 첫날 성적표 — 작동 7 / 사각지대 2</h3>
+<p>배포 증거: balance_history에 estimated_asset 필드 첫 기록, fill_audit.csv 51행 백필, 매도주문이 모두 권고수량과 체결수량 일치(수지 1,046−991=55 정합).</p>
+<table>
+<thead>
+<tr>
+<th>가드</th>
+<th>판정</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>EOD 체결 백필(ka10073)</td>
+<td>✅ 작동</td>
+<td>fill_audit 51행 — 이 리포트가 실측 기반이 된 이유</td>
+</tr>
+<tr>
+<td>추정예탁자산 병기</td>
+<td>✅ 작동</td>
+<td>47,974,914 기록 — 누적 손익 ground truth 확보</td>
+</tr>
+<tr>
+<td>이월 총액 한도(20%)</td>
+<td>✅ 작동(미발동)</td>
+<td>보유 2.2M &lt; 9.6M — 청산 없음이 정상</td>
+</tr>
+<tr>
+<td>회로차단기(당일손익 입력)</td>
+<td>✅ 정상 무발동</td>
+<td>당일 -3%(-1.44M) 미도달 — BLOCKED 0건이 올바름</td>
+</tr>
+<tr>
+<td>상한가 차단(29.5%)</td>
+<td>✅ 정상 무발동</td>
+<td>상한가 잠김 진입 시도 자체가 없었음</td>
+</tr>
+<tr>
+<td>갭 가드(gold/f 15%)</td>
+<td>⚠️ 임계 경계 통과</td>
+<td>손실 3건이 <strong>13.1~13.5%로 통과</strong>(심층분석 3)</td>
+</tr>
+<tr>
+<td>st 단일트랜치·하드손절</td>
+<td>✅ 이중매수 재발 없음</td>
+<td>st 매수=매도 수량 전 건 일치. 하드손절 발동 사례는 없었음(손절은 ladder)</td>
+</tr>
+<tr>
+<td><strong>진입 컷오프 14:30</strong></td>
+<td>❌ <strong>사각지대</strong></td>
+<td><strong>st 트레이더에만 구현</strong> — f_zone이 14:33/14:38 진입해 이월(현대무벡스). 데몬 gold/f/sf 경로 무방비</td>
+</tr>
+<tr>
+<td>strategy_id 전파</td>
+<td>❌ <strong>재발 1건</strong></td>
+<td>09:30 시뮬 원샷 매수 빈칸 — 미수정 4번째 경로(<code>simulate_leaders.py:358</code> 추정) 실행 정황</td>
+</tr>
+</tbody>
+</table>
+<h3 id="3-gold">3. gold 갭 위 진입 — 네 번째 반복, 이번엔 임계 바로 아래로</h3>
+<p>gold/f 손실 4건(-472K) 중 3건이 전일종가 대비 <strong>+13.1%(대명)·+13.5%(SK이터닉스)·+10%대(스피어)</strong> 갭 위 진입 — 새 갭 가드 임계 15%의 <strong>바로 아래</strong>다. 5/29·6/8·6/10에 이은 네 번째 "갭 위 바닥신호" 패턴.</p>
+<ul>
+<li>임계 민감도(이날 실측): <strong>15→12%로 내리면 손절 3건 -353K 회피, 동시에 익절 3건(삼양컴텍 +62K·티엠씨 +115K) 상실 → 순효과 +175K 개선</strong>. 단 하루 표본이며, 6/11은 갭 위 진입이 유난히 많은 장이었다 — 임계 하향은 measured decision으로(일일감사에 갭 분포 누적 후 판단).</li>
+<li>정반대 사례 공존: SK이터닉스는 6/10 gold가 +2% 벌었던 종목인데 6/11 갭 위 재진입으로 -157K — <strong>같은 종목·같은 전략이 갭 위치에 따라 정반대 결과</strong>. 갭이 변수라는 가설 강화.</li>
+</ul>
+<h3 id="4">4. 초폭등장에서 고정 익절의 양면 — "일찍 내린 것"과 "옳게 내린 것"</h3>
+<p>거래 종목 중 5개가 +15%~상한가로 마감했고 시스템은 전부 +3~7%에서 하차했다(미래에셋 +5.8% 익절 → 상한가, 라이콤 +5.8% → +24%, 원익IPS +3.9% → +21%, 주성 +4.4% → +23%). 그러나 <strong>단순 "끝까지 보유" 시뮬은 오히려 -117K 악화</strong> — 티엠씨(+6.1% 익절 → 종가 -1.5%)와 삼양컴텍(+6.5% → +7.6%이나 매도가보다 낮은 7,900 마감)에서 익절이 정확히 옳았기 때문. <strong>고정 익절 폐지는 답이 아니고, 조건부 러너(BAR-OPS-36 peak-trail, 현재 OFF)가 답에 가깝다</strong> — 익절가 도달 시 즉시 매도 대신 고점 추적 전환이면 티엠씨류(고점 후 붕괴)는 trail로 잡고 미래에셋류(지속 상승)는 동행한다. 러너 shadow 측정 가치 충분.</p>
+<h3 id="5-t2-956">5. 추정 방법론 캘리브레이션 — T+2 예측 95.6% 적중과 낙관 편향의 정량화</h3>
+<p>6/10 리포트의 예측 "예수금(6/11) ≈ 29,132,716"은 실측 27,840,458로 <strong>95.6% 적중</strong>(잔차 -1,292K). 잔차의 구성이 이날 실측으로 풀렸다: 6/9 비용 과소 -877K + 슬리피지·근사 오차. 실측 체결가 vs 1분봉 종가 직접 비교(16개 매도주문): <strong>매도 평균 -0.34%, 매수 평균 -0.17%</strong> — 가격 근사 자체는 정확했고, <strong>추정 손익의 시스템적 낙관 편향은 거의 전부 비용 모델</strong>이었다. 다음 검증 예측: <strong>예수금(6/12) ≈ 48.0~48.4M</strong>(6/10 거래 정산 +20.5M 반영, 비용 보정 포함).</p>
+<h2 id="_5">인시던트 분석</h2>
+<ul>
+<li><strong>strategy_id 빈칸 재발 (P1 잔여 버그)</strong> — 09:30:20 티엠씨 52주 매수. BAR-OPS-38 P1에서 3개 경로를 수정했으나 <strong><code>simulate_leaders.py:358</code>(시뮬 원샷 매수의 실제 실행 경로로 추정)는 미수정</strong>. 6/9·6/10의 빈칸도 같은 경로였을 정황(09:30 시뮬 직후 발생 패턴 동일).</li>
+<li><strong>중복 매도 경합 — FAILED 1건(무피해)</strong> — 09:57:13 st 티엠씨 86주 매도 성공 → 09:58:17 동일 수량 매도 재시도 RuntimeError. 6/9에도 동일 패턴 3건(010170·093370). st 트레이더와 데몬 매도평가가 같은 보유를 거의 동시에 청산 시도하는 경합 추정 — 거부돼 무피해였으나, 부분체결 상황이면 과매도 위험. 청산 주체 단일화 또는 주문 전 보유 재확인 필요.</li>
+<li><strong>일봉 캐시 6/10 정지</strong> — ohlcv_cache가 6/10까지만 갱신(5분봉은 6/11 정상). EOD OHLCV 자동화(커밋 2bdf0b4)의 일봉 갱신 경로 점검 필요. 본 리포트 일봉 맥락은 네이버로 보강.</li>
+<li><strong>fill_audit에 매수 체결 행 부재 (검증자 지적)</strong> — 매수가가 매도 행의 브로커 평단에 의존해 자기참조적이고, 매수 슬리피지·부분체결을 독립 감사할 수 없다. 이번엔 수량 수지(1,046−991=55)로 통과했으나 부분체결 발생 시 전략 귀속이 조용히 깨질 수 있음.</li>
+<li><strong>손절 체결 슬립</strong> — gold/f 손절 기준 -4% 대비 실제 체결 -4.3~-6.2%(평균 약 -1.3%p 슬립). 급락 구간에서 평가 주기(60초)+시장가 체결의 구조적 비용. 대명에너지는 진입 5분 만에 -5.2% — 갭 위 진입은 손절도 비싸게 잡힌다.</li>
+</ul>
+<h2 id="_6">발견과 진단</h2>
+<ul>
+<li><strong>트레이딩은 이겼고 비용이 졌다</strong> — 승률 68.8%, gross +67K는 이 시스템 기록상 최고 수준의 트립 품질. 그 위에 실측 비용 -187K. <strong>이제부터 모든 전략 평가의 영점은 "왕복 0.35%+세 0.20%를 이기는가"</strong>다.</li>
+<li><strong>갭 가드는 방향이 맞고 임계가 문제</strong> — 임계 15%를 13%대 진입 3건이 통과해 -353K. 6/11 데이터만으로 12%면 +175K 개선이지만 표본 1일 — 일일감사로 갭 분포를 누적 측정 후 조정.</li>
+<li><strong>재진입의 양면이 한 종목에서 실증</strong> — 미래에셋생명: gold 고점권 진입 -114K(나쁜 진입) → st가 더 싼 가격에 재진입 +115K(좋은 재진입). 반면 티엠씨: f 익절 후 st 고가 재진입 -123K(나쁜 재진입). 재진입 자체가 아니라 <strong>재진입 가격의 위치</strong>가 변수 — "직전 청산가 대비 더 싸게만 재진입" 같은 가격 조건이 6/8 cooldown 제안보다 정밀.</li>
+<li><strong>sf_zone 첫 발동 성공</strong> — 주 1회 이상 발동 KPI 충족 + 2승 0패. 표본 누적 시작.</li>
+<li><strong>이월 정책의 비대칭 구현이 드러남</strong> — 컷오프는 st만, 이월 한도는 전 전략. f_zone 14:33 진입이 그 틈으로 이월(이번엔 +38K 행운). 컷오프를 데몬 경로에도 적용해야 정책이 완성된다.</li>
+</ul>
+<h2 id="what-if">What-if 시나리오</h2>
+<table>
+<thead>
+<tr>
+<th>시나리오</th>
+<th style="text-align: right;">당일 실현</th>
+<th style="text-align: right;">Δ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>실제 (실측)</td>
+<td style="text-align: right;">-119,952원</td>
+<td style="text-align: right;">—</td>
+</tr>
+<tr>
+<td>(1) 비용이 모델 가정(0.015%+0.18%)이었다면</td>
+<td style="text-align: right;"><strong>+23,463원</strong></td>
+<td style="text-align: right;">+143,415 — 흑↔적의 전부가 비용</td>
+</tr>
+<tr>
+<td>(2) 갭 가드 15→12% (갭 위 6트립 차단)</td>
+<td style="text-align: right;">+55,490원</td>
+<td style="text-align: right;">+175,442 (손절 3건 회피 − 익절 3건 상실)</td>
+</tr>
+<tr>
+<td>(3) 익절분 전부 종가까지 보유(단순 러너)</td>
+<td style="text-align: right;">-237,322원</td>
+<td style="text-align: right;"><strong>-117,370 — 단순 보유는 악화</strong>(티엠씨·삼양컴텍 상쇄)</td>
+</tr>
+<tr>
+<td>(4) st 티엠씨 고가 재진입 미실행</td>
+<td style="text-align: right;">+2,686원</td>
+<td style="text-align: right;">+122,638</td>
+</tr>
+</tbody>
+</table>
+<p>→ (1)은 통제 가능한 즉시 개선(요율 협의/회전 절감), (2)는 측정 후 결정, (3)은 조건부 러너만 타당, (4)는 재진입 가격조건의 근거.</p>
+<h2 id="_7">권고 (우선순위)</h2>
+<p><strong>P0 — 즉시</strong>
+- <strong>비용 모델 현실화 + 전략 기대값 전면 재검증</strong>: 백테스터·시뮬레이터·일일감사의 COMMISSION_RATE 0.00015→<strong>0.00175(편도)</strong>, TAX_RATE 0.0018→<strong>0.0020</strong> 교체 후, 활성 전략(gold/f/sf/st)의 격자·OOS 결론을 실측 비용으로 재실행. 비용 후 음수로 뒤집히는 전략·타임프레임은 비중 축소. 트립당 기대익이 0.55%를 넘지 못하는 설정은 폐기 대상.
+- <strong>수수료 요율 실사 및 협의</strong>: 왕복 0.349%는 비대면 기본 요율 수준 — 키움 요율제 확인(우대/협의 요율, 월 정액제 등). 코드 한 줄 안 바꾸고 손익분기점을 바꿀 수 있는 최대 레버리지(일 회전 40M 기준 요율 절반이면 일 ~+70K).
+- <strong>진입 컷오프를 데몬 경로(gold/f/sf)에도 적용</strong>: <code>_scan_and_buy</code>에 BUY_CUTOFF(기본 14:30, env) 추가 — BAR-OPS-38 P0#4①의 사각지대 봉합. 현대무벡스 케이스가 실증.
+- <strong><code>simulate_leaders.py:358</code> strategy_id 전파 수정</strong>: 빈칸 재발의 추정 원인(P1 잔여 4번째 경로).</p>
+<p><strong>P1 — 단기</strong>
+- fill_audit에 <strong>매수 체결 행 추가</strong>(ka10073의 매수분 또는 ka10076 체결요청) — 매수 슬리피지 감사·전략 귀속의 자기참조성 해소(독립 검증자 지적).
+- 갭 가드 임계 측정 인프라: 일일감사에 진입 시점 전일比 갭 컬럼 추가 → 갭 구간별 승률/기대값 누적 → 임계 데이터 기반 조정(현재 15%, 후보 12%).
+- 중복 매도 경합 수정: st 트레이더·데몬 매도평가의 청산 주체 단일화(또는 매도 직전 잔고 재확인). 6/9 3건 + 6/11 1건.
+- 조건부 러너(BAR-OPS-36) shadow 측정: 초폭등장 4종목 조기 하차가 동기 — 단 단순 보유는 -117K로 악화 확인됐으므로 peak-trail 조건부만.
+- 재진입 가격 조건: "직전 청산가 이하에서만 재진입 허용" — 미래에셋(성공)·티엠씨(실패) 대비 실증.
+- 일봉 캐시 EOD 갱신 경로 점검(6/10 정지).</p>
+<p><strong>P2 — 개선</strong>
+- 일일감사에 실측(fill_audit) 우선 모드 — 추정 경로는 fill 부재 시 폴백으로.
+- 손절 슬립 모니터링(기준 대비 체결 슬립 일일 추적 — 급락장 평가주기 단축 검토 근거).</p>
+<h2 id="_8">검증 노트</h2>
+<ul>
+<li><strong>독립 검증 에이전트 2개</strong>(산술 재계산·데이터 정합성)가 전 수치를 원본에서 재계산 — <strong>산술 전 항목 일치</strong>(실현 -119,952·전략별·시간대별·트립 16건, ±0.01원 부동소수 잔차). 전략 귀속(종목별 시간순 수량합 매칭)은 9종목 전부 잔여 0으로 분할 확인, 멀티전략 종목(미래에셋·티엠씨)은 브로커 매수평단 차이로 교차 오염 없음이 이중 확인됨.</li>
+<li><strong>유일 디스클로저</strong>: 보유종목 종가 40,800원은 네이버 시세(일봉 캐시 6/10 정지로 로컬 미존재). 15:20 잔고 스냅샷 기준(41,200원)이면 평가 +60,500·종합 -59,452원.</li>
+<li>수량 수지: 매수 17건 1,046주 − 매도 16건 991주 = EOD 보유 55주, fill_audit 991주와 정합. FAILED 1건은 미체결 확인(이중계상 없음).</li>
+<li><strong>T+2 사후검증 체인</strong>: 6/10 예측 → 6/11 실측 95.6% 적중(본 리포트) → 다음 예측 <strong>예수금(6/12) ≈ 48.0~48.4M</strong>, 추정예탁자산은 보유 평가 변동분만 이동. 6/12 데이터 반입 시 대조.</li>
+<li>실현손익은 브로커 ka10073 그대로 — 6/8~6/10 리포트와 달리 추정 밴드가 없다.</li>
+</ul>
+<h2 id="_9">부록 — 기존 추정치 소급 보정 (실측 비용 반영)</h2>
+<table>
+<thead>
+<tr>
+<th>일자</th>
+<th style="text-align: right;">기존 추정</th>
+<th style="text-align: right;">비용 보정</th>
+<th style="text-align: right;">보정 후</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>6/8</td>
+<td style="text-align: right;">-335,882</td>
+<td style="text-align: right;">-306,660</td>
+<td style="text-align: right;"><strong>약 -643K</strong></td>
+</tr>
+<tr>
+<td>6/9</td>
+<td style="text-align: right;">+1,585,410</td>
+<td style="text-align: right;">-877,162</td>
+<td style="text-align: right;"><strong>약 +708K</strong></td>
+</tr>
+<tr>
+<td>6/10</td>
+<td style="text-align: right;">-1,013,424</td>
+<td style="text-align: right;">-330,346</td>
+<td style="text-align: right;"><strong>약 -1,344K</strong></td>
+</tr>
+<tr>
+<td>6/11 (실측)</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;"><strong>-119,952 (확정)</strong></td>
+</tr>
+<tr>
+<td>4일 누적</td>
+<td style="text-align: right;">+116K (구)</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"><strong>약 -1,399K</strong> vs 실측 -1,632K (잔차 -233K = 슬리피지·근사)</td>
+</tr>
+</tbody>
+</table>
+<p>추정예탁자산 실측(47,974,914 = 시작 49,606,509 − 1,631,595)이 ground truth. 이후 일일 손익은 fill_audit(실측)과 estimated_asset 차분으로 이중 추적한다.</p>
+</body>
+</html>
