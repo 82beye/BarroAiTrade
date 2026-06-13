@@ -1,6 +1,8 @@
 #!/bin/bash
 # 장마감(15:30) 이후 OHLCV 일봉+5분봉 업데이트 → 데스크탑 3아카이브 → 82beye@gmail.com 이메일.
-# crontab 15:40 weekdays 등록. 이메일은 Mail.app(iCloud)+Mail Drop(대용량).
+# crontab 15:40 weekdays 등록.
+# 이메일: scripts/eod_email_split_send.py — Mail Drop 회피(분할 14MB 일반첨부 + part.00 base64 .txt 우회)
+#   다중 발송. (구 send_archive_email.applescript=Mail Drop 단일첨부는 -1712 상시실패로 폐기.)
 set -u
 REPO=/Users/beye82/Workspace/BarroAiTrade
 AI=/Users/beye82/Workspace/ai-trade/data
@@ -19,6 +21,6 @@ tar -czf "$DESK/$D" -C "$AI" ohlcv_cache && echo "  일봉 ok"
 tar -czf "$DESK/$M" -C "$AI" ohlcv_cache_5m && echo "  5분봉 ok"
 tar -czf "$DESK/$T" -C "$REPO" data && echo "  매매로그 ok"
 for f in "$D" "$M" "$T"; do gzip -t "$DESK/$f" && echo "  gzip OK $f" || echo "  gzip FAIL $f"; done
-echo "-- 이메일 발송(82beye@gmail.com, Mail.app/iCloud) --"
-osascript "$REPO/scripts/send_archive_email.applescript" "$DESK/$D" "$DESK/$M" "$DESK/$T" "$DT" 2>&1
+echo "-- 이메일 발송(split+base64 우회, Mail Drop 미사용) --"
+"$REPO/.venv/bin/python" "$REPO/scripts/eod_email_split_send.py" "$DT" "$DESK/$D" "$DESK/$M" "$DESK/$T" 2>&1
 echo "==== DONE $(date '+%F %T') ===="
