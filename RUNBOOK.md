@@ -241,9 +241,52 @@
 
 ---
 
+## 11. 운영 배포 절차 + 자동 검증 (BAR-OPS-39 후속)
+
+배경: BAR-OPS-38/39 가 origin/main 에는 머지됐으나 운영 머신에 pull 되지 않아
+**4거래일(6/9~6/12) 라이브 미적용이 반복**됐다(6/12 매매복기 — buy_audit 부재·
+일봉 캐시 6/10 정지·strategy_id 빈칸·중복매도 FAILED 로 발견). 손실의 대부분이
+"이미 처방됐으나 미배포"였다. 아래 절차로 매 배포를 검증한다.
+
+### 운영 머신 배포 (cron 기반 — 재기동 대부분 불필요)
+```bash
+cd /Users/beye/BarroAiTrade
+git pull origin main
+bash scripts/verify_deploy.sh            # 배포 자동 검증 (PASS/FAIL 요약)
+./.venv/bin/python scripts/update_ohlcv_cache.py   # 밀린 일봉 1회 백필
+```
+- **cron 경로**(09:30 simulate_leaders / 매시간 evaluate_holdings)는 pull 만으로
+  다음 실행부터 최신 코드 적용 — **별도 재기동 불필요**.
+- **supertrend 를 상시 프로세스**(run_telegram_bot, `SUPERTREND_AUTO_ENABLED=1`)로
+  돌리는 경우, 그 프로세스만 재기동해야 새 코드가 적용된다.
+
+### `scripts/verify_deploy.sh` 가 점검하는 것
+1. HEAD == origin/main (코드 최신 여부)
+2. BAR-OPS-39 마커 5종(trading_costs·컷오프·buy_snapshot·strategy_id·일봉 gap<1)
+3. IntradaySimulator 비용 default = 0.175%(실측) — '비용 0 선정 버그' 해소 확인
+4. 일봉 캐시 meta.json 신선도(new_days_added)
+5. 회귀 테스트(test_bar_ops_39 + risk) 통과
+6. 권장 env(.env.local) 점검 (경고만)
+→ `FAIL 0` 이면 배포 정상. exit code = FAIL 건수.
+
+### 수수료 요율 협의 후 (P0)
+협의 성사 시 운영 `.env.local` 에 한 줄(재기동/다음 cron 부터 반영):
+```
+BARRO_COMMISSION_RATE=<협의 편도요율(소수)>   # 예 0.0010
+```
+
+### 측정 후 결정 항목 (배포 후 데이터 누적 → 판단)
+- 갭 가드 임계 15%→12% 하향: 일일감사 `gap_records` 누적 후. 6/11·6/12 모두 손실이
+  +11~15% 갭 구간 — 표본 더 쌓고 결정.
+- 조건부 러너(BAR-OPS-36)·재진입 가격조건: 일일감사 §C run-up·진입 갭으로 측정 후
+  HITL 승인 시 env 활성화. (지금 임의 활성화 금지 — 자가진화 HITL 원칙)
+
+---
+
 ## 변경 이력
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-05-08 | 초안 (BAR-OPS-04) | – |
 | 2026-06-11 | §9 BAR-OPS-38 리스크 가드 기본 활성 | – |
 | 2026-06-12 | §10 BAR-OPS-39 비용 현실화 + 가드 보완 | – |
+| 2026-06-14 | §11 운영 배포 절차 + verify_deploy.sh 자동 검증 | – |
