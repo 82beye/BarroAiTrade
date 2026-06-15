@@ -281,6 +281,44 @@ BARRO_COMMISSION_RATE=<협의 편도요율(소수)>   # 예 0.0010
 - 조건부 러너(BAR-OPS-36)·재진입 가격조건: 일일감사 §C run-up·진입 갭으로 측정 후
   HITL 승인 시 env 활성화. (지금 임의 활성화 금지 — 자가진화 HITL 원칙)
 
+## 12. EOD 데이터 무결성 자가검증 (BAR-OPS, 2026-06-15 매매복기 권고)
+
+**배경.** 2026-06-09~06-15 동안 (1) BAR-OPS-39 코드가 운영에 미배포된 채 라이브가
+돌고, (2) 이브닝 파이프라인(`_eod_fill_backfill`·`_eod_buy_snapshot`·
+`_save_balance_snapshot`)이 조용히 침묵해, 6/15 엔 `fill_audit`(브로커 체결)·EOD
+`balance`·`buy_audit` 가 통째로 누락됐다. 매수/매도 주문은 정상이었으나 **브로커
+실측 손익 원천이 사라져** 6/15 매매복기가 추정으로 떨어졌다. 이 회귀를 EOD 직후
+자동 감지한다.
+
+**실행 (장 마감 + 이브닝 파이프라인 이후 1회):**
+```
+cd /Users/beye/BarroAiTrade
+bash scripts/verify_eod_data.sh            # 오늘(KST)
+bash scripts/verify_eod_data.sh 2026-06-15 # 특정일
+```
+종료코드 = NG 건수(0=정상). 비거래일(주문 0건)·주말은 자동 스킵.
+
+**점검 항목 (당일 거래가 있었던 거래일 한정):**
+| 항목 | 합격 조건 | NG 의미 |
+|---|---|---|
+| `fill_audit.csv` | 매도 발생 시 ka10073 체결행 존재 | 이브닝 fill 백필 미실행 → 실현손익 원천 부재 |
+| `balance_history` | 장 마감 후(≥14시 KST) EOD 정산 엔트리 | 아침 스냅샷만 → EOD 정산 누락 |
+| `buy_audit.csv` | EOD 보유 종목 있으면 매수평단 스냅샷 존재 | `_eod_buy_snapshot` 미실행(BAR-OPS-39 미배포 신호) |
+
+- 당일 실행은 `active_positions.json`(EOD 확정 보유)을 쓴다. **과거일** 검증은
+  `_active_positions_history/` 의 장중 마지막 스냅샷(근사)을 써서 `buy_audit` 는
+  hard-NG 대신 WARN 으로 보고(EOD 전 청산분이 보유로 잡힐 수 있음).
+
+**cron 예 (이브닝 파이프라인 뒤, 평일 16:10):**
+```
+10 16 * * 1-5  cd /Users/beye/BarroAiTrade && bash scripts/verify_eod_data.sh >> logs/verify_eod.log 2>&1
+```
+
+**NG 시 조치.** 운영 머신에서 EOD 시퀀스 로그 점검 → `ka10073`(매도 체결)·`kt00018`
+(보유 평단) 재수집으로 당일 실측 복구(브로커 **D+2 조회기간 내**). 코드 미배포가
+의심되면 `scripts/verify_deploy.sh`(§11)도 함께 실행. 회귀 테스트:
+`backend/tests/test_verify_eod_data.py`.
+
 ---
 
 ## 변경 이력
@@ -290,3 +328,4 @@ BARRO_COMMISSION_RATE=<협의 편도요율(소수)>   # 예 0.0010
 | 2026-06-11 | §9 BAR-OPS-38 리스크 가드 기본 활성 | – |
 | 2026-06-12 | §10 BAR-OPS-39 비용 현실화 + 가드 보완 | – |
 | 2026-06-14 | §11 운영 배포 절차 + verify_deploy.sh 자동 검증 | – |
+| 2026-06-15 | §12 EOD 데이터 무결성 자가검증 verify_eod_data.sh | – |
