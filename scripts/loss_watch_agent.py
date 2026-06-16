@@ -597,22 +597,38 @@ def scan_once(st):
         if not sell:
             continue
         entry = float(prev.get("avg_price", 0) or 0)
+        # 체결가: order_audit 는 시장가 주문(price='MKT')이라 체결 직후엔 avg_fill_price 가
+        #   비어있다 → float('MKT') 파싱불가. avg_fill_price 가 숫자일 때만 정확값,
+        #   아니면 직전 스캔의 미실현률(시장가 청산 ≈ 그 부근)로 폴백 추정한다.
+        #   (정확한 실현손익은 EOD fill_audit/ka10073 가 별도 확보.)
+        sell_px = 0.0
         try:
-            sell_px = float(sell[-1].get("avg_fill_price") or sell[-1].get("price") or 0)
+            _afp = sell[-1].get("avg_fill_price")
+            sell_px = float(_afp) if _afp not in (None, "") else 0.0
         except (TypeError, ValueError):
             sell_px = 0.0
+        approx = False
         if entry > 0 and sell_px > 0:
             rpct = (sell_px - entry) / entry * 100
-            if rpct < 0:
-                key = f"{now_kst():%Y%m%d}:{sym}:REALIZED"
-                if key not in st["seen"]:
-                    st["seen"].append(key)
-                    losers += 1
-                    tg_send(f"🟡 <b>손실감시</b> [REALIZED] 실현손실 청산\n"
-                            f"{_esc(prev.get('name',''))} ({sym}) · {rpct:+.2f}% "
-                            f"(진입 {int(entry):,} → 매도 {int(sell_px):,})")
+        else:
+            try:
+                _lp = prev.get("pnl")
+                rpct = float(_lp) if _lp is not None else None
+            except (TypeError, ValueError):
+                rpct = None
+            approx = True
+        if rpct is not None and rpct < 0:
+            key = f"{now_kst():%Y%m%d}:{sym}:REALIZED"
+            if key not in st["seen"]:
+                st["seen"].append(key)
+                losers += 1
+                tail = (f"(진입 {int(entry):,} → 매도 {int(sell_px):,})" if not approx
+                        else f"(진입 {int(entry):,}, 직전스캔 미실현 기준 추정)")
+                tg_send(f"🟡 <b>손실감시</b> [REALIZED] 실현손실 청산{' ~추정' if approx else ''}\n"
+                        f"{_esc(prev.get('name',''))} ({sym}) · {rpct:+.2f}% {tail}")
 
-    st["last_positions"] = {s: {"name": p.get("name", ""), "avg_price": p.get("avg_price", 0)}
+    st["last_positions"] = {s: {"name": p.get("name", ""), "avg_price": p.get("avg_price", 0),
+                                "pnl": p.get("pnl_rate", 0), "cur": p.get("cur_price", 0)}
                             for s, p in positions.items()}
     save_state(st)
     src = "live" if live else "fallback"
