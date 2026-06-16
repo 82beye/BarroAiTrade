@@ -1,0 +1,160 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>BarroAiTrade 매매복기 2026-06-16</title>
+<style>
+body{font-family:-apple-system,'Apple SD Gothic Neo',Segoe UI,Roboto,sans-serif;max-width:980px;margin:0 auto;padding:24px;color:#1a1a1a;line-height:1.6}
+h1{border-bottom:3px solid #1a7f4b;padding-bottom:8px}
+h2{margin-top:1.8em;border-left:4px solid #2c3e50;padding-left:10px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid #ddd;padding:6px 9px;text-align:right}
+th{background:#2c3e50;color:#fff;text-align:center}
+td:first-child,th:first-child,td:nth-child(2){text-align:left}
+tr:nth-child(even){background:#f7f9fb}
+code{background:#eef1f3;padding:1px 5px;border-radius:3px;font-size:13px}
+blockquote{color:#666;border-left:3px solid #ccc;margin:0;padding-left:12px;font-size:14px}
+strong{color:#c0392b} li{margin:3px 0} hr{border:none;border-top:1px solid #ddd;margin:24px 0}
+</style></head><body>
+<h1>BarroAiTrade 매매복기 — 2026-06-16 (화)</h1>
+
+<blockquote>생성: 2026-06-16 22:48 KST · 직전 거래일 6/15 · <strong>브로커 실측 기반(fill_audit)</strong></blockquote>
+<blockquote>산출: <code>barro-trade-review</code> 스킬 워크플로 · 진실원천 <code>reports/strategy_audit_2026-06-16.json</code>(<code>_daily_strategy_audit.py --source auto</code>) · verify_eod_data <strong>PASS 3/0</strong> · 전략별 교차검증 <strong>일치(합 +13,862)</strong></blockquote>
+
+<h2>✓ 데이터 무결성 — 복구됨 (6/15 대비 반전)</h2>
+
+<p>6/15 매매복기에서 추가한 <code>verify_eod_data.sh</code> 로 6/16 EOD 를 점검: <strong>PASS 3 / FAIL 0</strong>.</p>
+<table><thead><tr><th>항목</th><th>6/15</th><th><strong>6/16</strong></th></tr></thead><tbody>
+<tr><td>fill_audit (브로커 실측 체결)</td><td>0행(부재)</td><td><strong>49행 ✓</strong></td></tr>
+<tr><td>EOD balance (장 마감 후 정산)</td><td>09:05 아침만</td><td><strong>15:20 정산 ✓</strong></td></tr>
+<tr><td>buy_audit (BAR-OPS-39 EOD 스냅샷)</td><td>부재</td><td><strong>1행(028050) ✓</strong></td></tr>
+</tbody></table>
+
+<li>이브닝 파이프라인(<code>_eod_fill_backfill</code>·<code>_eod_buy_snapshot</code>·<code>_save_balance_snapshot</code>)이 <strong>정상 실행</strong>됐고, 6/15까지 한 번도 없던 <code>buy_audit.csv</code> 가 처음 생성됨 → <strong>BAR-OPS-39 가 운영에 배포된 것으로 판단</strong>(권고했던 복구 달성).</li>
+<li>따라서 6/16 손익은 <strong>추정이 아닌 브로커 실측</strong>(6/15는 추정이었음).</li>
+
+<h2>한 줄 요약</h2>
+
+<p><strong>실현 순손익(실측) +13,862원 / 13트립 5승 8패 (승률 38%).</strong> 그러나 이 흑자는 <strong>전적으로 6/15 이월 supertrend 2종목(011070 +321K·009150 +126K = +447,213)</strong> 덕분 — <strong>당일 신규 매매 11트립은 -433,351 적자</strong>(고갭 추격 + 비용). gross +438,314를 비용 424,453원(gross의 0.97배)이 거의 전액 잠식. EOD 보유 028050 미실현 +20,301 반영 종합 <strong>+34,163</strong>.</p>
+
+<h2>종합 손익 (실측)</h2>
+
+<table><thead><tr><th>구분</th><th>금액</th></tr></thead><tbody>
+<tr><td>실현 gross (매도-매수)</td><td>+438,314</td></tr>
+<tr><td>거래비용 (수수료+세, 실측)</td><td>-424,453</td></tr>
+<tr><td><strong>실현 순손익</strong></td><td><strong>+13,862</strong></td></tr>
+<tr><td>└ 이월분(6/15 보유 청산)</td><td>+447,213</td></tr>
+<tr><td>└ 당일 신규 매매</td><td>-433,351</td></tr>
+<tr><td>EOD 보유 미실현 (028050, gross)</td><td>+20,301</td></tr>
+<tr><td><strong>종합</strong></td><td><strong>+34,163</strong></td></tr>
+</tbody></table>
+
+<li>회전대금 약 94백만원 · 트립당 평균 비용 32,650원 · 비용/gross 0.97배.</li>
+<li>balance 6/16 EOD(15:20): cash 47,844,240 / eval 3,805,600 / <strong>total 51,649,840</strong> / est_asset 47,384,465 / 보유 1종목.</li>
+
+<h2>⚠️ 핵심: 당일 신규 매매는 적자, 이월이 살림</h2>
+
+<li><strong>이월 2종목(+447,213)</strong>: 6/15 EOD 보유했던 supertrend 011070(LG이노텍, +10.0%)·009150(삼성전기, +7.5%)을 6/16 시초(09:01) 청산. 6/15 복기에서 미실현 +174K(gross)로 봤던 게 더 올라 큰 실현이익으로 확정 → <strong>supertrend 오버나잇 보유 논리 입증</strong>.</li>
+<li><strong>당일 신규 11트립(-433,351)</strong>: 고갭 추격 + 비용으로 적자. 특히 신규 supertrend 7건은 -474,345(전략별 supertrend 실현 -27,132에서 이월 447,213 제외).</li>
+<li>즉 <strong>6/16은 전일 보유분이 없었다면 -43만원대 적자일 뻔</strong>했다. 운에 가까운 이월 수익이 당일 신규의 구조적 손실을 덮은 날.</li>
+
+<h2>라운드트립 (브로커 실측)</h2>
+
+<table><thead><tr><th>종목</th><th>명</th><th>수량</th><th>매수→매도</th><th>순손익</th><th>수익률</th><th>비용</th><th>전략</th><th>매도시각</th><th>비고</th></tr></thead><tbody>
+<tr><td>011070</td><td>LG이노텍</td><td>3</td><td>1,179,667→1,298,000</td><td>+321,202</td><td>+10.0%</td><td>33,798</td><td>supertrend</td><td>09:01</td><td>이월</td></tr>
+<tr><td>009150</td><td>삼성전기</td><td>1</td><td>1,911,000→2,055,000</td><td>+126,011</td><td>+7.5%</td><td>17,989</td><td>supertrend</td><td>09:01</td><td>이월</td></tr>
+<tr><td>034020</td><td>두산에너빌리티</td><td>36</td><td>104,183→102,900</td><td>-79,652</td><td>-1.2%</td><td>33,452</td><td>supertrend</td><td>09:49</td><td></td></tr>
+<tr><td>006360</td><td>GS건설</td><td>113</td><td>33,667→32,400</td><td>-176,589</td><td>-3.8%</td><td>33,439</td><td>supertrend</td><td>09:56</td><td></td></tr>
+<tr><td>012450</td><td>한화에어로스페이스</td><td>3</td><td>1,181,500→1,166,000</td><td>-78,136</td><td>-1.3%</td><td>31,636</td><td>supertrend</td><td>09:58</td><td></td></tr>
+<tr><td>010170</td><td>대한광통신</td><td>190</td><td>20,004→19,746</td><td>-82,953</td><td>-1.3%</td><td>33,913</td><td>supertrend</td><td>10:04</td><td></td></tr>
+<tr><td>017900</td><td>광전자</td><td>370</td><td>10,294→10,100</td><td>-105,823</td><td>-1.9%</td><td>33,883</td><td>supertrend</td><td>10:07</td><td></td></tr>
+<tr><td>439960</td><td>코스모로보틱스</td><td>133</td><td>28,318→30,348</td><td>+234,653</td><td>+7.2%</td><td>35,372</td><td>f_zone</td><td>10:09</td><td></td></tr>
+<tr><td>375500</td><td>DL이앤씨</td><td>42</td><td>90,100→88,614</td><td>-96,077</td><td>-1.6%</td><td>33,677</td><td>supertrend</td><td>10:11</td><td></td></tr>
+<tr><td>085620</td><td>미래에셋생명</td><td>117</td><td>32,282→33,765</td><td>+138,561</td><td>+4.6%</td><td>34,939</td><td>gold_zone</td><td>10:19</td><td></td></tr>
+<tr><td>475150</td><td>SK이터닉스</td><td>68</td><td>55,741→54,009</td><td>-151,234</td><td>-3.1%</td><td>33,434</td><td>gold_zone</td><td>12:43</td><td></td></tr>
+<tr><td>004310</td><td>현대약품</td><td>449</td><td>8,530→8,931</td><td>+144,885</td><td>+4.7%</td><td>35,435</td><td>supertrend</td><td>12:45</td><td></td></tr>
+<tr><td>047040</td><td>대우건설</td><td>138</td><td>27,619→26,550</td><td>-180,986</td><td>-3.9%</td><td>33,486</td><td>sf_zone</td><td>13:31</td><td></td></tr>
+</tbody></table>
+
+<h2>전략별 (실측)</h2>
+
+<table><thead><tr><th>전략</th><th>트립</th><th>승</th><th>실현</th><th>gross</th><th>비용</th><th>비고</th></tr></thead><tbody>
+<tr><td>sf_zone</td><td>1</td><td>0</td><td>-180,986</td><td>-147,500</td><td>33,486</td><td></td></tr>
+<tr><td>supertrend</td><td>9</td><td>3</td><td>-27,132</td><td>+260,090</td><td>287,222</td><td>이월 2건 +447K 포함(신규 7건은 ≈-474K)</td></tr>
+<tr><td>gold_zone</td><td>2</td><td>1</td><td>-12,673</td><td>+55,699</td><td>68,373</td><td></td></tr>
+<tr><td>f_zone</td><td>1</td><td>1</td><td>+234,653</td><td>+270,025</td><td>35,372</td><td></td></tr>
+</tbody></table>
+
+<li><strong>f_zone +234,653</strong>: 코스모로보틱스 단독 +7.2%(신규상장주, 일봉캐시 없음). 유일하게 신규에서 큰 흑자.</li>
+<li><strong>supertrend +447K처럼 보이나 전부 이월</strong>: 당일 신규 supertrend 7건(GS건설·광전자·DL이앤씨·두산·대한광통신·한화에어로 등)은 합산 ≈-474K 적자.</li>
+<li><strong>sf_zone -180,986</strong>: 대우건설 단 1건, +20.6% 고갭 추격(아래 갭 분석). sf_zone은 갭가드 미적용 전략.</li>
+<li><strong>gold_zone -12,673</strong>: 미래에셋생명 +138K(+4.6%) vs SK이터닉스 -151K(+14.1%갭). 갭 높은 쪽이 패.</li>
+
+<h2>시간대별 (매도시각 KST)</h2>
+
+<table><thead><tr><th>시간</th><th>건수</th><th>순손익</th></tr></thead><tbody>
+<tr><td>09시</td><td>5</td><td>+112,836</td></tr>
+<tr><td>10시</td><td>5</td><td>+88,361</td></tr>
+<tr><td>12시</td><td>2</td><td>-6,349</td></tr>
+<tr><td>13시</td><td>1</td><td>-180,986</td></tr>
+</tbody></table>
+
+<li>09시(+112,836)는 이월 청산 +447K 가 신규 조기손실 -334K 를 상쇄한 결과. 13시 -180,986 은 대우건설 늦은 손절.</li>
+
+<h2>진입 갭 분석 (6/15 종가 대비, 실측 매수평단 — 당일 신규분)</h2>
+
+<p>6/16에도 <strong>고갭 추격이 손실원</strong>. +11% 이상 갭 진입 7건 중 5건 패(대우건설·광전자·SK이터닉스·DL이앤씨·GS건설), 2건 승(현대약품·미래에셋생명).</p>
+
+<table><thead><tr><th>종목</th><th>전략</th><th>매수평단</th><th>6/15종가</th><th>갭</th><th>결과</th></tr></thead><tbody>
+<tr><td>047040 대우건설</td><td>sf_zone</td><td>27,619</td><td>22,900</td><td><strong>+20.6% ⚠️</strong></td><td>-180,986</td></tr>
+<tr><td>004310 현대약품</td><td>supertrend</td><td>8,530</td><td>7,440</td><td><strong>+14.6% ⚠️</strong></td><td>+144,885</td></tr>
+<tr><td>017900 광전자</td><td>supertrend</td><td>10,294</td><td>9,000</td><td><strong>+14.4% ⚠️</strong></td><td>-105,823</td></tr>
+<tr><td>475150 SK이터닉스</td><td>gold_zone</td><td>55,741</td><td>48,850</td><td><strong>+14.1% ⚠️</strong></td><td>-151,234</td></tr>
+<tr><td>375500 DL이앤씨</td><td>supertrend</td><td>90,100</td><td>79,000</td><td><strong>+14.1% ⚠️</strong></td><td>-96,077</td></tr>
+<tr><td>085620 미래에셋생명</td><td>gold_zone</td><td>32,282</td><td>28,650</td><td><strong>+12.7% ⚠️</strong></td><td>+138,561</td></tr>
+<tr><td>006360 GS건설</td><td>supertrend</td><td>33,667</td><td>30,250</td><td><strong>+11.3%</strong></td><td>-176,589</td></tr>
+<tr><td>012450 한화에어로스페이스</td><td>supertrend</td><td>1,181,500</td><td>1,084,000</td><td><strong>+9.0%</strong></td><td>-78,136</td></tr>
+<tr><td>010170 대한광통신</td><td>supertrend</td><td>20,004</td><td>18,960</td><td><strong>+5.5%</strong></td><td>-82,953</td></tr>
+<tr><td>034020 두산에너빌리티</td><td>supertrend</td><td>104,183</td><td>99,800</td><td><strong>+4.4%</strong></td><td>-79,652</td></tr>
+<tr><td>439960 코스모로보틱스</td><td>f_zone</td><td>28,318</td><td>(캐시없음·신규상장)</td><td>–</td><td>+234,653</td></tr>
+</tbody></table>
+
+<li>⚠️ = 12%+ 갭. <strong>대우건설 sf_zone +20.6%갭 -181K</strong>(최대 손실) — sf_zone은 갭가드 <code>_GAP_GUARD_STRATEGIES={gold_zone,f_zone}</code> 미포함이라 차단 안 됨.</li>
+<li>gold_zone SK이터닉스 +14.1% 통과(임계 15% 미만)→ -151K. 단 미래에셋생명 +12.7%는 +138K 승 → <strong>임계 일괄 하향은 양날</strong>(6/15 한온 sf +22% 흑자와 동일 교훈: 갭 자체보다 진입가 위치).</li>
+
+<h2>EOD 보유 (6/17 이월)</h2>
+
+<table><thead><tr><th>종목</th><th>전략</th><th>수량</th><th>진입가(buy_audit)</th><th>6/16종가</th><th>미실현(gross)</th><th>수익률</th></tr></thead><tbody>
+<tr><td>028050</td><td>삼성E&amp;A(sf_zone)</td><td>67</td><td>56,397</td><td>56,700</td><td>+20,301</td><td>+0.54%</td></tr>
+</tbody></table>
+
+<li>028050 삼성E&amp;A(sf_zone) 1종목, 미실현(gross) +20,301. 6/15 이월(011070·009150)이 +447K 였던 만큼 6/17 시초 향방 주목.</li>
+
+<h2>6/15·6/12 대비</h2>
+
+<table><thead><tr><th>항목</th><th>6/12(실측)</th><th>6/15(추정)</th><th><strong>6/16(실측)</strong></th></tr></thead><tbody>
+<tr><td>실현 손익</td><td>-90,805</td><td>-290,124</td><td><strong>+13,862</strong></td></tr>
+<tr><td>트립/승률</td><td>8트립 50%</td><td>25트립 44%</td><td><strong>13트립 38%</strong></td></tr>
+<tr><td>비용/gross</td><td>1.6배</td><td>5.7배</td><td><strong>0.97배</strong></td></tr>
+<tr><td>데이터</td><td>실측</td><td>추정</td><td><strong>실측(파이프라인 복구)</strong></td></tr>
+<tr><td>갭 추격</td><td>f_zone -374K</td><td>gold/f -266K</td><td><strong>sf 대우건설 -181K 등 신규 -433K</strong></td></tr>
+<tr><td>이월 효과</td><td>현대무벡스 +79K</td><td>(미실현 +174K)</td><td><strong>011070·009150 +447K 실현</strong></td></tr>
+</tbody></table>
+
+<li>반복 패턴: ① <strong>비용이 gross 거의 전액 잠식</strong>(3일 연속 손익 결정 변수) ② <strong>고갭 추격 손실</strong>(sf/gold/supertrend) ③ <strong>진입가 위치가 승패</strong>.</li>
+<li>신규 긍정: <strong>데이터 무결성 복구 + BAR-OPS-39 배포 정황</strong>(buy_audit 최초 생성). <strong>이월 supertrend의 위력</strong>(6/15→6/16 +447K).</li>
+
+<h2>권고 (우선순위)</h2>
+
+<p><strong>P0 — 비용 (3일 연속 손익 결정)</strong></p>
+<p>1. <strong>수수료 요율 협의가 단연 #1.</strong> 6/16 gross +438K 를 비용 424K(0.97배)가 거의 전부 잠식. 13트립 평균 비용 32,650원. 요율 인하 없이는 회전형 매매가 구조적으로 본전. 협의 후 <code>BARRO_COMMISSION_RATE</code> 설정.</p>
+
+<p><strong>P1 — 갭 추격 (측정 데이터 누적 중, HITL 승인 후 코드)</strong></p>
+<p>2. <strong>sf_zone 갭가드 미포함</strong>이 대우건설 +20.6%갭 -181K 를 허용. <code>_GAP_GUARD_STRATEGIES</code> 에 sf_zone 추가 검토 — 단 6/15 한온 sf +22% 는 흑자였으므로 <strong>일괄차단보다 진입가 위치(눌림 여부) 결합</strong>. (HITL 승인 전 변경 금지)</p>
+<p>3. supertrend 신규(당일) 7건 -474K vs 이월 2건 +447K → <strong>supertrend는 오버나잇 보유에 강하고 당일 고갭 진입엔 약함</strong>. 당일 신규 진입의 갭/시각 필터 강화 여부 데이터 누적 후 판단.</p>
+
+<p><strong>P2 — 운영/관측</strong></p>
+<p>4. <strong><code>verify_eod_data.sh</code> cron 등록</strong>(평일 16:10)으로 6/16 정상 상태를 매일 자동 확인 — 6/9~6/15 회귀 재발 방지.</p>
+<p>5. <code>verify_deploy.sh</code> 로 BAR-OPS-39 배포를 명시 확인(buy_audit 생성으로 정황은 확인됨).</p>
+<p>6. 코스모로보틱스(439960) 등 신규상장주 일봉캐시 누락 — <code>update_ohlcv_cache.py</code> 신규종목 편입 점검.</p>
+
+<hr>
+<p>*산출: <code>barro-trade-review</code> 스킬(Phase1 verify_eod_data PASS 3/0 → Phase2 <code>_daily_strategy_audit.py --source auto</code> 진실원천 → Phase4 리포트, 전략별 교차검증 일치). 브로커 실측(fill_audit 49행). EOD 보유 028050 미실현은 매도세 전 gross. 이월 011070·009150 은 6/15 진입가(브로커 평단) 기준 실현. ※<code>_loss_drill_down.py</code>는 evening-pipeline import-dir 레이아웃 필요 — 직접임포트 환경선 per_symbol JSON+네이버 캔들로 대체.*</p>
+</body></html>
