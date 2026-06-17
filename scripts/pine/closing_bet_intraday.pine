@@ -1,0 +1,190 @@
+//@version=6
+// =============================================================================
+// 종가베팅(Closing Bet) — 분봉(intraday) 전용 strategy
+// =============================================================================
+// 일봉 버전(closing_bet_strategy.pine)의 분봉판. 종베의 본질(15:00 종가 진입 →
+// 익일 아침 청산)은 intraday 이벤트라, 진입 시각·장중 매도 시그널을 '눈에 보이게'
+// 검증하려면 5분봉(권장) 차트에서 이 스크립트를 쓴다.
+//
+// ── 일봉 vs 분봉판 차이 ───────────────────────────────────────────────────────
+//   · 진입창 15:00~15:20(KST) 기본 ON — 그 시간 봉에서만 진입(실제 진입 시각 노출).
+//   · 익일 강제청산(기본 10:00) — 세션 기반 time-exit. 익일 아침 슈팅 못 잡으면 10시 정산.
+//   · calc_on_every_tick=true — 실시간 봉에서 TP/SL이 닿는 '그 순간' 매도 시그널 노출.
+//        (실시간 봉 repaint 발생 가능 — 실행 판단엔 무방, 백테스트 일관성만 유의.)
+//   · 신고가/장대양봉은 일봉 개념 → request.security 로 일봉을 끌어오되, '오늘' 집계는
+//     분봉에서 직접 누적(lookahead/리페인트 회피).
+//
+// ── 사용 ─────────────────────────────────────────────────────────────────────
+//   KRX 종목 5분봉 차트 → Pine 편집기 붙여넣기 → 전략 테스터.
+//   수수료(Properties): 실측 0.35%/side 권장. 대형주(하이닉스 등)는 TP1 기본 +2%.
+// =============================================================================
+
+strategy("종가베팅 Closing Bet [분봉]", shorttitle="종베-분봉",
+     overlay=true,
+     process_orders_on_close=true,
+     calc_on_every_tick=true,
+     initial_capital=10000000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     pyramiding=0,
+     max_lines_count=500,
+     max_labels_count=500,
+     commission_type=strategy.commission.percent,
+     commission_value=0.35)
+
+// ── 입력: 진입 ───────────────────────────────────────────────────────────────
+gIn = "진입"
+useNewHigh   = input.bool(true,  "신고가 돌파 필수",            group=gIn)
+lookback     = input.int(60,     "신고가 lookback(일)", minval=5, group=gIn)
+baseMinGainP = input.float(5.0,  "장대양봉 최소 몸통(%)", minval=0, group=gIn)
+upperWickMax = input.float(1.0,  "윗꼬리/몸통 상한",  minval=0, group=gIn)
+useAtr       = input.bool(false, "ATR 변동성 필터(일봉)",       group=gIn)
+minAtrPctP   = input.float(3.5,  "최소 ATR(%)",     minval=0, group=gIn)
+
+// ── 입력: 진입창 ─────────────────────────────────────────────────────────────
+gWin = "진입창"
+useEntryWindow = input.bool(true, "장막판 진입창 사용(15:00~15:20)", group=gWin)
+entrySess      = input.session("1500-1520", "진입 세션(KST)", group=gWin)
+
+// ── 입력: 분봉 자금유입(옵션) ────────────────────────────────────────────────
+gFlow = "분봉 자금유입(옵션)"
+useMoneyFlow  = input.bool(false, "오전/오후 자금유입 게이트", group=gFlow)
+flowMinEok    = input.float(10.0, "유입 인정 최소(억)", minval=0, group=gFlow)
+flowDeathRat  = input.float(0.3,  "오후<오전×비율=오전후死", minval=0, group=gFlow)
+
+// ── 입력: 청산 ───────────────────────────────────────────────────────────────
+gEx = "청산"
+tp1P        = input.float(2.0, "TP1(%) [대형주 2]", minval=0, group=gEx)
+tp1Qty      = input.float(50,  "TP1 청산비율(%)",   minval=1, maxval=100, group=gEx)
+tp2P        = input.float(4.5, "TP2(%)",            minval=0, group=gEx)
+slP         = input.float(3.0, "손절(%)",           minval=0, group=gEx)
+useFibStop  = input.bool(false,"0.618 fib 손절 병행",         group=gEx)
+morningExit = input.bool(true, "익일 강제청산 사용",          group=gEx)
+morningHour = input.int(10,    "강제청산 시각(시, KST)", minval=9, maxval=15, group=gEx)
+maxHoldDays = input.int(3,     "최대 보유일(D1~D3, 강제청산 OFF시)", minval=1, group=gEx)
+
+// ── KST 시간/날짜 ────────────────────────────────────────────────────────────
+hK = hour(time, "Asia/Seoul")
+mK = minute(time, "Asia/Seoul")
+dateNum = year(time, "Asia/Seoul") * 10000 + month(time, "Asia/Seoul") * 100 +
+     dayofmonth(time, "Asia/Seoul")
+
+// ── '오늘' 일봉 집계: 분봉에서 직접 누적(리페인트/lookahead 회피) ─────────────
+isNewDay = ta.change(time("D")) != 0
+var float todayOpen = na
+var float todayHigh = na
+var float todayLow  = na
+if isNewDay
+    todayOpen := open
+    todayHigh := high
+    todayLow  := low
+else
+    todayHigh := math.max(nz(todayHigh, high), high)
+    todayLow  := math.min(nz(todayLow, low), low)
+
+// ── 일봉 컨텍스트(과거 마감봉만): 직전 N일 고점 + ATR ───────────────────────
+priorHigh = request.security(syminfo.tickerid, "D", ta.highest(high, lookback),
+     lookahead=barmerge.lookahead_off)
+dAtr = request.security(syminfo.tickerid, "D", ta.atr(14), lookahead=barmerge.lookahead_off)
+
+// ── 분봉 자금유입(오전 09:00~11:30 / 오후 13:00~15:20) 거래대금 누적 ─────────
+var float amVal = 0.0
+var float pmVal = 0.0
+if isNewDay
+    amVal := 0.0
+    pmVal := 0.0
+inAM = (hK == 9) or (hK == 10) or (hK == 11 and mK <= 30)
+inPM = (hK == 13) or (hK == 14) or (hK == 15 and mK <= 20)
+amVal := amVal + (inAM ? close * volume : 0.0)
+pmVal := pmVal + (inPM ? close * volume : 0.0)
+flowMinVal = flowMinEok * 1e8
+amAct = amVal >= flowMinVal
+pmAct = pmVal >= flowMinVal
+flowDeath = amAct and amVal > 0 and pmVal < flowDeathRat * amVal
+flowOk = (not useMoneyFlow) or (pmAct and not flowDeath)
+
+// ── 진입 조건 (분봉에서 일봉 파생값으로 평가) ───────────────────────────────
+isNewHigh = (not useNewHigh) or (nz(todayHigh, high) >= priorHigh)
+body      = (not na(todayOpen) and todayOpen > 0) ? (close - todayOpen) / todayOpen : 0.0
+bodyAbs   = close - nz(todayOpen, close)
+isBull    = close > nz(todayOpen, close)
+bigBody   = body >= baseMinGainP / 100.0
+wickOk    = bodyAbs > 0 ? ((nz(todayHigh, high) - close) / bodyAbs <= upperWickMax) : false
+isBigBull = isBull and bigBody and wickOk
+atrOk     = (not useAtr) or (close > 0 and dAtr / close >= minAtrPctP / 100.0)
+inWindow  = (not useEntryWindow) or (not na(time(timeframe.period, entrySess, "Asia/Seoul")))
+
+longCond = isNewHigh and isBigBull and atrOk and inWindow and flowOk and
+     strategy.position_size == 0
+
+// ── 진입 (진입창 봉 종가) ────────────────────────────────────────────────────
+var int   entryDateNum = na
+var float fibStop      = na
+var int   holdDays     = 0
+if longCond
+    strategy.entry("종베", strategy.long)
+    entryDateNum := dateNum
+    fibStop      := nz(todayHigh, high) - (nz(todayHigh, high) - nz(todayLow, low)) * 0.618
+    holdDays     := 0
+
+// 보유 중 새 날마다 보유일수 +1 (멀티데이 청산용)
+if isNewDay and strategy.position_size > 0
+    holdDays := holdDays + 1
+
+// ── 청산 ────────────────────────────────────────────────────────────────────
+avg     = strategy.position_avg_price
+tp1     = avg * (1.0 + tp1P / 100.0)
+tp2     = avg * (1.0 + tp2P / 100.0)
+slBase  = avg * (1.0 - slP / 100.0)
+slPrice = (useFibStop and not na(fibStop)) ? math.max(slBase, fibStop) : slBase
+laterDay = (not na(entryDateNum)) and dateNum > entryDateNum
+
+if strategy.position_size > 0
+    // 익일 아침 슈팅(TP)·손절(SL) — 장중 닿는 즉시 체결(calc_on_every_tick)
+    strategy.exit("TP1", from_entry="종베", qty_percent=tp1Qty, limit=tp1, stop=slPrice)
+    strategy.exit("TP2", from_entry="종베", limit=tp2, stop=slPrice)
+    // 익일 강제청산: 진입 다음날 이후 + morningHour 도달 → 시장가 정산(슈팅 못 잡았을 때)
+    if morningExit and laterDay and hK >= morningHour
+        strategy.close("종베", comment="익일청산")
+    // 멀티데이 백업(강제청산 OFF 시): D1~D3 초과
+    if (not morningExit) and holdDays >= maxHoldDays
+        strategy.close("종베", comment="maxHold")
+
+// ── 시각화 ──────────────────────────────────────────────────────────────────
+bgcolor(inWindow and useEntryWindow ? color.new(color.teal, 90) : na, title="진입창")
+plotshape(longCond, title="종베 진입", style=shape.triangleup, location=location.belowbar,
+     color=color.new(color.teal, 0), size=size.small, text="종베")
+
+// 진입 시 TP/SL/진입가 수평선 + 라벨 — 진입가는 '이 봉 종가'(avg 는 진입봉에서 0).
+if longCond
+    ePx  = close
+    eTp1 = ePx * (1.0 + tp1P / 100.0)
+    eTp2 = ePx * (1.0 + tp2P / 100.0)
+    eSl  = useFibStop and not na(fibStop) ? math.max(ePx * (1.0 - slP / 100.0), fibStop)
+         : ePx * (1.0 - slP / 100.0)
+    line.new(bar_index, eTp2, bar_index + 40, eTp2, color=color.green, width=2)
+    line.new(bar_index, eTp1, bar_index + 40, eTp1, color=color.new(color.green, 40),
+         style=line.style_dashed)
+    line.new(bar_index, eSl,  bar_index + 40, eSl,  color=color.red, width=2)
+    line.new(bar_index, ePx,  bar_index + 40, ePx,  color=color.gray, style=line.style_dotted)
+    label.new(bar_index, eTp2, "TP +" + str.tostring(tp2P, "#.#") + "%", style=label.style_label_left,
+         color=color.green, textcolor=color.white, size=size.small)
+    label.new(bar_index, eSl, "SL -" + str.tostring(slP, "#.#") + "%", style=label.style_label_left,
+         color=color.red, textcolor=color.white, size=size.small)
+
+// ── 진단 테이블(우상단) — 왜 진입이 되/안 되는지 마지막 봉 상태 표시 ──────────
+var table dbg = table.new(position.top_right, 2, 6, border_width=1)
+if barstate.islast
+    table.cell(dbg, 0, 0, "종베 진단", text_color=color.white, bgcolor=color.new(color.teal, 0))
+    table.cell(dbg, 1, 0, "", bgcolor=color.new(color.teal, 0))
+    table.cell(dbg, 0, 1, "오늘 몸통%", text_color=color.silver)
+    table.cell(dbg, 1, 1, str.tostring(body * 100, "#.##"),
+         text_color=body >= baseMinGainP / 100.0 ? color.lime : color.gray)
+    table.cell(dbg, 0, 2, "신고가", text_color=color.silver)
+    table.cell(dbg, 1, 2, isNewHigh ? "O" : "X", text_color=isNewHigh ? color.lime : color.red)
+    table.cell(dbg, 0, 3, "진입창", text_color=color.silver)
+    table.cell(dbg, 1, 3, inWindow ? "O" : "X", text_color=inWindow ? color.lime : color.red)
+    table.cell(dbg, 0, 4, "포지션", text_color=color.silver)
+    table.cell(dbg, 1, 4, str.tostring(strategy.position_size, "#.#"), text_color=color.white)
+    table.cell(dbg, 0, 5, "총 거래수", text_color=color.silver)
+    table.cell(dbg, 1, 5, str.tostring(strategy.closedtrades), text_color=color.white)

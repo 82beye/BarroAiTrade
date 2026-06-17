@@ -24,6 +24,7 @@ from backend.core.strategy.crypto_breakout import (
     CryptoBreakoutParams,
     CryptoBreakoutStrategy,
 )
+from backend.core.strategy.closing_bet import ClosingBetParams, ClosingBetStrategy
 from backend.core.strategy.f_zone import FZoneParams, FZoneStrategy
 from backend.core.strategy.gold_zone import GoldZoneParams, GoldZoneStrategy
 from backend.core.strategy.sf_zone import SFZoneStrategy
@@ -47,13 +48,17 @@ _DEFAULT_ENABLED: Dict[str, bool] = {
     #   (승률55%·손익비7.36·기대값+5.34·MDD-7.6). multi-day 청산은 holding_evaluator
     #   STRATEGY_EXIT_PROFILES["swing_38"](min_hold 3/max_hold 20)이 게이트.
     "swing_38": True,          # 5번 활성 (BAR-OPS-33)
+    # thetrading-uplift Increment 1 (2026-06-17): 종가베팅(종베) — 기본 비활성 스캐폴딩.
+    #   라이브 활성(분봉 자금유입·존 진입가·선정 hard-cut + 오버나잇 carry 한도)은 별도
+    #   HITL 단계. 활성: SignalScanner(..., enabled_strategies={"closing_bet": True}).
+    "closing_bet": False,
 }
 
 # BAR-OPS-33: 안정성 순위(4~6월 백테스트) — 슬롯/자본 경합 시 점수 동률이면 상위 전략 우선.
 #   점수 1차 정렬, priority 2차 tiebreaker (작을수록 우선).
 STRATEGY_PRIORITY: Dict[str, int] = {
     "swing_38": 1, "gold_zone": 2, "f_zone": 3, "sf_zone": 4,
-    "supertrend": 5, "blue_line": 6, "crypto_breakout": 7,
+    "supertrend": 5, "blue_line": 6, "crypto_breakout": 7, "closing_bet": 8,
 }
 
 
@@ -78,6 +83,7 @@ class SignalScanner:
         crypto_params: Optional[CryptoBreakoutParams] = None,
         swing_38_params: Optional[Swing38Params] = None,
         gold_zone_params: Optional[GoldZoneParams] = None,
+        closing_bet_params: Optional[ClosingBetParams] = None,
         timeframe: str = "1m",       # intraday default = 1분봉
         candle_limit: int = 120,
         daily_timeframe: str = "1d",  # swing_38 전용 일봉 (비활성 시 사용 X)
@@ -104,6 +110,8 @@ class SignalScanner:
         self.crypto_breakout = CryptoBreakoutStrategy(crypto_params)
         # Phase C swing_38 = 일봉 (require_daily_candles=True), D2.1 default 비활성
         self.swing_38 = Swing38Strategy(swing_38_params)
+        # thetrading-uplift Increment 1: 종베 = 일봉 dispatch + ctx.timestamp 진입창. default OFF.
+        self.closing_bet = ClosingBetStrategy(closing_bet_params)
 
         # 운영 가시성: 활성 전략 목록 로깅 (재기동 시 1회)
         active = [k for k, v in self._enabled.items() if v]
@@ -173,21 +181,34 @@ class SignalScanner:
                         )
                         return signal
 
-            # swing_38 평가 (일봉) — 활성일 때만 fetch
-            if self._enabled["swing_38"]:
+            # 일봉 전략 평가 — swing_38 또는 closing_bet 활성 시에만 fetch (cost 절약).
+            if self._enabled["swing_38"] or self._enabled.get("closing_bet", False):
                 candles_daily = await self.gateway.get_ohlcv(
                     symbol, self.daily_timeframe, self.daily_candle_limit,
                 )
                 if candles_daily:
-                    sw_signal = self.swing_38.analyze(
-                        symbol, ticker.name, candles_daily, market_type,
-                    )
-                    if sw_signal:
-                        logger.info(
-                            "신호 발생 [swing_38] %s (%.1f점): %s",
-                            symbol, sw_signal.score, sw_signal.reason,
+                    if self._enabled["swing_38"]:
+                        sw_signal = self.swing_38.analyze(
+                            symbol, ticker.name, candles_daily, market_type,
                         )
-                        return sw_signal
+                        if sw_signal:
+                            logger.info(
+                                "신호 발생 [swing_38] %s (%.1f점): %s",
+                                symbol, sw_signal.score, sw_signal.reason,
+                            )
+                            return sw_signal
+                    # thetrading-uplift Increment 1: 종베 (기본 OFF). 진입 시간창(KST
+                    #   15:00~15:20)·신고가·장대양봉 게이트. 활성화는 별도 HITL 단계.
+                    if self._enabled.get("closing_bet", False):
+                        cb_signal = self.closing_bet.analyze(
+                            symbol, ticker.name, candles_daily, market_type,
+                        )
+                        if cb_signal:
+                            logger.info(
+                                "신호 발생 [closing_bet] %s (%.1f점): %s",
+                                symbol, cb_signal.score, cb_signal.reason,
+                            )
+                            return cb_signal
 
         except Exception as e:
             logger.error("%s 분석 실패: %s", symbol, e)

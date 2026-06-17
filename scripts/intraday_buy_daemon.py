@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv as _csv
+import json
 import os
 import signal
 import sys
@@ -600,7 +601,23 @@ _NO_DCA_STRATEGIES = {"swing_38", "supertrend"}
 #   ※ 6/11 실증: 임계 15% 바로 아래(13.1~13.5%) 진입 3건 전패 -353K — 임계 조정은
 #   일일감사의 갭 분포 누적 측정(BAR-OPS-39) 후 데이터 기반으로.
 _ZONE_MAX_FLU = float(os.environ.get("BARRO_ZONE_MAX_FLU", "15.0"))
-_GAP_GUARD_STRATEGIES = _MEANREV_STRATEGIES | {"f_zone"}
+
+
+def _parse_strategy_set(env_key: str, default: set) -> set:
+    """csv env → 전략집합. 미설정/빈값이면 default 그대로(기본 동작 보존)."""
+    raw = os.environ.get(env_key, "").strip()
+    if not raw:
+        return set(default)
+    return {s.strip() for s in raw.split(",") if s.strip()}
+
+
+# [thetrading-uplift Increment 1, 2026-06-17] 갭가드 적용 전략집합을 env 로 조정 가능.
+#   기본값은 기존과 동일({gold_zone, f_zone}) — 미설정 시 동작 불변(c 분류·안전).
+#   설계 §4.3: sf_zone 은 시초 open-gap·장중 flu 갭가드가 모두 없는 '진짜 구멍'.
+#   운영이 코드배포 없이 env 로 편입 가능: BARRO_GAP_GUARD_STRATEGIES="gold_zone,f_zone,sf_zone".
+#   ※ 실제 차단 활성은 선정 동작을 바꾸므로 (d) HITL — env 설정 자체가 인간 승인 게이트.
+_GAP_GUARD_STRATEGIES = _parse_strategy_set(
+    "BARRO_GAP_GUARD_STRATEGIES", _MEANREV_STRATEGIES | {"f_zone"})
 
 # [BAR-OPS-39 P0] 일반(데몬) 전략 진입 컷오프 — st 트레이더에만 있던 14:30 컷오프(BAR-OPS-38
 #   P0#4①)의 사각지대 봉합: 6/11 f_zone 이 14:33/14:38 현대무벡스 매수 → 이월 발생.
@@ -748,6 +765,16 @@ async def _scan_and_buy(
     pos_store = ActivePositionStore(args.pos_log)
     active_symbols = set(pos_store.load_all().keys())
 
+    # [사용자 요청 2026-06-18] 종베(알림 데몬) 보유 종목은 다른 전략이 재진입 금지.
+    #   브로커 잔고(already_held)가 1차 가드이나, ①balance 조회 실패 fail-open ②종베 수동
+    #   진입은 active_positions 에 없음 → closing_bet_positions.json 을 명시 제외(2차 방어).
+    closing_bet_held: set[str] = set()
+    try:
+        _cb = json.loads((_DATA_DIR / "closing_bet_positions.json").read_text())
+        closing_bet_held = {str(p["symbol"]) for p in _cb}
+    except Exception:
+        pass
+
     today_sold: set[str] = set()
     audit_path = Path(args.audit_log)
     if audit_path.exists():
@@ -801,7 +828,7 @@ async def _scan_and_buy(
 
     excluded = (
         already_held | active_symbols | today_sold | session_bought
-        | cooldown_buys | audit_buys
+        | cooldown_buys | audit_buys | closing_bet_held
     )
     # 급등 추격매수 방지 필터 — 등락률이 _MAX_FLU_RATE 이상인 종목 제외.
     # 2026-06-01: 25.0→30.0 완화. 강세장(코스피 급등)에서 +29%대 주도주(LG전자·

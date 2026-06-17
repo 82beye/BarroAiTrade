@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>2026-06-18-closing-bet-validation.report</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<hr />
+<h2 id="tags-report-validation-oos-strategyclosing_bet-featurethetrading-uplift-statuscomplete">tags: [report, validation, oos, strategy/closing_bet, feature/thetrading-uplift, status/complete]</h2>
+<h1 id="phase-c">종가베팅(종베) 검증 판정 리포트 — Phase C</h1>
+<blockquote>
+<p><strong>대상</strong>: <code>ClosingBetStrategy</code> (구체화 후: 분봉 자금유입·존 게이트 + 라이브 실행경로 통합)
+<strong>Project</strong>: BarroAiTrade · <strong>Date</strong>: 2026-06-18 · <strong>Branch</strong>: <code>feat/thetrading-uplift-increment1</code>
+<strong>판정(요약)</strong>: <strong>일봉 OOS 관문 3/3 PASS(실측비용 반영)</strong> — 프로젝트 공식 기준 통과. 단 <strong>엔진/진입 메커니즘 민감도</strong>와 <strong>차별화 게이트 비효과</strong>가 핵심 caveat → <strong>조건부 GO</strong>(소액·다음봉시가 진입·모니터링 전제).</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 무엇을 검증했나</h2>
+<p>종베 구체화(Phase A·B) 후, 프로젝트의 <strong>공식 OOS 관문</strong>(<code>scripts/_oos_validation.py</code>, f_zone/gold_zone가 통과한 그 기준)에 종베를 편입해 검증. 관문 = <strong>랜덤 유니버스(선택편향 제거) + train/holdout 40% 시간분할 + 실측비용</strong>. PASS 조건 5개: active≥15·trades≥30·avg_ret&gt;0·drop1 부호안정·holdout avg_ret&gt;0.</p>
+<p>병행: 5분봉 주입 <strong>분봉 게이트 ablation</strong>(자금유입·존이 per-trade 엣지를 더하는가).</p>
+<p>실측비용 반영: <code>BARRO_COMMISSION_RATE=0.0035</code>(편도 0.35%, fill_audit 186건 역산).</p>
+<hr />
+<h2 id="2-oos-closing_bet-33-pass">2. 일봉 OOS 결과 — closing_bet <strong>3/3 PASS</strong></h2>
+<table>
+<thead>
+<tr>
+<th>seed</th>
+<th>active</th>
+<th>trips</th>
+<th>승률</th>
+<th>avg_ret</th>
+<th>holdout</th>
+<th>drop1</th>
+<th>판정</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>42</td>
+<td>50</td>
+<td>248</td>
+<td>43%</td>
+<td><strong>+3.480%</strong></td>
+<td>+4.710%</td>
+<td>OK</td>
+<td><strong>PASS</strong></td>
+</tr>
+<tr>
+<td>7</td>
+<td>55</td>
+<td>347</td>
+<td>52%</td>
+<td><strong>+3.889%</strong></td>
+<td>+4.583%</td>
+<td>OK</td>
+<td><strong>PASS</strong></td>
+</tr>
+<tr>
+<td>123</td>
+<td>50</td>
+<td>246</td>
+<td>52%</td>
+<td><strong>+3.660%</strong></td>
+<td>+3.927%</td>
+<td>OK</td>
+<td><strong>PASS</strong></td>
+</tr>
+</tbody>
+</table>
+<p>비교(동일 관문·동일 seed):</p>
+<table>
+<thead>
+<tr>
+<th>전략</th>
+<th>seed42</th>
+<th>seed7</th>
+<th>seed123</th>
+<th>종합</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>closing_bet</strong></td>
+<td>+3.48</td>
+<td>+3.89</td>
+<td>+3.66</td>
+<td><strong>3/3 PASS (avg_ret 최고)</strong></td>
+</tr>
+<tr>
+<td>f_zone</td>
+<td>+1.90</td>
+<td>+1.99</td>
+<td>+3.08</td>
+<td>3/3 PASS</td>
+</tr>
+<tr>
+<td>gold_zone</td>
+<td>+1.56</td>
+<td>+1.95</td>
+<td>+2.34</td>
+<td>3/3 PASS</td>
+</tr>
+<tr>
+<td>sf_zone</td>
+<td>FAIL</td>
+<td>FAIL</td>
+<td>FAIL</td>
+<td>0/3 (희소, 기존 알려진 한계)</td>
+</tr>
+</tbody>
+</table>
+<p>→ <strong>종베가 실측비용 반영 상태로 3 seed 전부 PASS, holdout(out-of-sample 40%)에서도 +3.9~4.7%로 견고.</strong> drop1 부호안정(아웃라이어 의존 아님). 프로젝트 공식 기준으로는 <strong>명확한 통과</strong>.</p>
+<hr />
+<h2 id="3-ablation-5-top-600-19670-stock-day">3. 분봉 게이트 ablation (5분봉 주입, top 600, 19,670 stock-day)</h2>
+<table>
+<thead>
+<tr>
+<th>변형</th>
+<th>트립</th>
+<th>승률</th>
+<th>gross</th>
+<th>net(0.90)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>baseline (게이트 OFF)</td>
+<td>448</td>
+<td>55.1%</td>
+<td>+0.966%</td>
+<td>+0.066%</td>
+</tr>
+<tr>
+<td>+money_flow</td>
+<td>274</td>
+<td>55.5%</td>
+<td>+0.985%</td>
+<td>+0.085%</td>
+</tr>
+<tr>
+<td>+zone</td>
+<td>58</td>
+<td>51.7%</td>
+<td>+0.711%</td>
+<td><strong>−0.189%</strong></td>
+</tr>
+<tr>
+<td>+both</td>
+<td>38</td>
+<td>47.4%</td>
+<td>+0.355%</td>
+<td><strong>−0.545%</strong></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>money_flow 게이트</strong>: 미세 개선(gross +0.02%, 트립 39%↓). 약하지만 양(+).</li>
+<li><strong>zone 게이트: 오히려 악화</strong>. 신호 급감(448→58) + 기대값 하락. <strong>장대양봉 신고가 종가(고점 근처)와 골드존 0.5~0.618 되돌림은 같은 날 양립 불가</strong>(개념 충돌, 단위테스트로도 재현). 종베의 존은 "돌파 후 별도 눌림 진입" 셋업이지 돌파일 종가 게이트가 아니다 → <strong>현 형태 zone 게이트는 폐기 또는 재설계</strong>.</li>
+</ul>
+<hr />
+<h2 id="4-caveat">4. ⚠️ 핵심 caveat — 엔진/진입 메커니즘 민감도</h2>
+<p>같은 종베인데 백테스트 엔진에 따라 결과가 크게 다르다:</p>
+<table>
+<thead>
+<tr>
+<th>경로</th>
+<th>진입</th>
+<th>유니버스</th>
+<th>net 결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>일봉 OOS</strong> (IntradaySimulator)</td>
+<td><strong>익일 시가</strong>(entry_on_next_open)</td>
+<td>랜덤60 + holdout</td>
+<td><strong>+3.5%/트립 PASS</strong></td>
+</tr>
+<tr>
+<td>종가 ablation (custom)</td>
+<td>신호일 <strong>종가</strong></td>
+<td>거래대금상위 600</td>
+<td><strong>브레이크이븐</strong></td>
+</tr>
+<tr>
+<td>일봉 스캐폴드(6/17)</td>
+<td>종가</td>
+<td>상위500</td>
+<td>net ≈ 0</td>
+</tr>
+</tbody>
+</table>
+<p>→ <strong>종베 엣지의 상당 부분이 "장대양봉 익일 시초 연속성"에 있다</strong>(익일 시가 진입이 종가 진입보다 유리). 이는 OOS 엔진이 모든 전략에 동일 적용하는 가정(f/gold도 같은 엔진서 +1.5~3%)이라 종베만의 artifact는 아니나, <strong>라이브 진입 체결가가 이 가정과 일치해야</strong> OOS 수익이 재현된다. 종가 동시호가 슬리피지로 나쁜 체결이 나면 브레이크이븐으로 회귀할 수 있다.</p>
+<p>(추가 보수성: OOS 엔진은 intrabar에서 TP를 SL보다 먼저 평가 → 절대 수치는 모든 전략 공통으로 약간 낙관.)</p>
+<hr />
+<h2 id="5-go">5. 판정 — 조건부 GO</h2>
+<p><strong>공식 OOS 관문 3/3 PASS = 라이브 전환 게이트는 충족.</strong> 단 아래 조건을 달아 <strong>조건부 GO</strong>:</p>
+<ol>
+<li><strong>진입 체결가 정합</strong>: 라이브 진입을 OOS 가정(익일 시초 또는 그에 준하는 유리 체결)에 맞춤. 종가 동시호가 불리체결 시 엣지 소멸 → 진입 방식 명시 + 슬리피지 모니터.</li>
+<li><strong>zone 게이트 폐기</strong>(net 악화). money_flow는 약한 양(+)이라 유지/추가 검증.</li>
+<li><strong>소액 시작</strong>: <code>max_per_position</code> 대폭↓(예 2%), 동시 1~2종, 종베 전용 carry 한도.</li>
+<li><strong>점진 전환</strong>: 기존 전략 <strong>즉시 중지 금지</strong>. 종베를 소액 라이브(또는 페이퍼)로 1~2주 가동해 OOS 수익이 실체결로 재현되는지 확인 후 비중 확대 → 그 다음 종베-only.</li>
+<li><strong>모니터링</strong>: <code>_daily_strategy_audit.py</code>(승률·자본가중·진입품질) + <code>verify_eod_data.py</code>. 종베 실측 승률·체결슬립이 OOS와 괴리되면 롤백.</li>
+</ol>
+<blockquote>
+<p>한 줄: <strong>종베는 공식 기준을 통과했다(예상보다 강함). 단 그 수익은 "익일 시초 연속성"에 의존하므로, 라이브 체결가가 그 가정을 지키는지가 전부다. 종가 불리체결이면 브레이크이븐.</strong> zone 게이트는 빼고, 소액·점진 전환으로 실체결 검증부터.</p>
+</blockquote>
+<hr />
+<h2 id="6-phase-abc">6. 구현/검증 산출물 (Phase A·B·C)</h2>
+<ul>
+<li><strong>게이트 실구현</strong>: <code>closing_bet.py</code> <code>_money_flow_grade</code>(분봉 AM/PM 거래대금)·<code>_in_zone</code>(골드존 되돌림)·<code>AnalysisContext.intraday_candles</code>(멀티TF)·<code>LeaderCandidate.trade_value/is_new_high</code>.</li>
+<li><strong>실행경로 통합</strong>: <code>intraday_simulator.py</code> <code>closing_bet</code> 분기(swing_38 멀티데이 패턴) + <code>_oos_validation.py</code> 편입(<code>BARRO_DATA_DIR</code> override).</li>
+<li><strong>백테스트</strong>: <code>scripts/backtest_closing_bet_intraday.py</code>(분봉 ablation) + 원시결과 <code>2026-06-18-closing-bet-intraday-ablation.json</code>.</li>
+<li><strong>테스트</strong>: <code>test_closing_bet.py</code> 23건(게이트 9건 추가). 전체 회귀 <strong>1455 passed</strong>.</li>
+</ul>
+<h2 id="7">7. 재현</h2>
+<pre><code class="language-bash"># venv = /Users/beye/workspace/BarroAiTrade/venv/bin/python
+# 일봉 OOS (실측비용, 3 seed)
+for s in 42 7 123; do
+  BARRO_DATA_DIR=.../data BARRO_COMMISSION_RATE=0.0035 \
+    python scripts/_oos_validation.py --n 60 --seed $s
+done
+# 분봉 게이트 ablation
+python scripts/backtest_closing_bet_intraday.py 600 250
+</code></pre>
+<h2 id="8-phase-d">8. 다음 단계 (Phase D — 사용자 승인 시)</h2>
+<p>조건부 GO 수용 시: D1 데몬 EOD 진입경로(<code>_scan_and_buy_closing_bet</code>, 15:00~15:20) + D2 스캐너 라이브 컨텍스트 주입 + D3 종베-only 스위치(소액·점진). <strong>zone 게이트 제외, money_flow 유지.</strong> 기존 전략은 종베 실체결 검증 후 단계적 중지.</p>
+</body>
+</html>

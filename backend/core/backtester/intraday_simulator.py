@@ -268,6 +268,21 @@ def _build_strategies(
             if provider is not None:
                 sc.set_analysis_provider(provider)
             out.append(sc)
+        elif sid == "closing_bet":
+            from backend.core.strategy.closing_bet import (
+                ClosingBetParams, ClosingBetStrategy,
+            )
+
+            # thetrading-uplift: 종베 = 멀티데이 오버나잇(D1~D3). 백테스트는 진입창 우회
+            #   (ctx.timestamp 재현 불가) → require_eod_window=False, 일봉 신고가·장대양봉
+            #   코어 + 변동성 필터(0.035). ExitEngine min/max_hold_days 게이트(swing_38 패턴).
+            #   분봉 의존 게이트(자금유입·존)는 intraday_candles 미주입 시 자동 skip.
+            out.append(ClosingBetStrategy(_ov_params(ClosingBetParams(
+                require_eod_window=False,
+                require_daily_candles=True,
+                min_atr_pct=0.035,
+                max_hold_days=3,
+            ), "closing_bet", params_override)))
         else:
             raise ValueError(f"unknown strategy: {sid}")
     return out
