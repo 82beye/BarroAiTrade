@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import os
 import random
 import statistics
 import sys
@@ -27,8 +28,9 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO))
 
-DAILY_CACHE = _REPO / "data" / "ohlcv_cache"
-STRATEGIES = ["f_zone", "sf_zone", "gold_zone"]
+# 데이터 경로: BARRO_DATA_DIR override(worktree 등 data 부재 시 메인 레포 지정).
+DAILY_CACHE = Path(os.environ.get("BARRO_DATA_DIR", str(_REPO / "data"))) / "ohlcv_cache"
+STRATEGIES = ["f_zone", "sf_zone", "gold_zone", "closing_bet"]
 # [BAR-OPS-39] 브로커 실측 비용 — OOS 관문 판정이 실측 기준으로 보수화됨(의도).
 from backend.core.trading_costs import COMMISSION_PCT, TAX_PCT_ON_SELL as TAX_PCT
 

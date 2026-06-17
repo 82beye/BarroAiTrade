@@ -1,0 +1,114 @@
+//@version=6
+// =============================================================================
+// 종가베팅(Closing Bet) — TradingView 백테스트용 strategy
+// =============================================================================
+// BarroAiTrade `ClosingBetStrategy`(backend/core/strategy/closing_bet.py)의
+// 일봉 스캐폴드 로직을 Pine Script v6 로 이식. Python 백테스트
+// (scripts/backtest_closing_bet.py)와 진입/청산/파라미터를 1:1 매칭하여
+// TradingView 전략 테스터에서 동일 결과를 재현·비교할 수 있게 함.
+//
+// ── 진입(매수) ─────────────────────────────────────────────────────────────
+//   ① (옵션) 신고가 돌파 : 당일 high > 직전 N봉 고점 (default 60)
+//   ② 장대양봉(기준봉)   : 몸통 (close-open)/open ≥ 5% & 윗꼬리/몸통 ≤ 상한
+//   ③ (옵션) ATR 필터    : ATR%/close ≥ 임계
+//   ④ (옵션) 진입창      : 분봉 차트에서만 15:00~15:20(KST) 세션
+//   → 신호봉 '종가'에 진입(process_orders_on_close=true) = 종베 종가매수와 일치
+//
+// ── 청산(매도) ─────────────────────────────────────────────────────────────
+//   TP1 +2.7%(50% 분할) → TP2 +4.5%(잔량) / SL -3%(0.618 fib 병행 옵션) /
+//   최대보유 3봉(D1~D3) 강제청산  ← Python ExitParams 와 동일
+//
+// ── ⚠️ 한계(Python 백테스트와 동일하게 인지할 것) ──────────────────────────
+//   · 일봉 스캐폴드만: 종베의 분봉 자금유입(오전/오후)·존(F/골드) 진입가·
+//     주도주 거래대금 rank 컷은 미반영(원전략 default OFF).
+//   · TradingView 의 intrabar TP/SL 체결 가정은 Python 백테스터(TP 우선)와
+//     다를 수 있음(보통 TradingView 가 더 보수적 → 승률이 더 낮게 나올 수 있음).
+//   · 비용이 손익을 좌우: 전략 테스터 Properties 에서 수수료를 실측으로 설정.
+//     - 현행 모델   : 편도 0.175%  (commission_value=0.175)
+//     - 실측(권장)  : 편도 0.35%   (commission_value=0.35) + 매도세는 별도
+//     한국 매도세 0.20% 까지 반영하려면 편도 ≈ 0.45% 로 올려 근사.
+// =============================================================================
+
+strategy("종가베팅 Closing Bet [BarroAiTrade]", shorttitle="종베",
+     overlay=true,
+     process_orders_on_close=true,
+     initial_capital=10000000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10,
+     pyramiding=0,
+     commission_type=strategy.commission.percent,
+     commission_value=0.35,
+     slippage=0)
+
+// ── 입력: 진입 ───────────────────────────────────────────────────────────────
+gIn = "진입"
+useNewHigh   = input.bool(true,  "신고가 돌파 필수",            group=gIn)
+lookback     = input.int(60,     "신고가 lookback(봉)", minval=5, group=gIn)
+newHighTolP  = input.float(0.0,  "신고가 허용 미달(%)", minval=0, group=gIn)
+baseMinGainP = input.float(5.0,  "장대양봉 최소 몸통(%)", minval=0, group=gIn)
+upperWickMax = input.float(1.0,  "윗꼬리/몸통 상한",  minval=0, group=gIn)
+useAtr       = input.bool(false, "ATR 변동성 필터 사용",        group=gIn)
+minAtrPctP   = input.float(3.5,  "최소 ATR(%)",     minval=0, group=gIn)
+atrN         = input.int(14,     "ATR 기간",        minval=1, group=gIn)
+
+// ── 입력: 진입창(분봉 전용) ──────────────────────────────────────────────────
+gWin = "진입창(분봉 전용)"
+useEntryWindow = input.bool(false, "장막판 진입창 사용", group=gWin)
+sess           = input.session("1500-1520", "진입 세션(KST)", group=gWin)
+
+// ── 입력: 청산 ───────────────────────────────────────────────────────────────
+gEx = "청산"
+tp1P        = input.float(2.7, "TP1(%)",            minval=0, group=gEx)
+tp1Qty      = input.float(50,  "TP1 청산비율(%)",   minval=1, maxval=100, group=gEx)
+tp2P        = input.float(4.5, "TP2(%)",            minval=0, group=gEx)
+slP         = input.float(3.0, "손절(%)",           minval=0, group=gEx)
+maxHoldBars = input.int(3,     "최대 보유(봉=D1~D3)", minval=1, group=gEx)
+useFibStop  = input.bool(false,"0.618 fib 손절 병행",         group=gEx)
+
+// ── 진입 조건 계산 ───────────────────────────────────────────────────────────
+priorHigh = ta.highest(high, lookback)[1]                 // 직전 N봉 고점(당일 제외)
+isNewHigh = not useNewHigh or (high >= priorHigh * (1.0 - newHighTolP / 100.0))
+
+bodyAbs   = close - open
+isBull    = close > open
+bigBody   = open > 0 and (bodyAbs / open) >= (baseMinGainP / 100.0)
+wickOk    = bodyAbs > 0 and ((high - close) / bodyAbs) <= upperWickMax
+isBigBull = isBull and bigBody and wickOk
+
+atrOk = not useAtr or (close > 0 and (ta.atr(atrN) / close) >= (minAtrPctP / 100.0))
+
+// 진입창: useEntryWindow=false 또는 일봉이면 무시, 분봉이면 세션 일치 필요
+inWindow = (not useEntryWindow) or (not timeframe.isintraday) or
+     (not na(time(timeframe.period, sess, "Asia/Seoul")))
+
+enoughBars = bar_index >= lookback
+longCond   = enoughBars and isNewHigh and isBigBull and atrOk and inWindow and
+     strategy.position_size == 0
+
+// ── 진입 실행 (신호봉 종가) ──────────────────────────────────────────────────
+var int   entryBarIndex = na
+var float fibStop        = na
+if longCond
+    strategy.entry("종베", strategy.long)
+    entryBarIndex := bar_index
+    fibStop       := high - (high - low) * 0.618          // 기준봉 0.618 가격
+
+// ── 청산 실행 ────────────────────────────────────────────────────────────────
+avg     = strategy.position_avg_price
+tp1     = avg * (1.0 + tp1P / 100.0)
+tp2     = avg * (1.0 + tp2P / 100.0)
+slBase  = avg * (1.0 - slP / 100.0)
+// fib 병행 시: 고정 SL 과 0.618 중 '더 가까운(보수적)' 쪽 = max(두 가격)
+slPrice = (useFibStop and not na(fibStop)) ? math.max(slBase, fibStop) : slBase
+
+if strategy.position_size > 0
+    strategy.exit("TP1", from_entry="종베", qty_percent=tp1Qty, limit=tp1, stop=slPrice)
+    strategy.exit("TP2", from_entry="종베", limit=tp2, stop=slPrice)
+    if (bar_index - entryBarIndex) >= maxHoldBars
+        strategy.close("종베", comment="max_hold")
+
+// ── 시각화 ──────────────────────────────────────────────────────────────────
+plotshape(longCond, title="진입", style=shape.triangleup, location=location.belowbar,
+     color=color.new(color.teal, 0), size=size.tiny, text="종베")
+plot(strategy.position_size > 0 ? tp2 : na, "TP2",  color=color.new(color.green, 0), style=plot.style_linebr)
+plot(strategy.position_size > 0 ? slPrice : na, "SL", color=color.new(color.red, 0), style=plot.style_linebr)
