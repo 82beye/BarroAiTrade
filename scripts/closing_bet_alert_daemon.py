@@ -51,6 +51,17 @@ _MAIN_DATA = Path(os.environ.get("BARRO_DATA_DIR", str(Path(__file__).resolve().
 POS_FILE = _MAIN_DATA / "closing_bet_positions.json"
 BUY_WINDOW = (dtime(15, 0), dtime(15, 20))
 
+
+def _build_oauth():
+    """KIWOOM_APP_KEY/SECRET/BASE_URL(.env.local)로 OAuth 생성 (from_env 부재 대체)."""
+    from pydantic import SecretStr
+    from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
+    return KiwoomNativeOAuth(
+        app_key=SecretStr(os.environ["KIWOOM_APP_KEY"]),
+        app_secret=SecretStr(os.environ["KIWOOM_APP_SECRET"]),
+        base_url=os.environ.get("KIWOOM_BASE_URL", "https://mockapi.kiwoom.com"),
+    )
+
 PARAMS = ClosingBetParams(require_eod_window=False, require_money_flow=True,
                           require_zone=False, require_leader_meta=False, min_atr_pct=0.035)
 
@@ -139,9 +150,8 @@ async def scan_sell(dry_print: bool, from_cache: bool) -> None:
         return
     fetcher = None
     if not from_cache:
-        from backend.core.auth.kiwoom_native_oauth import KiwoomNativeOAuth  # type: ignore
         from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
-        fetcher = KiwoomNativeCandleFetcher(oauth=KiwoomNativeOAuth.from_env())
+        fetcher = KiwoomNativeCandleFetcher(oauth=_build_oauth())
     now = _now()
     changed = False
     for p in positions:
@@ -181,10 +191,9 @@ async def scan_buy(dry_print: bool, from_cache: bool, symbols: list[str], top_n:
     if from_cache:
         candidates = [(s, s, _load_daily(s)) for s in symbols]
     else:
-        from backend.core.auth.kiwoom_native_oauth import KiwoomNativeOAuth  # type: ignore
         from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
         from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
-        oauth = KiwoomNativeOAuth.from_env()
+        oauth = _build_oauth()
         leaders = await KiwoomNativeLeaderPicker(oauth=oauth, min_flu_rate=1.0).pick(top_n=top_n)
         f = KiwoomNativeCandleFetcher(oauth=oauth)
         candidates = []
