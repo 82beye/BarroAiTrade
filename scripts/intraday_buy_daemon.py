@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv as _csv
+import json
 import os
 import signal
 import sys
@@ -764,6 +765,16 @@ async def _scan_and_buy(
     pos_store = ActivePositionStore(args.pos_log)
     active_symbols = set(pos_store.load_all().keys())
 
+    # [사용자 요청 2026-06-18] 종베(알림 데몬) 보유 종목은 다른 전략이 재진입 금지.
+    #   브로커 잔고(already_held)가 1차 가드이나, ①balance 조회 실패 fail-open ②종베 수동
+    #   진입은 active_positions 에 없음 → closing_bet_positions.json 을 명시 제외(2차 방어).
+    closing_bet_held: set[str] = set()
+    try:
+        _cb = json.loads((_DATA_DIR / "closing_bet_positions.json").read_text())
+        closing_bet_held = {str(p["symbol"]) for p in _cb}
+    except Exception:
+        pass
+
     today_sold: set[str] = set()
     audit_path = Path(args.audit_log)
     if audit_path.exists():
@@ -817,7 +828,7 @@ async def _scan_and_buy(
 
     excluded = (
         already_held | active_symbols | today_sold | session_bought
-        | cooldown_buys | audit_buys
+        | cooldown_buys | audit_buys | closing_bet_held
     )
     # 급등 추격매수 방지 필터 — 등락률이 _MAX_FLU_RATE 이상인 종목 제외.
     # 2026-06-01: 25.0→30.0 완화. 강세장(코스피 급등)에서 +29%대 주도주(LG전자·
