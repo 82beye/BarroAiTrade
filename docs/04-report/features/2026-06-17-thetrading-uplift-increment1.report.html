@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>2026-06-17-thetrading-uplift-increment1.report</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<hr />
+<h2 id="tags-report-featurethetrading-uplift-increment1-statuscomplete">tags: [report, feature/thetrading-uplift, increment/1, status/complete]</h2>
+<h1 id="increment-1">더트레이딩 고도화 Increment 1 — 구현 결과 리포트</h1>
+<blockquote>
+<p><strong>연관 설계</strong>: [[../../02-design/features/2026-06-17-thetrading-methodology-uplift.design|매매전략 분석·설계 문서]]
+<strong>연관 분석</strong>: [[../../03-analysis/2026-06-17-thetrading-methodology-extract|방법론 추출 부록]]</p>
+<p><strong>Project</strong>: BarroAiTrade
+<strong>Date</strong>: 2026-06-17
+<strong>Branch</strong>: <code>feat/thetrading-uplift-increment1</code>
+<strong>Status</strong>: Complete — 테스트 1446 passed
+<strong>분류</strong>: 전부 <strong>(c) 안전</strong>(신규/기본OFF/inert) — <strong>라이브 매매 동작 무변경</strong></p>
+</blockquote>
+<hr />
+<h2 id="1">1. 요약</h2>
+<p>설계 문서의 고도화 로드맵 중 <strong>자동 구현이 안전한 (c)분류 항목만</strong> 1차 구현했다. 핵심은 <strong>종가베팅(종베) 전용 전략 모듈 신설</strong>(기본 비활성)과 <strong>갭가드 전략집합의 env화</strong>(기본값 동일)다. 모든 변경은 추가(additive)·기본 OFF·inert라 <strong>현재 라이브 매매 흐름에 영향이 없으며</strong>, 전체 회귀 테스트 1446건이 통과했다.</p>
+<p>실거래 동작을 바꾸는 <strong>(d)분류</strong>(종베 라이브 ON, sf_zone 갭가드 실제 차단, 비용모델 정정, top5 hard-cut, swing_38 보유한도 단축)는 <strong>자동 진행하지 않았다</strong> — 측정·스캐폴딩까지만 준비하고 HITL 승인 단계로 남겼다.</p>
+<hr />
+<h2 id="2-7">2. 구현 단계 (7단계 자동 진행)</h2>
+<table>
+<thead>
+<tr>
+<th>단계</th>
+<th>내용</th>
+<th>분류</th>
+<th>결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>S1</strong></td>
+<td><code>closing_bet.py</code> 신규 — <code>ClosingBetParams</code> + <code>ClosingBetStrategy</code></td>
+<td>c (신규)</td>
+<td>✅ 302줄</td>
+</tr>
+<tr>
+<td><strong>S2</strong></td>
+<td><code>signal.py</code> <code>EntrySignal.signal_type</code> Literal += <code>"closing_bet"</code></td>
+<td>c (additive)</td>
+<td>✅</td>
+</tr>
+<tr>
+<td><strong>S3</strong></td>
+<td><code>holding_evaluator.py</code> inert 종베 청산 프로파일(min 1/max 3, SL −5%)</td>
+<td>c (inert)</td>
+<td>✅</td>
+</tr>
+<tr>
+<td><strong>S4</strong></td>
+<td><code>signal_scanner.py</code> 종베 <code>False</code> 등록 + 우선순위(8) + 일봉 dispatch(OFF guard)</td>
+<td>c (OFF)</td>
+<td>✅</td>
+</tr>
+<tr>
+<td><strong>S5</strong></td>
+<td>데몬 <code>_GAP_GUARD_STRATEGIES</code> → <code>BARRO_GAP_GUARD_STRATEGIES</code> env화(<strong>기본값 동일</strong>)</td>
+<td>c (불변)</td>
+<td>✅</td>
+</tr>
+<tr>
+<td><strong>S6</strong></td>
+<td><code>test_closing_bet.py</code> 단위테스트 14건</td>
+<td>c</td>
+<td>✅ 14 passed</td>
+</tr>
+<tr>
+<td><strong>S7</strong></td>
+<td>전체 회귀 테스트</td>
+<td>-</td>
+<td>✅ <strong>1446 passed, 0 failed</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-closingbetstrategy">3. 종베 전략(<code>ClosingBetStrategy</code>) 구현 범위</h2>
+<p><strong>구현(일봉 스캐폴드, 자기완결·테스트가능)</strong>:
+- <strong>진입 시간창 게이트</strong>: <code>ctx.timestamp</code>(KST)가 15:00~15:20 밖이면 진입 거부 — 종베의 핵심 차별점.
+- <strong>신고가 돌파</strong>(직전 60봉 고점 초과) + <strong>기준봉 장대양봉</strong>(몸통 ≥5%, 윗꼬리 제한).
+- <strong>청산(<code>exit_plan</code>)</strong>: 익일 슈팅 익절(+4.5%/대형주 +2%), 0.618 이탈 가격기반 SL, 익일 10:00 시간청산, D1~D3 보유한도. 오버나잇 의미론(진입일 당일 time_exit skip 필요)은 docstring에 명시.</p>
+<p><strong>기본 비활성 옵션(라이브 활성 단계에서 분봉/선정 컨텍스트 주입 후 ON)</strong>:
+- 분봉 자금유입(오전/오후) 게이트, 존(골드존 0.5~0.618) 진입가, 거래대금 rank/시총 hard-cut.</p>
+<blockquote>
+<p>이유: 자금유입·존 진입가는 intraday 데이터, 선정컷은 leader 메타가 필요해 일봉만으로 근사 불가. 활성화는 데이터 플러밍을 동반하는 별도 (d) 단계.</p>
+</blockquote>
+<p><strong>스캐너 등록</strong>: <code>_DEFAULT_ENABLED["closing_bet"]=False</code>. 활성화는 <code>SignalScanner(..., enabled_strategies={"closing_bet": True})</code>. OFF인 동안 dispatch가 실행되지 않아 라이브 무영향(테스트 <code>test_scanner_default_off</code>로 검증).</p>
+<hr />
+<h2 id="4-env-43-sf_zone">4. 갭가드 env화 (설계 §4.3 — sf_zone "진짜 구멍" 대응)</h2>
+<p><code>scripts/intraday_buy_daemon.py</code>:</p>
+<pre><code class="language-python">_GAP_GUARD_STRATEGIES = _parse_strategy_set(
+    &quot;BARRO_GAP_GUARD_STRATEGIES&quot;, _MEANREV_STRATEGIES | {&quot;f_zone&quot;})  # 기본 {gold_zone, f_zone}
+</code></pre>
+<ul>
+<li><strong>미설정 시 기존과 100% 동일</strong> → 동작 불변((c) 안전). 회귀 테스트 <code>test_default_set_unchanged</code> 통과.</li>
+<li>운영이 <strong>코드배포 없이 env로 sf_zone 편입</strong> 가능: <code>BARRO_GAP_GUARD_STRATEGIES="gold_zone,f_zone,sf_zone"</code>.</li>
+<li>⚠️ 실제 env 설정으로 차단을 켜는 것은 <strong>선정 동작 변경 = (d) HITL</strong> (env 설정 자체가 인간 승인 게이트). 측정축(시초 open-gap vs 장중 flu)·임계는 gap_records 누적 후 데이터 기반 결정.</li>
+</ul>
+<hr />
+<h2 id="5">5. 변경 파일</h2>
+<table>
+<thead>
+<tr>
+<th>파일</th>
+<th>변경</th>
+<th>성격</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>backend/core/strategy/closing_bet.py</code></td>
+<td>+302 (신규)</td>
+<td>종베 전략 모듈</td>
+</tr>
+<tr>
+<td><code>backend/tests/strategy/test_closing_bet.py</code></td>
+<td>+161 (신규)</td>
+<td>단위테스트 14건</td>
+</tr>
+<tr>
+<td><code>backend/core/scanner/signal_scanner.py</code></td>
+<td>+43/−13</td>
+<td>종베 OFF 등록 + 일봉 dispatch</td>
+</tr>
+<tr>
+<td><code>backend/core/risk/holding_evaluator.py</code></td>
+<td>+17</td>
+<td>inert 종베 청산 프로파일</td>
+</tr>
+<tr>
+<td><code>scripts/intraday_buy_daemon.py</code></td>
+<td>+18</td>
+<td>갭가드 env화(기본 동일)</td>
+</tr>
+<tr>
+<td><code>backend/models/signal.py</code></td>
+<td>+1/−1</td>
+<td>signal_type Literal += closing_bet</td>
+</tr>
+</tbody>
+</table>
+<p>합계: <strong>6 files, +530/−13</strong>.</p>
+<hr />
+<h2 id="6">6. 검증</h2>
+<ul>
+<li><strong>신규 테스트 14건</strong>: 상속·캔들부족·진입창 게이트(밖→None)·신고가/장대양봉 게이트·진입신호·ExitPlan 오버나잇 의미론·대형주 2% TP·inert 프로파일·resolve_policy 버전매핑·스캐너 기본 OFF·갭가드 env 기본값 불변/sf_zone 편입.</li>
+<li><strong>전체 회귀</strong>: <code>backend/tests/</code> <strong>1446 passed, 10 skipped, 0 failed</strong> (6.3s).</li>
+<li><strong>핵심 불변 단언</strong>: <code>test_daemon_fill_reconcile</code>(gold/f_zone ∈ 갭가드 유지), <code>test_signal_scanner_phase_c</code>(스캔결과에 closing_bet 미출현=OFF 확인) 모두 통과.</li>
+</ul>
+<hr />
+<h2 id="7-d-hitl">7. 자동 진행하지 않은 것 — (d) HITL 잔여</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>상태</th>
+<th>활성 방법</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>종베 라이브 ON</td>
+<td>스캐폴딩 완료(OFF)</td>
+<td>분봉/선정 컨텍스트 주입 + <code>enabled_strategies</code> + OOS PASS 후</td>
+</tr>
+<tr>
+<td>sf_zone 갭가드 실제 차단</td>
+<td>env 훅 준비</td>
+<td><code>BARRO_GAP_GUARD_STRATEGIES</code> 설정(인간 승인)</td>
+</tr>
+<tr>
+<td>비용모델 정정(0.00175→0.0035)</td>
+<td>미착수</td>
+<td><code>code-surgeon</code> 위임 + AskUserQuestion</td>
+</tr>
+<tr>
+<td>대장주 top5 hard-cut + 신고가 선정</td>
+<td>미착수</td>
+<td>LeaderPicker 인자 + 선정 시뮬 검증</td>
+</tr>
+<tr>
+<td>swing_38 보유한도 20→3</td>
+<td>미착수</td>
+<td>다단계(25%한도) + 각 단계 OOS</td>
+</tr>
+<tr>
+<td>진입가 위치 결합 게이트(P0-1)</td>
+<td>미착수</td>
+<td>데몬 shadow → 캘리브 → (d)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8">8. 다음 단계 (권고)</h2>
+<ol>
+<li><strong>종베 백테스트</strong>: <code>IntradaySimulator</code> 다일 윈도우로 종베 오버나잇 청산 시뮬 → OOS(<code>_oos_validation.py</code>) PASS 게이트 통과 전 라이브 자본 편입 금지.</li>
+<li><strong>P0-1 shadow</strong>: 진입가 위치 측정을 데몬에 shadow(차단 X)로 추가 → <code>gap_records</code>+위치 분포 N일 누적 → 임계 캘리브 → (d) 활성.</li>
+<li><strong>비용모델 정정</strong>: <code>code-surgeon</code> 위임(단일 상수, 선정영향 → HITL).</li>
+</ol>
+<blockquote>
+<p>본 Increment는 <code>feat/thetrading-uplift-increment1</code> 브랜치에 격리. 커밋/머지는 사용자 검토 후.</p>
+</blockquote>
+</body>
+</html>

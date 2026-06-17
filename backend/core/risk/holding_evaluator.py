@@ -144,6 +144,23 @@ STRATEGY_EXIT_PROFILES: dict[str, dict] = {
         "min_hold_days": 3,
         "max_hold_days": 20,                       # Phase D 8 → 20 (S6 결합 최적)
     },
+    # thetrading-uplift Increment 1 (2026-06-17): 종가베팅(종베) 오버나잇 청산 프로파일.
+    # 종베 포지션(strategy_id=closing_bet_v1)이 생겨야 매칭 — 그 전엔 inert(라이브 무영향).
+    # 설계: docs/02-design/features/2026-06-17-thetrading-methodology-uplift.design.md §6.4.
+    # SL -5% = 0.618 이탈 + 익일 갭하락 흡수(2차망, ExitPlan -3% 보다 너그러운 fallback).
+    # D1~D3: min_hold 1(익일 아침 청산 허용)·max_hold 3(4일차=5일선 붕괴 청산).
+    "closing_bet": {
+        "stop_loss_pct": Decimal("-5.0"),
+        "take_profit_pct": Decimal("4.5"),
+        "partial_tp_pct": Decimal("2.7"),
+        "partial_tp_ratio": Decimal("0.5"),
+        "trailing_start_pct": Decimal("3.5"),
+        "trailing_offset_pct": Decimal("1.0"),
+        "breakeven_trigger_pct": Decimal("2.0"),
+        "tightened_sl_pct": Decimal("-3.0"),
+        "min_hold_days": 1,
+        "max_hold_days": 3,
+    },
 }
 
 
