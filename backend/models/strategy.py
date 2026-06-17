@@ -42,6 +42,10 @@ class AnalysisContext(BaseModel):
     composite_orderbook: Any = None    # TODO(BAR-54): CompositeOrderBook
     theme_context: Any = None          # TODO(BAR-58/59): ThemeContext
     news_context: Any = None           # TODO(BAR-57): NewsContext
+    # thetrading-uplift: 종베 멀티 타임프레임 — candles=일봉(신고가·장대양봉),
+    #   intraday_candles=5분봉(자금유입·존 진입가). None 이면 분봉 의존 게이트 자동 skip
+    #   (하위호환·기본 OFF). 백테스트/라이브 진입점이 주입.
+    intraday_candles: Optional[list[OHLCV]] = None
 
     @classmethod
     def from_legacy(

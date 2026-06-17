@@ -159,3 +159,85 @@ class TestGapGuardEnvConfigurable:
         # 원복 (다른 테스트 격리)
         monkeypatch.delenv("BARRO_GAP_GUARD_STRATEGIES", raising=False)
         importlib.reload(d)
+
+
+def _intraday_bars(am_value: float, pm_value: float, price: float = 10_000.0) -> list[OHLCV]:
+    """오전(10:00)/오후(14:00) 5분봉. 거래대금=close×volume=value 가 되게 volume 설정."""
+    base = datetime(2026, 6, 17)
+    bars: list[OHLCV] = []
+    if am_value > 0:
+        bars.append(OHLCV(symbol="T", timestamp=base.replace(hour=10), open=price, high=price,
+                          low=price, close=price, volume=am_value / price, market_type=MarketType.STOCK))
+    if pm_value > 0:
+        bars.append(OHLCV(symbol="T", timestamp=base.replace(hour=14), open=price, high=price,
+                          low=price, close=price, volume=pm_value / price, market_type=MarketType.STOCK))
+    if not bars:
+        bars.append(OHLCV(symbol="T", timestamp=base.replace(hour=15), open=price, high=price,
+                          low=price, close=price, volume=0.0, market_type=MarketType.STOCK))
+    return bars
+
+
+def _flow_ctx(am_value: float, pm_value: float) -> AnalysisContext:
+    return AnalysisContext(symbol="T", name="T", candles=_candles(70, 0.07, True),
+                           market_type=MarketType.STOCK,
+                           intraday_candles=_intraday_bars(am_value, pm_value))
+
+
+class TestClosingBetMoneyFlow:
+    def test_both(self):
+        assert ClosingBetStrategy()._money_flow_grade(_flow_ctx(2e9, 2e9)) == "BOTH"
+
+    def test_pm_only(self):
+        # 오전 미달(0.5e9<1e9), 오후 충족 → PM_ONLY
+        assert ClosingBetStrategy()._money_flow_grade(_flow_ctx(0.5e9, 2e9)) == "PM_ONLY"
+
+    def test_afternoon_death_blocks(self):
+        # 오전 유입(2e9) 후 오후 급감(0.3e9 < 0.3×2e9) → BLOCK
+        assert ClosingBetStrategy()._money_flow_grade(_flow_ctx(2e9, 0.3e9)) == "BLOCK"
+
+    def test_no_pm_blocks(self):
+        assert ClosingBetStrategy()._money_flow_grade(_flow_ctx(2e9, 0.0)) == "BLOCK"
+
+    def test_no_intraday_returns_na(self):
+        """intraday_candles 없으면(테마컨텍스트도 없음) N/A=통과(하위호환)."""
+        ctx = AnalysisContext(symbol="T", candles=_candles(70, 0.07, True),
+                              market_type=MarketType.STOCK)
+        assert ClosingBetStrategy()._money_flow_grade(ctx) == "N/A"
+
+
+class TestClosingBetZone:
+    @staticmethod
+    def _zone_bars(retrace_down: float, n: int = 30) -> list[OHLCV]:
+        base = datetime(2026, 6, 17)
+        lo, hi = 100.0, 110.0
+        cur = hi - retrace_down * (hi - lo)
+        bars = [OHLCV(symbol="T", timestamp=base.replace(day=1 + i % 27), open=lo, high=hi,
+                      low=lo, close=(lo + hi) / 2, volume=1.0, market_type=MarketType.STOCK)
+                for i in range(n)]
+        last = bars[-1]
+        bars[-1] = OHLCV(symbol="T", timestamp=last.timestamp, open=lo, high=hi, low=lo,
+                         close=cur, volume=1.0, market_type=MarketType.STOCK)
+        return bars
+
+    def test_in_zone(self):
+        # 되돌림 깊이 0.55 ∈ [0.5, 0.618] → True
+        assert ClosingBetStrategy()._in_zone(self._zone_bars(0.55)) is True
+
+    def test_out_of_zone(self):
+        # 고점 근처(0.1) → 존 밖
+        assert ClosingBetStrategy()._in_zone(self._zone_bars(0.1)) is False
+
+    def test_require_zone_daily_fallback_blocks_breakout(self):
+        """존 요구 + 분봉 없음 → 일봉 폴백. 장대양봉 종가는 고점근처라 존 밖 → None.
+
+        (분봉 ablation에서 확인된 '장대양봉 종가 vs 골드존 되돌림' 개념 충돌의 단위 재현.)
+        """
+        s = ClosingBetStrategy(ClosingBetParams(require_eod_window=False, require_zone=True))
+        assert s._analyze_v2(_ctx(_candles(80, 0.07, True), hh=10, mm=10)) is None
+
+
+class TestClosingBetSimulatorBranch:
+    def test_build_strategies_closing_bet(self):
+        from backend.core.backtester.intraday_simulator import _build_strategies
+        out = _build_strategies(["closing_bet"])
+        assert len(out) == 1 and out[0].STRATEGY_ID == "closing_bet_v1"

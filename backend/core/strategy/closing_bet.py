@@ -76,15 +76,27 @@ class ClosingBetParams:
     max_hold_days: int = 3                # D1~D3
     stop_loss_pct: float = -0.03          # 보조 고정 SL (0.618 이탈과 병행 2차망)
 
-    # ── intraday/선정 의존 게이트 (기본 비활성 — 활성화는 별도 HITL 단계) ──
-    require_zone: bool = False            # 존(골드존 0.5~0.618) 진입가 — intraday 필요
-    gold_fib_low: float = 0.5
-    gold_fib_high: float = 0.618
-    require_money_flow: bool = False      # 분봉 오전/오후 자금유입 — intraday 필요
+    # ── intraday/선정 의존 게이트 (기본 비활성 — 활성화는 검증 후 단계) ──
+    require_daily_candles: bool = True    # ctx.candles=일봉 가정 (swing_38 일관)
+    # 존(골드존): 기준봉 고점 대비 0.5~0.618 되돌림 깊이에 현재가가 있을 때 진입.
+    #   분봉(ctx.intraday_candles) 우선, 없으면 일봉(ctx.candles) 폴백.
+    require_zone: bool = False
+    zone_lookback: int = 30               # 존 판정 lookback(5분봉 30=2.5h)
+    gold_fib_low: float = 0.5             # 되돌림 깊이 하한 (high 기준)
+    gold_fib_high: float = 0.618          # 되돌림 깊이 상한
+    # 분봉 자금유입: 오전(09:00~11:30)/오후(13:00~15:20) 거래대금=Σ(close×volume).
+    require_money_flow: bool = False
+    flow_am_start: dtime = dtime(9, 0)
+    flow_am_end: dtime = dtime(11, 30)
+    flow_pm_start: dtime = dtime(13, 0)
+    flow_pm_end: dtime = dtime(15, 20)
+    flow_min_value: float = 1.0e9         # 윈도우 '유입' 인정 최소 거래대금(10억)
+    flow_death_ratio: float = 0.3         # 오후 < 오전×0.3 = 오전유입후死(BLOCK)
     flow_block_am_only: bool = True
-    max_trade_value_rank: int = 5         # 거래대금 1~5위 (선정 메타 있을 때만)
-    min_trade_value: float = 3.0e10       # 300억 (선정 메타 있을 때만)
-    require_leader_meta: bool = False     # ctx.theme_context 선정 메타 hard-cut 강제
+    # 주도주 선정 hard-cut (ctx.theme_context 메타 주입 시)
+    max_trade_value_rank: int = 5         # 거래대금 1~5위
+    min_trade_value: float = 3.0e10       # 300억
+    require_leader_meta: bool = False     # 선정 메타 hard-cut 강제
 
     # ── 토글 (라이브 활성 단계용 placeholder) ──
     enable_ipo_mode: bool = False         # 신규주 종베 (상장 1~2일)
@@ -148,13 +160,10 @@ class ClosingBetStrategy(Strategy):
             if tval is not None and tval < p.min_trade_value:
                 return None
 
-        # ⑥ (옵션, 기본 off) 존(골드존) 진입가 — 당일 캔들 되돌림 기준(intraday 활성 시 정밀화).
+        # ⑥ (옵션) 존(골드존) 진입가 — 분봉(intraday_candles) 우선, 없으면 일봉 폴백.
         if p.require_zone:
-            rng = today.high - today.low
-            if rng <= 0:
-                return None
-            retrace = (today.high - cur) / rng
-            if not (p.gold_fib_low <= retrace <= p.gold_fib_high):
+            zone_src = ctx.intraday_candles or candles
+            if not self._in_zone(zone_src):
                 return None
 
         # ⑦ (옵션, 기본 off) 분봉 자금유입 — intraday 활성 시 주입.
@@ -211,20 +220,60 @@ class ClosingBetStrategy(Strategy):
         return tc if isinstance(tc, dict) else None
 
     def _money_flow_grade(self, ctx: AnalysisContext) -> str:
-        """분봉 오전/오후 자금유입 등급. intraday 데이터 부재 시 'N/A'(통과).
+        """분봉 오전/오후 자금유입 등급. 분봉 부재 시 'N/A'(통과).
 
-        활성화(별도 HITL)에서 분봉 캔들/유입 메타를 주입해 BOTH/PM_ONLY/BLOCK 판정.
+        분봉(ctx.intraday_candles)에서 오전/오후 거래대금=Σ(close×volume)을 집계해
+        BOTH(오전+오후) / PM_ONLY(오후만) / BLOCK(오후死 또는 오전후死) 판정.
+        분봉이 없으면 theme_context 의 사전계산 플래그(am_inflow/pm_inflow) 폴백.
         """
-        tc = self._leader_meta(ctx)
-        if not tc or "am_inflow" not in tc:
-            return "N/A"
-        am = bool(tc.get("am_inflow"))
-        pm = bool(tc.get("pm_inflow"))
-        if self.params.flow_block_am_only and am and not pm:
+        p = self.params
+        intraday = getattr(ctx, "intraday_candles", None)
+        if intraday:
+            am_val = self._window_value(intraday, p.flow_am_start, p.flow_am_end)
+            pm_val = self._window_value(intraday, p.flow_pm_start, p.flow_pm_end)
+            am = am_val >= p.flow_min_value
+            pm = pm_val >= p.flow_min_value
+            # 오전유입후死: 오전 유입인데 오후가 오전 대비 급감
+            if am and am_val > 0 and pm_val < p.flow_death_ratio * am_val:
+                return "BLOCK"
+        else:
+            tc = self._leader_meta(ctx)
+            if not tc or "am_inflow" not in tc:
+                return "N/A"
+            am, pm = bool(tc.get("am_inflow")), bool(tc.get("pm_inflow"))
+        if p.flow_block_am_only and am and not pm:
             return "BLOCK"          # 오전유입후 死 = 금지
         if not pm:
-            return "BLOCK"
+            return "BLOCK"          # 오후 유입 없음
         return "BOTH" if (am and pm) else "PM_ONLY"
+
+    @staticmethod
+    def _window_value(candles: List[OHLCV], start: dtime, end: dtime) -> float:
+        """시간창 [start, end] 의 거래대금 합계 Σ(close×volume). 당일(마지막 날짜)만."""
+        if not candles:
+            return 0.0
+        last_day = candles[-1].timestamp.date()
+        return float(sum(
+            c.close * c.volume for c in candles
+            if c.timestamp.date() == last_day and start <= c.timestamp.time() <= end
+        ))
+
+    def _in_zone(self, bars: List[OHLCV]) -> bool:
+        """최근 zone_lookback 봉의 고저 대비 현재가 되돌림 깊이가 골드존(0.5~0.618)인가.
+
+        되돌림 깊이 = (고점 − 현재가)/(고점 − 저점). 0=고점, 1=저점.
+        """
+        p = self.params
+        recent = bars[-p.zone_lookback:]
+        if len(recent) < 2:
+            return False
+        hi = max(b.high for b in recent)
+        lo = min(b.low for b in recent)
+        if hi <= lo:
+            return False
+        cur = bars[-1].close
+        retrace_down = (hi - cur) / (hi - lo)
+        return p.gold_fib_low <= retrace_down <= p.gold_fib_high
 
     def _score(self, body: float, new_high_margin: float, flow_grade: str) -> float:
         """0~10 스케일 스코어 — 기준봉 강도 + 돌파마진 + 유입 등급."""

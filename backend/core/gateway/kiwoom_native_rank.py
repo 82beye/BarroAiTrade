@@ -75,6 +75,9 @@ class LeaderCandidate:
     rank_flu_rate: Optional[int]
     rank_volume: Optional[int]            # BAR-OPS-12 — 거래량 순위
     score: float
+    # thetrading-uplift: 종베 주도주 선정 컷용(선정 레이어가 채워 theme_context 로 주입).
+    trade_value: Optional[float] = None   # 당일 거래대금(원) — rank 가 아닌 절대액
+    is_new_high: bool = False             # 신고가 돌파 플래그
 
 
 class KiwoomNativeLeaderPicker:
