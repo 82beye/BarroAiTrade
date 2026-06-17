@@ -87,6 +87,21 @@ async def _run(args) -> int:
     # AccountBalance 는 frozen dataclass 라 balance.holdings 를 재할당할 수 없으므로,
     # 로컬 변수 holdings 로 필터링하여 이후 평가·DCA·매도 전 경로에서 사용한다.
     holdings = list(balance.holdings)
+    # [사용자 요청 2026-06-18] 종베(closing_bet) 보유분은 강제청산/평가 제외 — 수동관리 전용.
+    try:
+        import json as _json
+        _cb = _json.loads((_DATA_DIR / "closing_bet_positions.json").read_text(encoding="utf-8"))
+        _cb_held = {str(p["symbol"]) for p in _cb}
+    except Exception:
+        _cb_held = set()
+    if _cb_held:
+        _cbskip = [h.symbol for h in holdings if h.symbol in _cb_held]
+        holdings = [h for h in holdings if h.symbol not in _cb_held]
+        if _cbskip:
+            print(f"[제외] 종베(closing_bet) 보유분 {len(_cbskip)}종목 강제청산/평가 제외: {', '.join(_cbskip)}")
+        if not holdings:
+            print("제외 후 평가 대상 종목 없음.")
+            return 0
     _excl = {s.strip() for s in (args.exclude_strategy or "").split(",")
              if s.strip() and s.strip().lower() != "none"}
     if _excl:

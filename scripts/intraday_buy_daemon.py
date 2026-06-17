@@ -167,6 +167,16 @@ def _in_market_hours() -> bool:
     return MARKET_OPEN <= now <= MARKET_CLOSE
 
 
+def _closing_bet_held() -> set[str]:
+    """종베(closing_bet) 보유 종목 — 자동 청산/재진입 제외(사용자 수동관리 전용).
+    [사용자 요청 2026-06-18] 종베 포지션은 다른 전략/EOD강제청산이 건드리지 않는다."""
+    try:
+        _cb = json.loads((_DATA_DIR / "closing_bet_positions.json").read_text(encoding="utf-8"))
+        return {str(p["symbol"]) for p in _cb}
+    except Exception:
+        return set()
+
+
 def _build_oauth() -> KiwoomNativeOAuth:
     app_key = os.environ.get("KIWOOM_APP_KEY", "")
     app_secret = os.environ.get("KIWOOM_APP_SECRET", "")
@@ -374,6 +384,10 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
             )
 
     decisions = evaluate_all(balance.holdings, policy, contexts)
+    # [사용자 요청 2026-06-18] 종베 보유분은 다른 전략이 청산 금지 — 수동관리 전용.
+    _cb_held = _closing_bet_held()
+    if _cb_held:
+        decisions = [d for d in decisions if d.symbol not in _cb_held]
 
     # DCA 분할매수
     _SELL_SIGNALS = {
@@ -1278,10 +1292,13 @@ async def _eod_carry_limit(args, oauth, notifier) -> int:
     )
     pos_store = ActivePositionStore(args.pos_log)
     book = pos_store.load_all()
+    _cb_skip = _closing_bet_held()
     sold = 0
     for h in sorted(holdings, key=lambda x: float(x.eval_amount), reverse=True):
         if eval_sum <= limit_value:
             break
+        if h.symbol in _cb_skip:
+            continue  # 종베 보유분 강제청산 제외(수동관리)
         strategy = getattr(book.get(h.symbol), "strategy", None) if book else None
         try:
             r = await gate.place_sell(symbol=h.symbol, qty=int(h.qty),
