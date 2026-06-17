@@ -1,0 +1,74 @@
+[
+  {
+    "label": "종베 full (신고가+장대양봉)",
+    "period": "2024-10-23 ~ 2026-06-16",
+    "universe": 500,
+    "symbols_with_trades": 461,
+    "trades": 3531,
+    "win_rate": 55.6,
+    "gross_expectancy_pct": 0.895,
+    "avg_win_pct": 3.57,
+    "avg_loss_pct": -2.46,
+    "median_pct": 3.6,
+    "profit_factor": 1.82,
+    "avg_hold": 0.17,
+    "avg_score": 7.2,
+    "exit_reasons": {
+      "tp2": 1939,
+      "stop_loss": 1556,
+      "max_hold": 31,
+      "end_of_data": 5
+    },
+    "net_expectancy_model_0.55": 0.345,
+    "net_expectancy_real_0.90": -0.005,
+    "net_expectancy_pref_0.40": 0.495
+  },
+  {
+    "label": "ablation: 장대양봉만 (신고가 OFF)",
+    "period": "2024-10-23 ~ 2026-06-16",
+    "universe": 500,
+    "symbols_with_trades": 478,
+    "trades": 5808,
+    "win_rate": 56.9,
+    "gross_expectancy_pct": 0.985,
+    "avg_win_pct": 3.57,
+    "avg_loss_pct": -2.43,
+    "median_pct": 3.6,
+    "profit_factor": 1.94,
+    "avg_hold": 0.13,
+    "avg_score": 5.08,
+    "exit_reasons": {
+      "tp2": 3267,
+      "stop_loss": 2472,
+      "max_hold": 43,
+      "end_of_data": 26
+    },
+    "net_expectancy_model_0.55": 0.435,
+    "net_expectancy_real_0.90": 0.085,
+    "net_expectancy_pref_0.40": 0.585
+  },
+  {
+    "label": "ablation: +ATR필터 0.035",
+    "period": "2024-10-23 ~ 2026-06-16",
+    "universe": 500,
+    "symbols_with_trades": 447,
+    "trades": 3291,
+    "win_rate": 56.3,
+    "gross_expectancy_pct": 0.951,
+    "avg_win_pct": 3.58,
+    "avg_loss_pct": -2.44,
+    "median_pct": 3.6,
+    "profit_factor": 1.89,
+    "avg_hold": 0.14,
+    "avg_score": 7.27,
+    "exit_reasons": {
+      "stop_loss": 1431,
+      "tp2": 1840,
+      "max_hold": 15,
+      "end_of_data": 5
+    },
+    "net_expectancy_model_0.55": 0.401,
+    "net_expectancy_real_0.90": 0.051,
+    "net_expectancy_pref_0.40": 0.551
+  }
+]
