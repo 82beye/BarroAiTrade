@@ -188,8 +188,10 @@ def _load_daily(symbol: str) -> list[OHLCV]:
 
 async def scan_buy(dry_print: bool, from_cache: bool, symbols: list[str], top_n: int) -> None:
     strat = ClosingBetStrategy(PARAMS)
+    # [검증버전(paper_scan) 일치, 2026-06-18] 5분봉 + leader_meta 주입 → money_flow 게이트 활성화.
+    #   candidates 튜플: (sym, name, daily, m5, meta)
     if from_cache:
-        candidates = [(s, s, _load_daily(s)) for s in symbols]
+        candidates = [(s, s, _load_daily(s), None, None) for s in symbols]
     else:
         from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
         from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
@@ -199,14 +201,19 @@ async def scan_buy(dry_print: bool, from_cache: bool, symbols: list[str], top_n:
         candidates = []
         for lc in leaders:
             try:
-                candidates.append((lc.symbol, lc.name, await f.fetch_daily(symbol=lc.symbol)))
+                daily = await f.fetch_daily(symbol=lc.symbol)
+                m5 = await f.fetch_minute(symbol=lc.symbol, tic_scope="5")   # money_flow 게이트용 5분봉
             except Exception:
                 continue
-    for sym, name, daily in candidates:
-        if len(daily) < PARAMS.min_candles:
+            meta = {"rank_trade_value": getattr(lc, "rank_trade_value", None),
+                    "trade_value": getattr(lc, "trade_value", None)}
+            candidates.append((lc.symbol, lc.name, daily, m5, meta))
+    for sym, name, daily, m5, meta in candidates:
+        if not daily or len(daily) < PARAMS.min_candles:
             continue
         sig = strat._analyze_v2(AnalysisContext(symbol=sym, name=name, candles=daily,
-                                                market_type=MarketType.STOCK))
+                                                market_type=MarketType.STOCK,
+                                                intraday_candles=m5 or None, theme_context=meta))
         if sig:
             await notify(
                 f"🔔 [종베 매수 시그널] {name}({sym})\n"
