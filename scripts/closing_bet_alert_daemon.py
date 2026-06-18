@@ -85,11 +85,11 @@ def save_positions(pos: list[dict]) -> None:
     POS_FILE.write_text(json.dumps(pos, ensure_ascii=False, indent=2))
 
 
-def add_position(symbol, entry_price, qty, name, tp_pct, sl_pct) -> None:
+def add_position(symbol, entry_price, qty, name, tp_pct, sl_pct, entry_date=None) -> None:
     pos = load_positions()
     pos = [p for p in pos if p["symbol"] != symbol]   # 동일 종목 교체
     pos.append({"symbol": symbol, "name": name or symbol, "entry_price": float(entry_price),
-                "qty": int(qty), "entry_date": _now().date().isoformat(),
+                "qty": int(qty), "entry_date": entry_date or _now().date().isoformat(),
                 "tp_pct": float(tp_pct), "sl_pct": float(sl_pct), "alerted": []})
     save_positions(pos)
     print(f"등록: {symbol} {name} @ {float(entry_price):,.0f} x{qty} (TP+{tp_pct}%/SL-{sl_pct}%)")
@@ -243,6 +243,7 @@ def main() -> None:
     ap.add_argument("--name", default="")
     ap.add_argument("--tp", type=float, default=2.0, help="익절%% (대형주 2)")
     ap.add_argument("--sl", type=float, default=3.0, help="손절%%")
+    ap.add_argument("--entry-date", default="", help="실제 진입일 YYYY-MM-DD (기본=오늘). 종베 전일진입→익일등록 시 명시 권장")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--remove", default="")
     ap.add_argument("--top", type=int, default=10)
@@ -254,7 +255,7 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.add:
-        add_position(args.add[0], args.add[1], args.add[2], args.name, args.tp, args.sl)
+        add_position(args.add[0], args.add[1], args.add[2], args.name, args.tp, args.sl, args.entry_date or None)
         return
     if args.remove:
         save_positions([p for p in load_positions() if p["symbol"] != args.remove])
