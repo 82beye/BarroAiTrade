@@ -1,0 +1,359 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>6/19 트랩가드+국면적응 시뮬레이션 리포트</title><style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;max-width:1100px;margin:2em auto;padding:0 1.5em;color:#222;line-height:1.6;background:#fafafa;}
+h1,h2,h3{color:#1a3a5f;}h1{border-bottom:3px solid #1a3a5f;padding-bottom:.3em;}
+h2{border-bottom:1px solid #ccc;padding-bottom:.2em;margin-top:2em;}h3{margin-top:1.6em;}
+table{border-collapse:collapse;margin:1em 0;width:100%;font-size:.9em;}
+th,td{border:1px solid #ddd;padding:6px 10px;text-align:left;}th{background:#1a3a5f;color:#fff;}
+tr:nth-child(even){background:#f0f4f8;}td{font-variant-numeric:tabular-nums;}
+code{background:#e8eef4;padding:2px 6px;border-radius:3px;}
+blockquote{border-left:4px solid #1a3a5f;padding:.5em 1em;background:#eef2f6;margin:1em 0;color:#444;}
+strong{color:#c0392b;}
+img{max-width:100%;height:auto;display:block;margin:1em auto;border:1px solid #ddd;border-radius:4px;box-shadow:0 1px 6px rgba(0,0,0,.08);}
+</style></head><body>
+<hr />
+<h2 id="tags-report-simulation-trap-guard-regime-exit-strategyall-date2026-06-19-statusfinal">tags: [report, simulation, trap-guard, regime-exit, strategy/all, date/2026-06-19, status/final]</h2>
+<h1 id="619">6/19 캔들 기준 — 트랩가드(진입) + 국면적응(청산) 로직 시뮬레이션 리포트</h1>
+<blockquote>
+<p><strong>Project</strong>: BarroAiTrade · <strong>Date</strong>: 2026-06-21 · <strong>대상 거래일</strong>: 2026-06-19 · <strong>Status</strong>: Final (시뮬레이션 — 실거래 무영향)
+<strong>목적</strong>: 신규 구현된 <code>trap_guard</code>(진입 가짜돌파 차단) + <code>regime_exit</code>(국면 적응 청산) 로직을 <strong>6/19 실측 캔들</strong>에 적용해 "매매시그널 기준"으로 시뮬레이션하고, 종목별 차트로 검증.
+<strong>연관</strong>: [[2026-06-21-tp-sl-exit-logic.report]] · <code>backend/core/strategy/trap_guard.py</code> · <code>backend/core/risk/regime_exit.py</code></p>
+</blockquote>
+<hr />
+<h2 id="0">0. 요약 — 한 줄 결론</h2>
+<p>6/19 고갭·장대양봉 무버 <strong>8종목 중 7종목을 트랩가드가 차단</strong>, 정상 셋업(대조군 1종)만 통과. 특히 <strong>gold_zone이 실제 매수 시그널을 낸 종목(012320)을 "과확장 추격"으로 차단</strong> — 6월 반복된 "가짜 상승/개미 꼬시기"를 진입 단계에서 직접 거른다. 청산 측은 6/19 국면(SIDEWAYS)이 <strong>SL −4%→−3%로 타이트화</strong>.</p>
+<p><strong>핵심 발견 3가지:</strong>
+1. <strong>윗꼬리 페이드 포착</strong>: 010120·009620 등은 5분봉상 아침 스파이크 후 종일 흘러내림(윗꼬리 3.5x·9.08x) — 트랩가드가 가짜 상승을 그대로 차단.
+2. <strong>전략 시그널 위에서 작동</strong>: 012320은 과매도 반등에 gold_zone이 점수 5.37로 진입 신호를 냈지만, 과확장(MA20 +12.4% &gt; 2.5×ATR)으로 트랩가드가 차단.
+3. <strong>고갭 OR 설계</strong>: 절대%(15%)와 ATR배수 게이트가 OR로 결합 — 고변동주(화신 ATR 11.9%)는 절대 backstop이, 상한가(056090)는 둘 다 발화.</p>
+<hr />
+<h2 id="1">1. 시뮬레이션 기준</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>거래일</strong></td>
+<td>2026-06-19 (KST)</td>
+</tr>
+<tr>
+<td><strong>캔들 데이터</strong></td>
+<td>6/19 <strong>5분봉 = 키움 실측</strong>(09:00~15:30, 캐시 임포트). 일봉 캐시는 6/18까지라 <strong>6/19 일봉은 5분봉에서 합성</strong>(시가=첫봉·고저=장중·종가=종가단일가)</td>
+</tr>
+<tr>
+<td><strong>시장 국면</strong></td>
+<td><strong>SIDEWAYS</strong> (<code>refined_signals.json</code> 6/19 실측, 데몬 <code>classify_regime</code> 산출)</td>
+</tr>
+<tr>
+<td><strong>종목 선정</strong></td>
+<td>6/19 무버/후보를 캐시에서 재구성. 010120·010690은 실제 6/19 <code>simulation_log</code> 후보, 나머지는 등락률 상위 무버. <strong>종목명은 로그에 있는 2종만 표기</strong>(나머지는 코드)</td>
+</tr>
+<tr>
+<td><strong>실거래</strong></td>
+<td>6/19는 <code>LIVE_TRADING_ENABLED=false</code>로 <strong>체결 0</strong> — 본 리포트는 순수 시뮬(분석)</td>
+</tr>
+<tr>
+<td><strong>트랩가드 임계(예시)</strong></td>
+<td>over_ext k=2.5(baseline MA20)·윗꼬리 max 1.0·gap ATR×3 / 절대 15%·ATR n=14</td>
+</tr>
+<tr>
+<td><strong>국면적응(예시)</strong></td>
+<td>SIDEWAYS SL×0.75 (−4%→−3%), TP×1.0 — f_zone 프로파일 기준</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>⚠️ <strong>임계는 예시값</strong>이다. 코드는 <strong>default-OFF로 출하</strong>되며(라이브 byte-identical), 본 시뮬은 "활성화 시 무엇을 할지"를 보여준다. 실제 활성화는 측정 후 (d) HITL.</p>
+</blockquote>
+<hr />
+<h2 id="2-8">2. 결과 (8종목)</h2>
+<table>
+<thead>
+<tr>
+<th>종목</th>
+<th>flu</th>
+<th>gap</th>
+<th>윗꼬리</th>
+<th>ATR%</th>
+<th>트랩가드</th>
+<th>차단 사유</th>
+<th>전략 시그널</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>012320</strong></td>
+<td>+16.4%</td>
+<td>+0.2%</td>
+<td>0.21x</td>
+<td>4.6%</td>
+<td>🚫 차단</td>
+<td>over_ext 0.124 &gt; 2.5×ATR 0.046</td>
+<td><strong>gold_zone (5.37)</strong></td>
+</tr>
+<tr>
+<td>010120 LS ELECTRIC</td>
+<td>+7.0%</td>
+<td>+5.0%</td>
+<td>3.50x</td>
+<td>9.8%</td>
+<td>🚫 차단</td>
+<td>upper_wick 3.50 &gt; 1.00</td>
+<td>-</td>
+</tr>
+<tr>
+<td>009620</td>
+<td>+11.5%</td>
+<td>+9.9%</td>
+<td><strong>9.08x</strong></td>
+<td>14.0%</td>
+<td>🚫 차단</td>
+<td>upper_wick 9.08 &gt; 1.00</td>
+<td>-</td>
+</tr>
+<tr>
+<td>010690 화신</td>
+<td>+19.1%</td>
+<td>+9.0%</td>
+<td>0.54x</td>
+<td>11.9%</td>
+<td>🚫 차단</td>
+<td>gap 19.1% &gt; abs=15.0</td>
+<td>-</td>
+</tr>
+<tr>
+<td>056090</td>
+<td>+30.0%</td>
+<td>+30.0%</td>
+<td>0.00x</td>
+<td>7.2%</td>
+<td>🚫 차단</td>
+<td>gap 30.0% &gt; atr=21.7/abs=15.0</td>
+<td>-</td>
+</tr>
+<tr>
+<td>067290</td>
+<td>+13.1%</td>
+<td>+0.2%</td>
+<td>1.13x</td>
+<td>10.3%</td>
+<td>🚫 차단</td>
+<td>upper_wick 1.13 &gt; 1.00</td>
+<td>-</td>
+</tr>
+<tr>
+<td>030960</td>
+<td>+10.0%</td>
+<td>−1.9%</td>
+<td>1.48x</td>
+<td>12.2%</td>
+<td>🚫 차단</td>
+<td>upper_wick 1.48 &gt; 1.00</td>
+<td>-</td>
+</tr>
+<tr>
+<td><strong>036570</strong></td>
+<td>+7.2%</td>
+<td>+1.0%</td>
+<td>0.34x</td>
+<td>7.9%</td>
+<td>✅ <strong>통과</strong></td>
+<td>ok (정상 셋업)</td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+<p><strong>차단율 7/8.</strong> 차단 룰 분포: 윗꼬리 5 · 고갭 2 · 과확장 1. 통과 1(대조군).</p>
+<hr />
+<h2 id="3">3. 종목별 차트</h2>
+<blockquote>
+<p>각 차트: <strong>상단=일봉</strong>(최근 40거래일, 6/19 합성봉 포함) + 청산 라인(검정=6/19 종가, 초록 점선=TP, 빨강 점선=SIDEWAYS 타이트 SL, 분홍 점선=기존 SL) / <strong>하단=6/19 장중 5분봉</strong>. 좌하단 박스=트랩가드 판정·전략 시그널·국면 청산.</p>
+</blockquote>
+<h3 id="31-012320-gold_zone">3.1 012320 — gold_zone 매수신호를 "과확장"으로 차단 ★결정적</h3>
+<p>수주간 70k→47k 하락 후 6/19 +16.4% 반등. <strong>gold_zone이 과매도 반등으로 진입 신호(5.37)를 냈으나</strong>, 종가가 MA20 대비 +12.4%(&gt; 2.5×ATR 11.5%)로 과확장 → 추격 진입 차단. "전략은 사려는데 막는" 개미 꼬시기 포착의 교과서 사례.</p>
+<p><img alt="012320 6/19" src="assets/2026-06-21-0619-sim/012320_0619.png" /></p>
+<h3 id="32-010120-ls-electric-619">3.2 010120 LS ELECTRIC — 실제 6/19 후보, 윗꼬리 차단</h3>
+<p>6/19 실제 sim 후보(거래대금 7,141억). 5분봉상 <strong>시가 갭+5% → 아침 276k 스파이크 → 종일 흘러내려 245k까지</strong> = 윗꼬리 3.5x. 가짜 상승의 전형.</p>
+<p><img alt="010120 6/19" src="assets/2026-06-21-0619-sim/010120_0619.png" /></p>
+<h3 id="33-009620-908x">3.3 009620 — 극단 윗꼬리 9.08x</h3>
+<p>gap +9.9%로 출발해 +11.5% 마감했으나 몸통 대비 윗꼬리가 9배 — 상단 매도세가 압도. 트랩가드 윗꼬리 룰의 극단 사례.</p>
+<p><img alt="009620 6/19" src="assets/2026-06-21-0619-sim/009620_0619.png" /></p>
+<h3 id="34-010690-15-backstop">3.4 010690 화신 — 고갭 추격(절대 15% backstop)</h3>
+<p>전일比 +19.1%, 시초 갭 +9%. ATR게이트(35.7%)는 통과하지만 <strong>절대 15% backstop</strong>이 차단 — 고변동주에서 ATR배수만으론 못 막는 갭을 절대% OR이 봉쇄.</p>
+<p><img alt="010690 화신 6/19" src="assets/2026-06-21-0619-sim/010690_0619.png" /></p>
+<h3 id="35-056090-30">3.5 056090 — 상한가 갭 +30%</h3>
+<p>시초부터 상한가 부근(+30% 갭), ATR게이트(21.7%)·절대(15%) 둘 다 발화. 가장 명백한 고갭 추격 차단.</p>
+<p><img alt="056090 6/19" src="assets/2026-06-21-0619-sim/056090_0619.png" /></p>
+<h3 id="36-067290">3.6 067290 — 고등락 + 윗꼬리</h3>
+<p>+13.1% 마감, 윗꼬리 1.13x로 임계 직상 차단.</p>
+<p><img alt="067290 6/19" src="assets/2026-06-21-0619-sim/067290_0619.png" /></p>
+<h3 id="37-030960-148x">3.7 030960 — 윗꼬리 1.48x</h3>
+<p>갭 없이(−1.9%) +10% 마감했으나 윗꼬리 1.48x — 갭이 아니어도 캔들 형태로 가짜 돌파 포착(갭가드와 직교).</p>
+<p><img alt="030960 6/19" src="assets/2026-06-21-0619-sim/030960_0619.png" /></p>
+<h3 id="38-036570">3.8 036570 — 대조군(통과) ★휩쏘 방지 입증</h3>
+<p>+7.2% 상승이지만 윗꼬리 0.34x·갭 1%·과확장 아님 → <strong>통과</strong>. 트랩가드가 정상 셋업까지 죽이지 않음(휩쏘 양날 방지)을 입증하는 대조군.</p>
+<p><img alt="036570 6/19" src="assets/2026-06-21-0619-sim/036570_0619.png" /></p>
+<hr />
+<h2 id="4">4. 핵심 발견</h2>
+<ol>
+<li><strong>진입 단계 직접 차단</strong>: 6월 반복 패턴(고갭/장대양봉 유인 후 페이드)을 매수 전에 거른다. 기존 갭가드는 <code>{gold_zone,f_zone}</code>·절대 15%만이었는데, 본 로직은 <strong>윗꼬리·과확장·ATR정규화 갭</strong>으로 확장.</li>
+<li><strong>전략 시그널 위에서 작동(012320)</strong>: 트랩가드는 전략과 직교 — 전략이 진입을 원해도(gold_zone 5.37) 추격이면 차단. 6월 손실의 다수였던 "과매도 반등 추격"을 봉쇄.</li>
+<li><strong>OR 설계의 가치(010690 vs 056090)</strong>: 고변동주는 절대 backstop, 상한가는 ATR+절대 모두 — 단일 임계의 한계를 보완.</li>
+<li><strong>선택성(036570)</strong>: 정상 셋업은 통과 → 휩쏘 양날(<code>f_zone.py:51-54</code> impulse_max 교훈) 회피.</li>
+<li><strong>청산 타이트화</strong>: SIDEWAYS 국면이 모든 종목 SL을 −4%→−3%로 조정(차트 빨강 점선). 변동성장 손실 꼬리 축소 후보.</li>
+</ol>
+<hr />
+<h2 id="5">5. 한계 · 다음 단계</h2>
+<ul>
+<li><strong>시뮬은 EOD 완성 일봉 기준(post-hoc)</strong>: 본 시뮬의 윗꼬리·과확장·갭은 <strong>6/19 종료된 일봉</strong>의 실현 형태다. 라이브 데몬은 장중(09:30~) <strong>형성 중 일봉 + 실시간 flu_rate</strong>로 판정하므로 같은 종목이라도 시점에 따라 값이 다르다. 즉 본 리포트는 "그날 봉이 트랩이었나"를 보여주는 사후 검증이며, 09:30 의사결정과는 다르다(§6 forward-return 참조).</li>
+<li><strong>합성 일봉</strong>: 6/19 일봉은 5분봉 집계(종가=15:30 단일가). 전략 analyze는 일봉 모드(<code>simulation_log</code> 6/19와 동일).</li>
+<li><strong>종목명</strong>: 로그 외 무버는 코드 표기 — 개발머신 로컬에 종목명 마스터가 없어(<code>data/</code>·order_audit·refined_signals 모두 명칭 소스 부재) <strong>임의 추정하지 않음</strong>. 010120·010690만 <code>simulation_log</code> 기반 실명.</li>
+<li><strong>임계 미확정</strong>: 본 시뮬 임계(k=2.5·wick 1.0·gap×3/15%·SL×0.75)는 <strong>예시</strong>. §6 검증에서 보듯 차단은 무료가 아님(휩쏘 양날) → <strong>활성화 전 측정 필수</strong>: ops shadow 모드(차단했을 것 로깅) 또는 6월 전체 백테스트로 차단율·오차단(정상 모멘텀 손실)·net 효과 정량화.</li>
+<li><strong>활성화 = (d) HITL</strong>: env <code>BARRO_TRAP_*</code> + PolicyConfig <code>regime_exit_*</code> 켜는 것이 승인 게이트. <code>regime_exit</code>는 현재 <strong>default-OFF로 100% 무동작</strong>(의도된 상태, 버그 아님). 측정 후 <code>barrotrade-code-surgeon</code> 위임.</li>
+<li><strong>코드 상태</strong>: 워크트리 <code>feat/thetrading-uplift-increment1</code> <strong>미커밋</strong>, default-OFF(라이브 byte-identical).</li>
+</ul>
+<hr />
+<h2 id="6-619-intraday-forward-return">6. 차단 정당성 검증 — 6/19 intraday forward-return ★보강</h2>
+<p>트랩가드 차단이 옳았는지 = "차단된 종목을 추격 매수했다면 어땠나"를 6/19 5분봉으로 검증. 추격 진입 2기준(09:30 종가 / 장중 고점) → EOD 종가 수익률.</p>
+<table>
+<thead>
+<tr>
+<th>종목</th>
+<th>판정</th>
+<th style="text-align: right;">09:30 추격→EOD</th>
+<th style="text-align: right;"><strong>고점 추격→EOD</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>012320</td>
+<td>과확장</td>
+<td style="text-align: right;">+3.8%</td>
+<td style="text-align: right;">−2.9%</td>
+</tr>
+<tr>
+<td>010120 LS ELECTRIC</td>
+<td>윗꼬리</td>
+<td style="text-align: right;">−4.1%</td>
+<td style="text-align: right;">−6.3%</td>
+</tr>
+<tr>
+<td>009620</td>
+<td>윗꼬리</td>
+<td style="text-align: right;">+3.9%</td>
+<td style="text-align: right;"><strong>−11.9%</strong></td>
+</tr>
+<tr>
+<td>010690 화신</td>
+<td>고갭</td>
+<td style="text-align: right;">+12.0%</td>
+<td style="text-align: right;">−4.4%</td>
+</tr>
+<tr>
+<td>056090</td>
+<td>고갭(상한가)</td>
+<td style="text-align: right;">0.0%</td>
+<td style="text-align: right;">0.0%</td>
+</tr>
+<tr>
+<td>067290</td>
+<td>윗꼬리</td>
+<td style="text-align: right;">−3.1%</td>
+<td style="text-align: right;"><strong>−11.4%</strong></td>
+</tr>
+<tr>
+<td>030960</td>
+<td>윗꼬리</td>
+<td style="text-align: right;">+12.2%</td>
+<td style="text-align: right;"><strong>−13.9%</strong></td>
+</tr>
+<tr>
+<td><strong>차단군 평균(7)</strong></td>
+<td></td>
+<td style="text-align: right;"><strong>+3.5%</strong></td>
+<td style="text-align: right;"><strong>−7.3%</strong></td>
+</tr>
+<tr>
+<td>036570 (대조군/통과)</td>
+<td>통과</td>
+<td style="text-align: right;">−0.5%</td>
+<td style="text-align: right;">−1.9%</td>
+</tr>
+</tbody>
+</table>
+<p><strong>검증 결론(정직):</strong>
+1. <strong>고점 추격은 함정이었다</strong>: 차단군을 장중 고점에 추격하면 EOD까지 <strong>평균 −7.3%</strong>(통과군 036570은 −1.9%) — 윗꼬리·과확장 경고가 실제 페이드로 이어짐 = "개미 꼬시기" 입증.
+2. <strong>단 차단은 무료가 아니다(휩쏘 양날)</strong>: 09:30 추격 기준으론 차단군 평균 <strong>+3.5%</strong>(010690 +12%·030960 +12.2%는 종일 상승 지속). 즉 09:30 시점에 차단했다면 일부 상승을 놓쳤다. → 임계가 너무 타이트하면 정상 모멘텀 진입을 죽이는 비용 발생. <strong>측정으로 손익분기 임계를 찾아야 함.</strong>
+3. 상한가(056090)는 종일 잠겨 사실상 매수 불가(0%).</p>
+<hr />
+<h2 id="7-2026-06-21">7. 발견된 이슈 및 해결 (2026-06-21 보강)</h2>
+<p>직전 시뮬·리포트 검토에서 발견된 이슈와 처리:</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>이슈</th>
+<th>분류</th>
+<th>처리</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>일봉 선정 단계에 trap_guard 미적용</strong> — 데몬 <code>sim.run</code>은 default params(trap=0)라 시뮬이 보여준 일봉 차단이 실제 선정 경로엔 미배선</td>
+<td>P0 정합성</td>
+<td><strong>해결</strong>: 데몬 후처리 트랩필터 추가(<code>intraday_buy_daemon.py</code>, 갭가드 옆) — 일봉 후보 캔들+실 flu_rate로 전 전략 차단. default-OFF.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>gap 룰이 5분봉 reval에서 flu_rate 미주입 → 시초갭 무력</strong>(bar-gap proxy는 5분 간격이라 ~0)</td>
+<td>P0 정확성</td>
+<td><strong>해결</strong>: 후처리 필터가 LeaderPicker <strong>실 flu_rate</strong>(전일比) 사용.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>swing_38 trap_guard 미배선</strong>(reval <code>_build_reval_strategy</code> 미지원, 5분봉은 swing 부적합)</td>
+<td>P0 커버리지</td>
+<td><strong>해결</strong>: 후처리 필터는 <code>best_strategy</code> 무관 전 전략 적용(swing_38 포함).</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>차단 정당성 미검증</strong>(차단만 보여주고 옳았는지 미제시)</td>
+<td>P1 분석</td>
+<td><strong>해결</strong>: §6 forward-return 검증 추가(고점추격 −7.3% 입증 + 휩쏘 양날 정직 반영).</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>리포트가 enforcement 경로 과장</strong>(실제론 일봉 선정 미적용·reval 부분적)</td>
+<td>P1 정직성</td>
+<td><strong>해결</strong>: §5 정정 + 본 §7.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>종목명 6/8 미표기</strong></td>
+<td>P2 데이터</td>
+<td>로컬 명칭 소스 없음 → 코드 유지·명시(추정 금지).</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>regime_exit 100% 무동작</strong></td>
+<td>—</td>
+<td><strong>이슈 아님</strong>: 의도된 default-OFF. 활성화는 HITL.</td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong>리포트 worktree만 생성</strong>(메인 경로 누락)</td>
+<td>P3 프로세스</td>
+<td><strong>해결</strong>: 메인 <code>~/workspace/BarroAiTrade/docs/...</code>로 동기화.</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>모든 코드 수정은 <strong>default-OFF 유지</strong>(env/PolicyConfig 미설정 시 라이브 byte-identical). 활성화는 측정 후 (d) HITL.</p>
+</blockquote>
+</body></html>
