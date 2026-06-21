@@ -27,6 +27,7 @@ import pandas as pd
 
 from backend.core.strategy.base import Strategy
 from backend.core.strategy.round_figure import resolve_sl_pct
+from backend.core.strategy.trap_guard import TrapGuardConfig, evaluate_trap_guard
 from backend.models.market import OHLCV, MarketType
 from backend.models.position import Position
 from backend.models.signal import EntrySignal
@@ -105,6 +106,28 @@ class FZoneParams:
     # 패턴: 5/22 f_zone 036930 13:49 재진입 같은 장 후반 진입 차단 (청산 여유 부족 손실 방지).
     # Phase 8c swing_38 / Phase 8d gold_zone 와 동일 패턴.
     entry_time_cutoff: Optional[dtime] = None
+
+    # 6월 트랩(가짜 상승/개미 꼬시기) 방어 가드 — config-gated, **default-OFF**.
+    # 모든 임계 0 → 기존 진입 경로 byte-identical. 설계: backend/core/strategy/trap_guard.py.
+    # 활성화는 측정 후 (d) HITL (운영 env BARRO_TRAP_* override). sf_zone 은 본 params 상속.
+    trap_over_ext_k_atr: float = 0.0          # 기준선 대비 k×ATR% 초과 차단. 0=비활성
+    trap_over_ext_baseline: str = "ma"        # "ma" | "vwap" | "impulse_open"
+    trap_over_ext_ma_period: int = 20
+    trap_upper_wick_max: float = 0.0          # (high-close)/(close-open) 상한. 0=비활성
+    trap_gap_atr_mult: float = 0.0            # gap% > mult×ATR%×100 차단. 0=비활성
+    trap_gap_abs_max_pct: float = 0.0         # 절대% OR backstop. 0=비활성
+
+    def _trap_guard_config(self) -> TrapGuardConfig:
+        """현재 params 에서 트랩 가드 config 조립(모든 임계 0 이면 any_enabled()=False)."""
+        return TrapGuardConfig(
+            over_ext_k_atr=self.trap_over_ext_k_atr,
+            over_ext_baseline=self.trap_over_ext_baseline,
+            over_ext_ma_period=self.trap_over_ext_ma_period,
+            upper_wick_max=self.trap_upper_wick_max,
+            gap_atr_mult=self.trap_gap_atr_mult,
+            gap_abs_max_pct=self.trap_gap_abs_max_pct,
+            atr_n=self.atr_n,
+        )
 
     @classmethod
     def for_5min(cls) -> "FZoneParams":
@@ -243,6 +266,14 @@ class FZoneStrategy(Strategy):
                     "%s: ATR%% 임계 미달 (%.3f < %.3f) — f_zone 진입 거부",
                     symbol, atr_pct, p.min_atr_pct,
                 )
+                return None
+
+        # 6월 트랩(가짜 상승/개미 꼬시기) 방어 가드 (default-OFF) — 모든 임계 0 이면 no-op.
+        _trap_cfg = p._trap_guard_config()
+        if _trap_cfg.any_enabled():
+            _blocked, _reason = evaluate_trap_guard(candles, _trap_cfg)
+            if _blocked:
+                logger.debug("%s: 트랩 가드 차단 (%s) — f_zone 진입 거부", symbol, _reason)
                 return None
 
         # BAR-OPS-09 Phase 8e: 진입 시간 게이트 — 장 후반 진입 차단 (청산 여유 부족 손실 방지).

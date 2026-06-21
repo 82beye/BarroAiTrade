@@ -15,10 +15,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from backend.core.gateway.kiwoom_native_account import HoldingPosition
 from backend.core.strategy.round_figure import resolve_sl_pct
+
+if TYPE_CHECKING:  # 런타임 미import (backtester ↔ risk 순환 회피). 훅은 duck-typing 사용.
+    from backend.core.backtester.market_regime import MarketRegime
+    from backend.core.risk.regime_exit import RegimeExitConfig
 
 
 class SellSignal(str, Enum):
@@ -199,6 +203,12 @@ class PositionContext:
     # 2026-05-21 — 1분봉 시퀀스 (단기 고점 매도 평가용, optional).
     # daemon 이 fetch_minute_history 결과 전달. None 이면 SHORT_TERM_HIGH 평가 skip.
     minute_candles: Optional[list] = None
+    # 2026-06-21 — 국면 적응 청산(default-OFF). regime/atr_pct 는 동적 입력,
+    # regime_exit 는 설정(RegimeExitConfig). 셋 다 None/0.0 default → 기존 평가 byte-identical.
+    # daemon 이 refined_signals.json 의 regime 을 evaluate_holdings 경유 전달. 설계: regime_exit.py.
+    regime: "Optional[MarketRegime]" = None
+    atr_pct: float = 0.0
+    regime_exit: "Optional[RegimeExitConfig]" = None
 
 
 def _hold_days(entry_time: Optional[str]) -> int:
@@ -255,6 +265,11 @@ def evaluate_holding(
     # 전략별 정책 override
     if ctx.strategy:
         policy = resolve_policy(policy, ctx.strategy)
+
+    # 국면 적응 청산 (default-OFF) — ctx.regime_exit 미주입 또는 enabled=False 면 무변경.
+    # duck-typing(.apply) 으로 호출 → backtester↔risk 순환 회피. SIDEWAYS SL 타이트/BULL TP 확장.
+    if ctx.regime_exit is not None:
+        policy = ctx.regime_exit.apply(policy, ctx.regime, ctx.atr_pct)
 
     peak = Decimal(str(ctx.peak_pnl_rate))
     days = _hold_days(ctx.entry_time)
