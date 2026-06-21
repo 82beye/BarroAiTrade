@@ -23,6 +23,7 @@ import argparse
 import asyncio
 import csv as _csv
 import json
+import os
 from datetime import datetime, time as dtime, timedelta, timezone
 from pathlib import Path
 
@@ -40,9 +41,13 @@ _MAIN_DATA = Path("/Users/beye/workspace/BarroAiTrade/data")
 WINDOW_START, WINDOW_END = dtime(15, 0), dtime(15, 20)
 
 # 검증된 게이트 설정 — money_flow ON, zone OFF(악화 확인), 주도주컷 ON, 진입창은 스캐너가 관리.
+# 2026-06-22 — 이격도 게이트(disparity_yellow, 5일선 +14.25%) env 토글. default OFF(현행 byte-identical).
+#   사용자 dry-run 선택: BARRO_CB_DISPARITY_YELLOW=1 → ON(종베 net +0.107%→+0.405% 개선, 진입 빈도↓).
+_CB_DISPARITY = os.environ.get("BARRO_CB_DISPARITY_YELLOW", "0").strip().lower() in ("1", "true", "yes", "on")
 PARAMS = ClosingBetParams(
     require_eod_window=False, require_money_flow=True, require_zone=False,
     require_leader_meta=False, min_atr_pct=0.035, max_hold_days=3,
+    require_disparity_yellow=_CB_DISPARITY, disparity_yellow_threshold=0.1425,
 )
 
 
