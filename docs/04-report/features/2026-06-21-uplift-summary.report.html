@@ -1,0 +1,93 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>전략 고도화 적용 요약</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;max-width:1000px;margin:1.5em auto;padding:0 1.5em;color:#222;line-height:1.55;background:#fafafa;}
+h1,h2{color:#1a3a5f;}h1{border-bottom:3px solid #1a3a5f;padding-bottom:.3em;}h2{border-bottom:1px solid #ccc;padding-bottom:.2em;margin-top:1.4em;}
+table{border-collapse:collapse;margin:.8em 0;width:100%;font-size:.9em;}th,td{border:1px solid #ddd;padding:5px 9px;text-align:left;}th{background:#1a3a5f;color:#fff;}
+tr:nth-child(even){background:#f0f4f8;}code{background:#e8eef4;padding:2px 5px;border-radius:3px;font-size:.88em;}
+pre{background:#1e2a36;color:#e6edf3;padding:.8em 1em;border-radius:5px;overflow-x:auto;font-size:.82em;}pre code{background:none;color:inherit;}
+blockquote{border-left:4px solid #1a3a5f;padding:.4em 1em;background:#eef2f6;margin:.8em 0;color:#444;}strong{color:#c0392b;}</style></head><body>
+<hr />
+<h2>tags: [report, summary, strategy-uplift, status/final]</h2>
+<h1>BarroAiTrade 전략 고도화 — 적용 요약 (1페이지)</h1>
+<blockquote>
+<p><strong>2026-06-21</strong> · main <code>8cbf83a</code> 푸시 완료 · 전체 <strong>1496 테스트 통과</strong></p>
+</blockquote>
+<h2>1. 적용된 변경 (한눈에)</h2>
+<table>
+<thead>
+<tr>
+<th>변경</th>
+<th>영역</th>
+<th>무엇</th>
+<th>라이브 상태</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>trap_guard</strong></td>
+<td>진입</td>
+<td>가짜돌파/개미꼬시기 차단(과확장·윗꼬리·고갭 ATR)</td>
+<td>⚪ default-OFF</td>
+</tr>
+<tr>
+<td><strong>regime_exit</strong></td>
+<td>청산</td>
+<td>국면 적응(SIDEWAYS SL −4→−3, BULL TP 확장)</td>
+<td>⚪ default-OFF</td>
+</tr>
+<tr>
+<td><strong>net-aware TP</strong></td>
+<td>청산</td>
+<td>TP/분할익절에 왕복비용 가산(net 익절)</td>
+<td>⚪ default-OFF</td>
+</tr>
+<tr>
+<td><strong>trap SHADOW</strong></td>
+<td>진입</td>
+<td>차단 안 하고 "차단했을 것"만 로깅(측정용)</td>
+<td>⚪ default-OFF</td>
+</tr>
+<tr>
+<td><strong>COMMISSION_RATE 0.00175→0.0035</strong></td>
+<td>비용모델</td>
+<td>실측 2배 과소 정정</td>
+<td>🔴 <strong>적용됨(라이브)</strong></td>
+</tr>
+<tr>
+<td>측정도구 2개 + 리포트 3종</td>
+<td>관측성</td>
+<td>신호결정 audit·TP/SL net진단</td>
+<td>🟢 적용</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>🔴 <strong>라이브에 실제로 영향을 주는 변경은 비용율 정정 1개뿐.</strong> 나머지는 전부 default-OFF(켜야 작동).</p>
+</blockquote>
+<h2>2. 비용율 정정의 의미 (유일한 라이브 변경)</h2>
+<p><code>COMMISSION_RATE</code> 0.00175 → <strong>0.0035</strong> (fill_audit <strong>298행</strong> 재도출로 확정: 편도 0.3497%, 종전은 2배 과소).
+→ ops <code>git pull</code> 시 <strong>시뮬/선정이 비용을 정확히(net) 반영</strong> → 한계셋업 과매매 감소(보수적 선정). 우대요율 협의 시 <code>BARRO_COMMISSION_RATE</code>로 하향.</p>
+<h2>3. 핵심 측정 발견</h2>
+<ul>
+<li><strong>신호</strong>: 6/19 트랩 후보 13건 차단 → 고점 추격 시 EOD까지 평균 <strong>−5.5%</strong>(차단 정당). 단 09:30 추격 +7.4%(무료 아님 → 측정 필요).</li>
+<li><strong>TP/SL</strong>: 임계 전부 gross → <strong>gold 분할익절 +2%는 비용이 45% 잠식</strong>, SL net −4.9%.</li>
+<li><strong>6/16 실현</strong>: +13,862원(전적으로 이월 supertrend 덕, sf 대우건설 고갭 −181K).</li>
+</ul>
+<h2>4. 활성화 런북 (ops, 원할 때만 · 코드 default 는 OFF 유지)</h2>
+<pre><code class="language-bash"># ① trap SHADOW 측정 (1~2주, 미차단) — .env.local
+BARRO_TRAP_UPPER_WICK_MAX=1.0  BARRO_TRAP_OVER_EXT_K_ATR=2.5
+BARRO_TRAP_GAP_ATR_MULT=3.0  BARRO_TRAP_GAP_ABS_MAX_PCT=15.0  BARRO_TRAP_SHADOW=1
+# ② regime_exit / ③ net-aware — data/policy.json
+{ &quot;regime_exit_enabled&quot;: true, &quot;regime_sideways_sl_mult&quot;: 0.75, &quot;net_aware_tp_enabled&quot;: true }
+</code></pre>
+<h2>5. 잔여 액션 (사용자/ops)</h2>
+<ol>
+<li><strong>수수료 요율 협의</strong> — net 잠식 구조적 1순위 레버(코드 아님).</li>
+<li><strong>trap/regime SHADOW 측정 후 enforce/활성화 결정</strong>(휩쏘 양날).</li>
+<li>운영 머신 <code>git pull origin main</code>(비용율 정정 반영, 나머지 OFF 유지).</li>
+</ol>
+<h2>6. 산출물</h2>
+<ul>
+<li>리포트: <code>2026-06-21-tp-sl-exit-logic</code>(TP/SL 감사) · <code>2026-06-21-0619-trap-guard-simulation</code>(6/19 시뮬) · <code>2026-06-21-strategy-uplift-signal-tpsl-check</code>(고도화) — 모두 <code>docs/04-report/features/</code>.</li>
+<li>측정도구: <code>scripts/_signal_decision_audit.py</code> · <code>scripts/_tpsl_zone_diagnostic.py</code>.</li>
+<li>git: main <code>8cbf83a</code>(증분1 <code>e6fadd5</code> + 증분2). feat <code>feat/thetrading-uplift-increment1</code> 동기화.</li>
+</ul>
+</body></html>
