@@ -209,6 +209,9 @@ class PositionContext:
     regime: "Optional[MarketRegime]" = None
     atr_pct: float = 0.0
     regime_exit: "Optional[RegimeExitConfig]" = None
+    # 2026-06-21 — net-aware TP(default-OFF). True 면 TP/분할익절 임계에 왕복 비용 가산
+    # (net 기준 익절). default False → 기존 gross 임계 그대로. 설계: regime_exit.apply_net_aware_tp.
+    net_aware_tp: bool = False
 
 
 def _hold_days(entry_time: Optional[str]) -> int:
@@ -270,6 +273,12 @@ def evaluate_holding(
     # duck-typing(.apply) 으로 호출 → backtester↔risk 순환 회피. SIDEWAYS SL 타이트/BULL TP 확장.
     if ctx.regime_exit is not None:
         policy = ctx.regime_exit.apply(policy, ctx.regime, ctx.atr_pct)
+
+    # net-aware TP (default-OFF) — TP/분할익절 임계에 왕복 비용 가산(net 기준 익절).
+    # lazy import 로 backtester↔risk 순환 회피.
+    if ctx.net_aware_tp:
+        from backend.core.risk.regime_exit import apply_net_aware_tp
+        policy = apply_net_aware_tp(policy, True)
 
     peak = Decimal(str(ctx.peak_pnl_rate))
     days = _hold_days(ctx.entry_time)

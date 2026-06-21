@@ -54,12 +54,12 @@ def test_compute_net_includes_commission_and_tax():
     net = compute_net(buy, sell, qty)
     assert net == expected
     assert net < (sell - buy) * qty   # 비용이 실제로 차감됨
-    # 공식 자체를 손계산 리터럴로 핀(동어반복 방지) — default 요율(0.00175/0.0020) 기준:
-    #   50,000 − (20,500×100×0.00175=3,587.5) − (10,500×100×0.0020=2,100) = 44,312.5
+    # 공식 자체를 손계산 리터럴로 핀(동어반복 방지) — default 요율(0.0035/0.0020) 기준(2026-06-21 정정):
+    #   50,000 − (20,500×100×0.0035=7,175) − (10,500×100×0.0020=2,100) = 40,725
     import os as _os
     if (_os.environ.get("BARRO_COMMISSION_RATE") is None
             and _os.environ.get("BARRO_TAX_RATE_SELL") is None):
-        assert net == Decimal("44312.5")
+        assert net == Decimal("40725")
 
 
 def test_compute_net_loss_is_negative():

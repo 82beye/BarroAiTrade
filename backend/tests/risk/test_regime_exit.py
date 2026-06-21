@@ -110,6 +110,45 @@ class TestRegimeExitConfig:
         assert rx.sideways_max_hold_days == 2
 
 
+class TestNetAwareTP:
+    def test_disabled_returns_same_object(self):
+        from backend.core.risk.regime_exit import apply_net_aware_tp
+        p = ExitPolicy()
+        assert apply_net_aware_tp(p, enabled=False) is p
+
+    def test_grosses_up_tp_and_partial(self):
+        """enabled → TP/분할익절에 왕복 비용(0.90%) 가산. TP 5.0→5.9, partial 3.5→4.4."""
+        from backend.core.risk.regime_exit import apply_net_aware_tp
+        p = ExitPolicy()  # TP 5.0, partial 3.5
+        q = apply_net_aware_tp(p, enabled=True)
+        assert q.take_profit_pct == Decimal("5.9")
+        assert q.partial_tp_pct == Decimal("4.4")
+        assert q.stop_loss_pct == p.stop_loss_pct  # SL 미변경
+
+    def test_explicit_round_trip(self):
+        from backend.core.risk.regime_exit import apply_net_aware_tp
+        p = ExitPolicy()
+        q = apply_net_aware_tp(p, enabled=True, round_trip_pct=0.55)
+        assert q.take_profit_pct == Decimal("5.55")
+
+    def test_context_net_aware_raises_tp_threshold(self):
+        """PositionContext.net_aware_tp=True → evaluate 가 더 높은 TP 임계 사용."""
+        from backend.core.gateway.kiwoom_native_account import HoldingPosition
+        from backend.core.risk.holding_evaluator import (
+            ExitPolicy as EP, PositionContext, SellSignal, evaluate_holding,
+        )
+        h = HoldingPosition(symbol="005930", name="삼성전자", qty=10,
+                            avg_buy_price=Decimal("100000"), cur_price=Decimal("105200"),
+                            eval_amount=Decimal("1052000"), pnl=Decimal("52000"),
+                            pnl_rate=Decimal("5.2"))  # +5.2%
+        # gross 기준(net_aware off): f_zone TP 5.0 → +5.2% 익절
+        off = PositionContext(strategy="f_zone")
+        assert evaluate_holding(h, EP(), off).signal == SellSignal.TAKE_PROFIT
+        # net-aware on: TP 5.9 → +5.2% 는 아직 미달(전량익절 아님)
+        on = PositionContext(strategy="f_zone", net_aware_tp=True)
+        assert evaluate_holding(h, EP(), on).signal != SellSignal.TAKE_PROFIT
+
+
 class TestEvaluateHoldingIntegration:
     """evaluate_holding 이 조정된 정책을 실제로 사용하는지(end-to-end)."""
 

@@ -22,6 +22,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
 from backend.core.backtester.market_regime import MarketRegime
+from backend.core.trading_costs import ROUND_TRIP_COST_RATE
 
 if TYPE_CHECKING:  # 런타임 미import (순환 회피)
     from backend.core.risk.holding_evaluator import ExitPolicy
@@ -127,4 +128,28 @@ class RegimeExitConfig:
         )
 
 
-__all__ = ["adjust_policy_for_regime", "RegimeExitConfig"]
+def apply_net_aware_tp(
+    policy: "ExitPolicy", enabled: bool = False, round_trip_pct: float | None = None,
+) -> "ExitPolicy":
+    """net-aware TP — TP/분할익절 임계에 왕복 비용(%)을 가산(gross-up)해 **net 기준** 익절.
+
+    배경: 라이브 TP 임계는 전부 gross → 타이트한 분할익절(gold +2%)일수록 비용 잠식 큼
+    (왕복 ~0.90% → +2% 의 45%). 이 옵션을 켜면 임계를 비용만큼 올려 net 수익이 의도값에
+    수렴. **default(enabled=False) → policy 그대로**(byte-identical). SL 은 미변경(가산 시
+    손절이 타이트해져 의도와 어긋남 — 보수적으로 TP 측만).
+
+    활성화는 (d) HITL — 익절 빈도/보유시간 변화. 측정 권장.
+    """
+    if not enabled:
+        return policy
+    rt = Decimal(str(round_trip_pct)) if round_trip_pct is not None else Decimal(str(ROUND_TRIP_COST_RATE)) * 100
+    if rt == Decimal("0"):
+        return policy
+    return replace(
+        policy,
+        take_profit_pct=policy.take_profit_pct + rt,
+        partial_tp_pct=policy.partial_tp_pct + rt,
+    )
+
+
+__all__ = ["adjust_policy_for_regime", "RegimeExitConfig", "apply_net_aware_tp"]

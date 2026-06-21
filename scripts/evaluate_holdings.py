@@ -194,6 +194,7 @@ async def _run(args) -> int:
                     strategy=pos.strategy,
                     regime=today_regime,            # default-OFF 시 None (무조정)
                     regime_exit=regime_exit_cfg,
+                    net_aware_tp=bool(getattr(cfg, "net_aware_tp_enabled", False)),
                 )
 
     decisions = evaluate_all(holdings, policy, contexts)

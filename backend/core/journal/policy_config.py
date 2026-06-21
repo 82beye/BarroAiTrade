@@ -43,6 +43,8 @@ class PolicyConfig:
     regime_bull_tp_mult: float = 1.0
     regime_bull_sl_mult: float = 1.0
     regime_bearish_sl_mult: float = 1.0
+    # 2026-06-21 — net-aware TP(default-OFF). True 면 TP/분할익절 임계에 왕복 비용 가산.
+    net_aware_tp_enabled: bool = False
     history: list[dict] = field(default_factory=list)         # 변경 이력
 
     def as_dict(self) -> dict:
