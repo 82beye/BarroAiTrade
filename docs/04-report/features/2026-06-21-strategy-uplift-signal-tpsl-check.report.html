@@ -1,0 +1,406 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>매매전략 고도화 — 신호+TP/SL 체크</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;max-width:1100px;margin:2em auto;padding:0 1.5em;color:#222;line-height:1.6;background:#fafafa;}
+h1,h2,h3{color:#1a3a5f;}h1{border-bottom:3px solid #1a3a5f;padding-bottom:.3em;}h2{border-bottom:1px solid #ccc;padding-bottom:.2em;margin-top:2em;}
+table{border-collapse:collapse;margin:1em 0;width:100%;font-size:.9em;}th,td{border:1px solid #ddd;padding:6px 10px;text-align:left;}th{background:#1a3a5f;color:#fff;}
+tr:nth-child(even){background:#f0f4f8;}td{font-variant-numeric:tabular-nums;}code{background:#e8eef4;padding:2px 6px;border-radius:3px;}
+blockquote{border-left:4px solid #1a3a5f;padding:.5em 1em;background:#eef2f6;margin:1em 0;color:#444;}strong{color:#c0392b;}
+img{max-width:100%;height:auto;display:block;margin:1em auto;border:1px solid #ddd;border-radius:4px;box-shadow:0 1px 6px rgba(0,0,0,.08);}</style></head><body>
+<hr />
+<h2 id="tags-report-strategy-uplift-signal-check-tp-sl-check-trap-guard-regime-exit-statusfinal">tags: [report, strategy-uplift, signal-check, tp-sl-check, trap-guard, regime-exit, status/final]</h2>
+<h1 id="tpsl">매매전략 고도화 — 매매시그널 상세체크 + TP/SL 구간 체크</h1>
+<blockquote>
+<p><strong>Project</strong>: BarroAiTrade · <strong>Date</strong>: 2026-06-21 · <strong>Status</strong>: Final (진단 + 측정도구 (c) 구현. 실거래 파라미터는 (d) HITL 미적용)
+<strong>대상</strong>: 방금 머지된 <code>trap_guard</code>(진입) + <code>regime_exit</code>(청산) 고도화. ①매매시그널 ②TP/SL 구간 2가지 상세체크.
+<strong>연관</strong>: [[2026-06-21-0619-trap-guard-simulation.report]] · [[2026-06-21-tp-sl-exit-logic.report]]</p>
+</blockquote>
+<hr />
+<h2 id="0">0. 요약 — 한 줄 결론</h2>
+<p>머지된 trap_guard·regime_exit는 <strong>default-OFF·미측정</strong>이었다. 두 측정 도구를 신설해 상세 점검한 결과:
+- <strong>신호</strong>: 6/19 트랩 후보 13건을 게이트가 전부 차단(갭가드 7·트랩가드 6), <strong>차단군을 장중 고점에 추격했다면 EOD까지 평균 −5.5%</strong> → 차단 정당(개미꼬시기 포착). 단 09:30 추격 기준 +7.4%(일부 상승 지속) = <strong>차단 무료 아님</strong>(임계 측정 필수).
+- <strong>TP/SL</strong>: 임계가 <strong>전부 gross</strong>라 비용(왕복 0.55~0.90%)이 잠식 — <strong>gold_zone 분할익절 +2%는 비용이 45% 잠식</strong>, SL은 net −4.9%. 6/16 실현 +13,862원은 전적으로 이월 supertrend 덕(sf_zone 대우건설 고갭 −181K). regime_exit 활성 시 SIDEWAYS SL −4→−3.</p>
+<p><strong>(c) 즉시 구현 완료</strong>: 측정도구 2개(<code>_signal_decision_audit.py</code>·<code>_tpsl_zone_diagnostic.py</code>) + trap SHADOW 모드 + 본 리포트. <strong>(d) 실거래 파라미터 5종은 §5 권고 → AskUserQuestion 후 결정</strong>(default 불변).</p>
+<hr />
+<h2 id="1">1. 점검 기준</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>신호 데이터</td>
+<td><strong>6/19</strong>(트랩 풍부 무버, 5분봉 실측+일봉 합성). 6/19는 live-OFF라 실현 0 → 게이트 "결정"만 재현</td>
+</tr>
+<tr>
+<td>TP/SL 데이터</td>
+<td><strong>6/16</strong>(실측 fill 존재) — <code>_daily_strategy_audit.py --source auto</code> 진실원천(total_realized +13,862 인용)</td>
+</tr>
+<tr>
+<td>측정 도구(신규, (c))</td>
+<td><code>_signal_decision_audit.py</code>(게이트 replay+forward-return), <code>_tpsl_zone_diagnostic.py</code>(gross/net+regime)</td>
+</tr>
+<tr>
+<td>비용 가정</td>
+<td>현행모델 왕복 0.55%(편도 0.175%) vs <strong>6/17 실측 재분석 0.90%</strong>(편도 0.350%, fill_audit 186건) 병행</td>
+</tr>
+<tr>
+<td>안전</td>
+<td>측정도구·SHADOW·regime_exit 모두 <strong>default-OFF</strong>(env/PolicyConfig 미설정 시 라이브 byte-identical)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-1-trap_guard">2. ① 매매시그널 상세체크 (trap_guard)</h2>
+<p><code>_signal_decision_audit.py --date 2026-06-19 --movers 12</code> — 후보별 게이트 체인 재현 + forward-return.</p>
+<p><img alt="6/19 차단 후보 고점추격 손실" src="assets/2026-06-21-uplift/signal_fwd_return.png" /></p>
+<table>
+<thead>
+<tr>
+<th>종목</th>
+<th>전략</th>
+<th style="text-align: right;">score</th>
+<th style="text-align: right;">flu%</th>
+<th style="text-align: right;">윗꼬리</th>
+<th style="text-align: right;">pos930</th>
+<th>판정</th>
+<th style="text-align: right;">고점→EOD</th>
+<th>사유</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>010120</td>
+<td>gold_zone</td>
+<td style="text-align: right;">0.79</td>
+<td style="text-align: right;">7.0</td>
+<td style="text-align: right;">3.50</td>
+<td style="text-align: right;">80%</td>
+<td>SKIP-TRAP</td>
+<td style="text-align: right;">−6.3%</td>
+<td>upper_wick 3.50</td>
+</tr>
+<tr>
+<td>009620</td>
+<td>f_zone</td>
+<td style="text-align: right;">-</td>
+<td style="text-align: right;">11.5</td>
+<td style="text-align: right;">9.08</td>
+<td style="text-align: right;">26%</td>
+<td>SKIP-TRAP</td>
+<td style="text-align: right;">−11.9%</td>
+<td>upper_wick 9.08</td>
+</tr>
+<tr>
+<td>067290</td>
+<td>f_zone</td>
+<td style="text-align: right;">-</td>
+<td style="text-align: right;">13.1</td>
+<td style="text-align: right;">1.13</td>
+<td style="text-align: right;">60%</td>
+<td>SKIP-TRAP</td>
+<td style="text-align: right;">−11.4%</td>
+<td>upper_wick 1.13</td>
+</tr>
+<tr>
+<td>030960</td>
+<td>f_zone</td>
+<td style="text-align: right;">-</td>
+<td style="text-align: right;">10.0</td>
+<td style="text-align: right;">1.48</td>
+<td style="text-align: right;">7%</td>
+<td>SKIP-TRAP</td>
+<td style="text-align: right;">−13.9%</td>
+<td>upper_wick 1.48</td>
+</tr>
+<tr>
+<td>001000</td>
+<td>f_zone</td>
+<td style="text-align: right;">-</td>
+<td style="text-align: right;">8.4</td>
+<td style="text-align: right;">2.19</td>
+<td style="text-align: right;">6%</td>
+<td>SKIP-TRAP</td>
+<td style="text-align: right;">−16.2%</td>
+<td>upper_wick 2.19</td>
+</tr>
+<tr>
+<td>009155</td>
+<td>f_zone</td>
+<td style="text-align: right;">-</td>
+<td style="text-align: right;">11.4</td>
+<td style="text-align: right;">0.71</td>
+<td style="text-align: right;">84%</td>
+<td>SKIP-TRAP</td>
+<td style="text-align: right;">−4.3%</td>
+<td>over_ext 0.327 &gt; 2.5×ATR</td>
+</tr>
+<tr>
+<td>010690·012320·…</td>
+<td>f_zone</td>
+<td style="text-align: right;">-</td>
+<td style="text-align: right;">16~30</td>
+<td style="text-align: right;">-</td>
+<td style="text-align: right;">-</td>
+<td>SKIP-GAP</td>
+<td style="text-align: right;">0~−4%</td>
+<td>flu ≥ 15%</td>
+</tr>
+</tbody>
+</table>
+<p><strong>발견:</strong>
+1. <strong>차단 정당성 입증</strong>: 차단군 13건을 <strong>장중 고점에 추격하면 EOD까지 평균 −5.5%</strong>(001000 −16.2%·030960 −13.9%·009620 −11.9%). 윗꼬리·과확장 경고가 실제 페이드로 이어짐.
+2. <strong>실제 후보 010120</strong>(gold_zone, score 0.79 — 6/19 sim 선정)도 윗꼬리 3.5x로 트랩가드 차단 → −6.3%. 전략 시그널 위에서 작동.
+3. <strong>단 09:30 추격 기준 차단군 +7.4%</strong>(일부 상승 지속 + 상한가 5건 0%). 즉 <strong>너무 이르게 차단하면 정상 모멘텀 손실</strong> → 임계는 측정으로 손익분기 탐색(휩쏘 양날).
+4. <strong>관측성 공백 해소</strong>: "왜 탈락했는지(어느 게이트)"를 집계하는 도구가 없었음 → 신규 audit로 차단율(갭가드 7·트랩 6)·forward-return 정량화.</p>
+<hr />
+<h2 id="3-2-tpsl-regime_exit">3. ② TP/SL 구간 체크 (regime_exit + 비용)</h2>
+<p><code>_tpsl_zone_diagnostic.py --date 2026-06-16</code> — 전략별 gross vs net + 국면 효과 + 실현 맥락.</p>
+<p><img alt="TP/SL 비용 잠식" src="assets/2026-06-21-uplift/tpsl_erosion.png" /></p>
+<table>
+<thead>
+<tr>
+<th>전략</th>
+<th style="text-align: right;">grossTP</th>
+<th style="text-align: right;">netTP(0.90%)</th>
+<th style="text-align: right;">grossSL</th>
+<th style="text-align: right;">netSL(0.90%)</th>
+<th style="text-align: right;">분할TP</th>
+<th style="text-align: right;"><strong>잠식%(0.90)</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>f_zone</td>
+<td style="text-align: right;">5.0</td>
+<td style="text-align: right;">4.10</td>
+<td style="text-align: right;">−4.0</td>
+<td style="text-align: right;">−4.90</td>
+<td style="text-align: right;">3.0</td>
+<td style="text-align: right;">30%</td>
+</tr>
+<tr>
+<td>sf_zone</td>
+<td style="text-align: right;">7.0</td>
+<td style="text-align: right;">6.10</td>
+<td style="text-align: right;">−4.0</td>
+<td style="text-align: right;">−4.90</td>
+<td style="text-align: right;">3.0</td>
+<td style="text-align: right;">30%</td>
+</tr>
+<tr>
+<td><strong>gold_zone</strong></td>
+<td style="text-align: right;">4.0</td>
+<td style="text-align: right;">3.10</td>
+<td style="text-align: right;">−4.0</td>
+<td style="text-align: right;">−4.90</td>
+<td style="text-align: right;"><strong>2.0</strong></td>
+<td style="text-align: right;"><strong>45%</strong></td>
+</tr>
+<tr>
+<td>swing_38</td>
+<td style="text-align: right;">50.0</td>
+<td style="text-align: right;">49.10</td>
+<td style="text-align: right;">−15.0</td>
+<td style="text-align: right;">−15.90</td>
+<td style="text-align: right;">20.0</td>
+<td style="text-align: right;">4.5%</td>
+</tr>
+<tr>
+<td>closing_bet</td>
+<td style="text-align: right;">4.5</td>
+<td style="text-align: right;">3.60</td>
+<td style="text-align: right;">−5.0</td>
+<td style="text-align: right;">−5.90</td>
+<td style="text-align: right;">2.7</td>
+<td style="text-align: right;">33%</td>
+</tr>
+</tbody>
+</table>
+<p><strong>regime_exit 효과</strong>(예시배수 — 현재 default-OFF):</p>
+<table>
+<thead>
+<tr>
+<th>전략</th>
+<th style="text-align: right;">baseSL</th>
+<th style="text-align: right;">SIDEWAYS_SL</th>
+<th style="text-align: right;">baseTP</th>
+<th style="text-align: right;">BULL_TP</th>
+<th style="text-align: right;">BEARISH_SL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>f_zone</td>
+<td style="text-align: right;">−4.0</td>
+<td style="text-align: right;">−3.00</td>
+<td style="text-align: right;">5.0</td>
+<td style="text-align: right;">6.50</td>
+<td style="text-align: right;">−5.00</td>
+</tr>
+<tr>
+<td>gold_zone</td>
+<td style="text-align: right;">−4.0</td>
+<td style="text-align: right;">−3.00</td>
+<td style="text-align: right;">4.0</td>
+<td style="text-align: right;">5.20</td>
+<td style="text-align: right;">−5.00</td>
+</tr>
+<tr>
+<td>swing_38</td>
+<td style="text-align: right;">−15.0</td>
+<td style="text-align: right;">−11.25</td>
+<td style="text-align: right;">50.0</td>
+<td style="text-align: right;">65.00</td>
+<td style="text-align: right;">−18.75</td>
+</tr>
+</tbody>
+</table>
+<p><strong>발견:</strong>
+1. <strong>임계가 전부 gross</strong> → 타이트한 분할익절일수록 비용 잠식 큼. <strong>gold_zone +2% 분할익절은 0.90% 비용이 45% 잠식</strong>(net +1.10%), f/sf +3%는 30%, closing +2.7%는 33%. SL도 net으로 ~0.9%p 더 깊다.
+2. <strong>비용 모델 2배 과소 → 정정 적용(✅)</strong>: fill_audit <strong>298행 재도출</strong>으로 확정 — 수수료 1,768,040 / 왕복거래액(매수+매도) 505,588,092 = <strong>편도 0.3497%</strong>. fee 공식이 <code>(매수+매도)×COMMISSION_RATE</code>라 rate=0.0035 여야 하나 코드는 0.00175(절반). 종전 6/11 계산이 '왕복 0.3494%'를 편도로 오라벨 후 반감한 오류. <strong><code>COMMISSION_RATE</code> 0.00175→0.0035 정정</strong>(시뮬/선정이 net 정확 반영 → 한계셋업 과매매 감소). 영향 테스트 6건 정정값 갱신.
+3. <strong>6/16 실현 맥락</strong>(진실원천): f_zone +234,653 / sf_zone <strong>−180,986</strong>(대우건설 +20.6%갭 sf — sim −0.1만 → 실현 −18.1만 대괴리) / gold −12,673 / supertrend −27,132 / <strong>total +13,862</strong>(전적으로 이월 supertrend 덕). §C 손절슬립은 sf +0.13%p(작음 — 손실은 슬립 아닌 <strong>진입가 위치</strong>).
+4. <strong>regime_exit는 100% 무동작</strong>(의도된 default-OFF). 6월 SIDEWAYS 변동성장엔 SL 타이트(−4→−3)가 후보지만, 노이즈 손절 다발(휩쏘) 위험 → 측정 후.</p>
+<hr />
+<h2 id="4-c">4. 신규 측정 도구 ((c) 안전 개선 — 즉시 구현)</h2>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>역할</th>
+<th>안전성</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scripts/_signal_decision_audit.py</code></td>
+<td>특정일 후보 게이트 체인 재현(SKIP-GAP/TRAP) + forward-return 검증</td>
+<td>읽기·계산만, config 무변경</td>
+</tr>
+<tr>
+<td><code>scripts/_tpsl_zone_diagnostic.py</code></td>
+<td>전략별 gross vs net(2 비용가정) + regime_exit 효과 + 실현 맥락 인용</td>
+<td>읽기·계산만</td>
+</tr>
+<tr>
+<td><code>intraday_buy_daemon.py</code> SHADOW 모드</td>
+<td>env <code>BARRO_TRAP_SHADOW=1</code> → 트랩 "차단했을 것"만 로깅(미차단) → enforce 전 차단율 측정</td>
+<td>default-OFF(enforce), env 토글</td>
+</tr>
+<tr>
+<td><code>regime_exit.apply_net_aware_tp</code> + <code>net_aware_tp_enabled</code></td>
+<td>TP/분할익절 비용 가산(net 익절)</td>
+<td>config-gated default-OFF</td>
+</tr>
+<tr>
+<td><code>COMMISSION_RATE</code> 0.00175→0.0035</td>
+<td>실측 2배 과소 정정(298행)</td>
+<td>(d) 승인 적용</td>
+</tr>
+<tr>
+<td>테스트 +14건</td>
+<td>net 변환·regime·net-aware·게이트 판정·default-OFF parity</td>
+<td>전체 <strong>1496 통과</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-abcd">5. 권고 (분류 a/b/c/d · 우선순위)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>권고</th>
+<th>분류</th>
+<th>우선</th>
+<th>처리</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>측정도구 2개 + SHADOW 모드 + 본 리포트</td>
+<td><strong>(c)</strong></td>
+<td>P0</td>
+<td>✅ 구현·테스트 완료</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>수수료 요율 협의</strong>(net 잠식 구조적 1순위 레버)</td>
+<td>(a) 운영</td>
+<td>P0</td>
+<td>사용자 액션(협의 후 <code>BARRO_COMMISSION_RATE</code>)</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong><code>COMMISSION_RATE</code> 0.00175→0.0035 정정</strong>(실측 2배)</td>
+<td>(d)→승인</td>
+<td>P1</td>
+<td>✅ <strong>정정 적용</strong>(298행 확정, 영향 테스트 6건 갱신). ops pull 시 시뮬/선정 net 정확화</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>trap_guard SHADOW 배포 측정</strong>(wick 1.0·gap 15·k 2.5)</td>
+<td>(d)→승인</td>
+<td>P1</td>
+<td>✅ 코드 완비 → ops <strong>SHADOW 런북</strong>(아래). 측정 후 enforce</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>regime_exit 활성화 + SIDEWAYS SL×0.75</strong></td>
+<td>(d)→승인</td>
+<td>P1</td>
+<td>✅ config-gated 완비 → ops <strong>policy.json 런북</strong>(아래). 코드 default 는 OFF 유지</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>net-aware TP/SL</strong>(gold 분할 +2%→비용가산)</td>
+<td>(d)→승인</td>
+<td>P2</td>
+<td>✅ <strong>구현</strong>(config-gated default-OFF, <code>net_aware_tp_enabled</code>)</td>
+</tr>
+<tr>
+<td>7</td>
+<td>SL 격차(−2 백테 vs −4 라이브) 통일</td>
+<td>(d)</td>
+<td>P2</td>
+<td>측정 후(슬립 +0.13%p·STOP_LOSS&lt;20%라 재검토 트리거 미달)</td>
+</tr>
+<tr>
+<td>8</td>
+<td>갭가드 <code>_ZONE_MAX_FLU</code>(15%)</td>
+<td>(b) 이미구현</td>
+<td>—</td>
+<td>배포됨(env 토글)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ops-d">운영(ops) 런북 — 승인된 (d) 활성화</h3>
+<blockquote>
+<p>코드 default 는 모두 OFF(라이브 byte-identical). 아래는 <strong>운영 머신 설정</strong>(이 개발머신 미적용).</p>
+</blockquote>
+<p><strong>① 비용율 정정</strong>: <code>git pull origin main</code> 만으로 적용(코드 default 0.0035). 우대요율 협의 시 <code>BARRO_COMMISSION_RATE</code> 로 하향.</p>
+<p><strong>② trap_guard SHADOW 측정</strong>(1~2주, 미차단): <code>.env.local</code> 에</p>
+<pre><code class="language-bash">BARRO_TRAP_UPPER_WICK_MAX=1.0
+BARRO_TRAP_OVER_EXT_K_ATR=2.5
+BARRO_TRAP_GAP_ATR_MULT=3.0
+BARRO_TRAP_GAP_ABS_MAX_PCT=15.0
+BARRO_TRAP_SHADOW=1        # 차단했을 것만 로깅(미차단). 측정 후 0 으로 enforce
+</code></pre>
+<p>로그의 <code>[SHADOW-TRAP]</code> 빈도·forward 결과로 차단율·오차단 측정 → 그 후 <code>BARRO_TRAP_SHADOW=0</code>.</p>
+<p><strong>③ regime_exit 활성화</strong>: <code>data/policy.json</code> 에(또는 <code>/tune</code>)</p>
+<pre><code class="language-json">{ &quot;regime_exit_enabled&quot;: true, &quot;regime_sideways_sl_mult&quot;: 0.75, &quot;regime_bull_tp_mult&quot;: 1.3 }
+</code></pre>
+<p>(daemon 이 <code>refined_signals.json</code> 당일 regime 산출 → evaluate_holdings 가 SIDEWAYS 시 SL −4→−3.) 휩쏘 위험 → <code>verify_eod_data</code>·<code>_daily_strategy_audit</code> 로 손절율 모니터.</p>
+<p><strong>④ net-aware TP</strong>: <code>data/policy.json</code> 에 <code>{ "net_aware_tp_enabled": true }</code> (TP/분할익절 +0.9% gross-up → net 익절).</p>
+<hr />
+<h2 id="6">6. 한계 / 주의</h2>
+<ul>
+<li><strong>개발머신 키움 인증 없음</strong>: §B 진입품질 캔들 fetch 인증실패(정상) → 일중위치는 5분봉 합성으로 보완. 일봉캐시 6/18까지 → 6/19 일봉 5분봉 합성.</li>
+<li><strong>6/19 live-OFF</strong>: 실현 거래 0 → 신호 "결정"만(forward-return로 정당성 검증). 실현 TP/SL은 6/16.</li>
+<li><strong>시뮬은 EOD 완성 일봉 기준</strong>(post-hoc): 라이브 데몬은 장중 형성 중 일봉으로 판정 → SHADOW 모드로 실제 차단율 측정 필요.</li>
+<li><strong>임계 예시값</strong>: trap k=2.5·wick 1.0, regime ×0.75/×1.3은 illustrative. <strong>활성화 전 SHADOW/백테스트 측정 필수</strong>(휩쏘 양날).</li>
+<li><strong>(d) 전부 HITL</strong>: §5 #3~6은 AskUserQuestion 승인 전 default 불변. 본 increment은 (c)만 자동.</li>
+<li>코드: 워크트리 <code>feat/thetrading-uplift-increment1</code>, <strong>미커밋</strong>(커밋/푸시는 승인 후).</li>
+</ul>
+</body></html>
