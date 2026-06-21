@@ -9,9 +9,13 @@ from datetime import datetime, timezone
 
 from backend.core.strategy.closing_bet_filters import (
     body_new_high,
+    disparity_5ma,
+    disparity_yellow,
+    envelope_upper_break,
     liquidity_ok,
     overheat_warning,
     remaining_upside_ratio,
+    triple_factor_buy,
 )
 from backend.models.market import MarketType, OHLCV
 
@@ -95,6 +99,58 @@ def test_remaining_upside_ratio_clips():
 
 def test_remaining_upside_ratio_invalid_span_none():
     assert remaining_upside_ratio(150, target_high=100, base_low=100) is None
+
+
+# ── envelope_upper_break (D-R42: 20MA ±20% 상단 돌파) ──
+def test_envelope_upper_break_true():
+    candles = [_c(100) for _ in range(19)] + [_c(121)]  # SMA20=101.05, upper=121.26? → use 130
+    candles = [_c(100) for _ in range(20)] + [_c(130)]  # SMA20=100, upper=120, 130>120
+    assert envelope_upper_break(candles, ma_period=20, env_pct=0.20) is True
+
+
+def test_envelope_upper_break_false_below_band():
+    candles = [_c(100) for _ in range(20)] + [_c(119)]  # SMA20≈100.9, upper≈121, 119<121
+    assert envelope_upper_break(candles, ma_period=20, env_pct=0.20) is False
+
+
+def test_envelope_upper_break_insufficient_data_false():
+    assert envelope_upper_break([_c(100)] * 5, ma_period=20) is False
+
+
+# ── disparity_5ma / disparity_yellow (D-R43) ──
+def test_disparity_5ma_value():
+    candles = [_c(100), _c(100), _c(100), _c(100), _c(130)]  # SMA5=106, (130-106)/106
+    d = disparity_5ma(candles, ma_period=5)
+    assert d is not None and abs(d - (130 - 106) / 106) < 1e-9
+
+
+def test_disparity_5ma_insufficient_none():
+    assert disparity_5ma([_c(100), _c(100)], ma_period=5) is None
+
+
+def test_disparity_yellow_true_and_false():
+    hot = [_c(100), _c(100), _c(100), _c(100), _c(130)]   # ~+22.6%
+    cool = [_c(100), _c(100), _c(100), _c(100), _c(105)]  # ~+4.0%
+    assert disparity_yellow(hot, threshold=0.1425) is True
+    assert disparity_yellow(cool, threshold=0.1425) is False
+
+
+# ── triple_factor_buy (D-R44: 엔벨 ∧ 이격 ∧ 거래대금) ──
+def _triple_candles():
+    return [_c(100) for _ in range(19)] + [_c(130)]  # SMA20=101.5→upper122.85? 130>; SMA5=106→+22.6%
+
+
+def test_triple_factor_buy_all_pass():
+    assert triple_factor_buy(_triple_candles(), day_value_won=2.0e11) is True
+
+
+def test_triple_factor_buy_fails_on_value_floor():
+    assert triple_factor_buy(_triple_candles(), day_value_won=5.0e10) is False
+
+
+def test_triple_factor_buy_fails_when_not_strong():
+    flat = [_c(100) for _ in range(20)] + [_c(101)]  # 엔벨·이격 모두 미달
+    assert triple_factor_buy(flat, day_value_won=2.0e11) is False
 
 
 # ── inert 보장: 모듈이 어떤 전략/스캐너에도 import 되지 않음 ──

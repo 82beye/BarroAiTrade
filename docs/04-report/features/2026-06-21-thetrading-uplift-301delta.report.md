@@ -9,7 +9,7 @@ tags: [report, feature/thetrading-uplift, corpus/301, status/complete]
 >
 > **Project**: BarroAiTrade · **Date**: 2026-06-21 · **Branch**: `feat/thetrading-uplift-301delta`
 > **분류**: 전부 **(c) 안전**(신규 순수함수·inert·관측전용) — **라이브 매매 동작 무변경**
-> **테스트**: 전체 **1510 passed, 10 skipped, 0 failed** (기존 1496 + 신규 14)
+> **테스트**: 전체 **1519 passed, 10 skipped, 0 failed** (기존 1496 + 신규 23)
 
 ---
 
@@ -50,10 +50,12 @@ OOS 관문(`_oos_validation.py --n 60 --seed 42`, 일봉·3분할·실비용):
 
 | 파일 | 내용 | 성격 |
 |------|------|------|
-| `backend/core/strategy/closing_bet_filters.py` | 델타 정량게이트 4종 순수함수 | 신규 +120, **inert** |
-| `backend/tests/strategy/test_closing_bet_filters.py` | 단위테스트 14건(경계·데이터부족·inert 단언) | 신규 |
+| `backend/core/strategy/closing_bet_filters.py` | 델타 정량게이트 순수함수 7종 | 신규, **inert** |
+| `backend/tests/strategy/test_closing_bet_filters.py` | 단위테스트 23건(경계·데이터부족·inert 단언) | 신규 |
 
-**함수**(반환만, 부작용 없음): `body_new_high`(R6 몸통 신고가)·`overheat_warning`(D-R24 5일전×1.6)·`liquidity_ok`(D-R29/30 1분봉≥15억∧거래량≥전일×3)·`remaining_upside_ratio`(D-R14 잔존 기대수익).
+**함수**(반환만, 부작용 없음):
+- `body_new_high`(R6 몸통 신고가)·`overheat_warning`(D-R24 5일전×1.6)·`liquidity_ok`(D-R29/30 1분봉≥15억∧거래량≥전일×3)·`remaining_upside_ratio`(D-R14 잔존 기대수익).
+- **삼박자(추가)**: `envelope_upper_break`(D-R42 20MA±20% 상단돌파)·`disparity_5ma`/`disparity_yellow`(D-R43 5일선 이격 +14.25%)·`triple_factor_buy`(**D-R44** 엔벨∧이격∧거래대금≥1000억 AND).
 
 **무영향 보장**: 어떤 전략/스캐너도 이 모듈을 import 하지 않음(`test_module_is_inert_not_imported_by_live_path`가 `signal_scanner.py`·`closing_bet.py` 소스에 `closing_bet_filters` 부재를 단언). env·config 토글조차 없음 → byte-identical.
 
@@ -61,8 +63,8 @@ OOS 관문(`_oos_validation.py --n 60 --seed 42`, 일봉·3분할·실비용):
 
 ## 4. 검증
 
-- 신규 테스트 **14 passed** (0.49s).
-- 전체 회귀 **1510 passed, 10 skipped, 0 failed** (7.77s). 기존 1496 + 신규 14, 회귀 0.
+- 신규 테스트 **23 passed** (0.60s).
+- 전체 회귀 **1519 passed, 10 skipped, 0 failed** (5.47s). 기존 1496 + 신규 23, 회귀 0.
 - 백테스트 산출: `docs/04-report/features/2026-06-18-closing-bet-intraday-ablation.json`(재실행 일치).
 
 ---

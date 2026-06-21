@@ -111,3 +111,92 @@ def remaining_upside_ratio(
     if ratio > 1.0:
         return 1.0
     return ratio
+
+
+def _sma(candles: List[OHLCV], period: int) -> Optional[float]:
+    """최근 `period`봉 종가 단순이동평균. 데이터 부족 시 None."""
+    if period <= 0 or len(candles) < period:
+        return None
+    return sum(c.close for c in candles[-period:]) / period
+
+
+def envelope_upper_break(
+    candles: List[OHLCV], ma_period: int = 20, env_pct: float = 0.20
+) -> bool:
+    """D-R42 — 엔벨로프 상단(천장) 돌파 = 초강세.
+
+    더트레이딩(V13): "20일선 엔벨로프 ±20% 상단을 뚫고 올라가는 종목 = 크게 될 놈".
+    최신 종가가 `SMA(ma_period) × (1 + env_pct)` 를 초과하면 True.
+
+    Args:
+        candles: OHLCV(오래된→최신). 최소 ma_period 필요.
+        ma_period: 이동평균 기간(기본 20).
+        env_pct: 엔벨로프 상단 비율(기본 0.20 = +20%).
+    Returns:
+        상단 돌파면 True. 데이터 부족/이평 ≤0 시 False(보수적).
+    """
+    sma = _sma(candles, ma_period)
+    if sma is None or sma <= 0:
+        return False
+    return candles[-1].close > sma * (1.0 + env_pct)
+
+
+def disparity_5ma(candles: List[OHLCV], ma_period: int = 5) -> Optional[float]:
+    """D-R43 — 5일선 이격도 = (종가 - SMA5) / SMA5.
+
+    양수=5일선 위(과열·반등탄력), 음수=아래. 호출측이 임계와 비교.
+
+    Args:
+        candles: OHLCV(오래된→최신). 최소 ma_period 필요.
+        ma_period: 기준 이동평균(기본 5).
+    Returns:
+        이격도 비율. 데이터 부족/이평 ≤0 시 None.
+    """
+    sma = _sma(candles, ma_period)
+    if sma is None or sma <= 0:
+        return None
+    return (candles[-1].close - sma) / sma
+
+
+def disparity_yellow(candles: List[OHLCV], threshold: float = 0.1425) -> bool:
+    """D-R43 — 이격도 "노란불"(5일선 +14.25% 이상) 여부.
+
+    더트레이딩(V13): "종가가 5일선 대비 14% 이상 벌어지면 노란색 표시 → 높은 곳서
+    떨어질수록 반등 큼". 이격도가 임계 이상이면 True.
+    """
+    d = disparity_5ma(candles)
+    return d is not None and d >= threshold
+
+
+def triple_factor_buy(
+    candles: List[OHLCV],
+    day_value_won: float,
+    *,
+    value_floor_won: float = 1.0e11,
+    ma_period: int = 20,
+    env_pct: float = 0.20,
+    disparity_threshold: float = 0.1425,
+) -> bool:
+    """D-R44 — 삼박자 동시충족 매수 신호 (관측 전용).
+
+    더트레이딩(V13, 영상13): **엔벨로프 상단돌파(D-R42) ∧ 이격도 노란불(D-R43)
+    ∧ 거래대금 ≥1000억(D-R44)** 세 조건 AND. "삼박자 고루 갖춘 종목만 거래".
+
+    ⚠️ inert — 판정만 반환. 호출처가 shadow 로그/백테스트 비교축으로만 사용.
+
+    Args:
+        candles: 일봉 OHLCV(오래된→최신). 최소 ma_period 필요.
+        day_value_won: 당일 거래대금(원). 보통 Σ(close×volume) 또는 외부 산출치.
+        value_floor_won: 거래대금 하한(기본 1000억=1.0e11).
+        ma_period/env_pct: 엔벨로프 파라미터(기본 20일·+20%).
+        disparity_threshold: 이격도 임계(기본 0.1425).
+    Returns:
+        세 조건 모두 충족 시 True. 하나라도 미달/산출불가 시 False(보수적).
+    """
+    if day_value_won < value_floor_won:
+        return False
+    if not envelope_upper_break(candles, ma_period=ma_period, env_pct=env_pct):
+        return False
+    if not disparity_yellow(candles, threshold=disparity_threshold):
+        return False
+    return True
