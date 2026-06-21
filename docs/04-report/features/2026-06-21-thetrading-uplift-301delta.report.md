@@ -9,7 +9,7 @@ tags: [report, feature/thetrading-uplift, corpus/301, status/complete]
 >
 > **Project**: BarroAiTrade · **Date**: 2026-06-21 · **Branch**: `feat/thetrading-uplift-301delta`
 > **분류**: 전부 **(c) 안전**(신규 순수함수·inert·관측전용) — **라이브 매매 동작 무변경**
-> **테스트**: 전체 **1519 passed, 10 skipped, 0 failed** (기존 1496 + 신규 23)
+> **테스트**: 전체 **1522 passed, 10 skipped, 0 failed** (기존 1496 + 신규 26)
 
 ---
 
@@ -99,10 +99,28 @@ OOS 관문(`_oos_validation.py --n 60 --seed 42`, 일봉·3분할·실비용):
 3. 다만 정정비용(0.90%) 기준 절대 net은 여전히 작다(+0.286%/트립). 우대요율 협의 시 net@0.55(+0.636%)로 크게 개선 → **요율이 여전히 1순위 레버**.
 - 산출: `docs/04-report/features/2026-06-21-closing-bet-triple-shadow.json`.
 
-## 7. 다음 단계
-1. ✅ (완료) `closing_bet_filters` 삼박자를 종베 백테스트에 shadow 비교축으로 연결 → **D-R43 이격도 노란불이 net 최대 기여** 확인.
-2. **(d) 제안**: 이격도 노란불(D-R43)을 종베 진입 가점/필터로 (요율 협의 후) AskUserQuestion + `barrotrade-code-surgeon`. full triple보다 이격도 단독이 우수하므로 단일 게이트부터.
-3. 요율 협의 결과 반영 후 종베 net 재평가 → 5분봉/일봉 sim 정합 → OOS → (d) 라이브 결정.
-4. 추가 seed·기간으로 삼박자 결과 robustness 확인(현재 단일 윈도우 한계).
+## 7. 이격도 노란불 게이트 (d) — config-gated 구현 (HITL 승인 후)
+
+사용자 HITL 승인(AskUserQuestion: config-gated 옵션 구현 + 임계 +14.25%)에 따라 `ClosingBetParams`에 게이트 추가:
+- `require_disparity_yellow: bool = False`(**default OFF = 현행 스캐폴드 byte-identical 보존**), `disparity_yellow_threshold: float = 0.1425`.
+- `_analyze_v2` ④-b: `require_disparity_yellow` 시 `disparity_yellow(candles, threshold)` 미충족이면 진입 거부. closing_bet 자체가 `_DEFAULT_ENABLED=False`라 **라이브 무영향**.
+- 단위테스트 +3(default-OFF parity / ON 저이격 거부 / ON 노란불 허용). 회귀 **1522 passed, 0 failed**.
+
+**end-to-end 정합 검증**(구현 게이트를 백테스트로 재실행):
+
+| 변형 | 트립 | 승률% | net@0.90 |
+|------|-----:|------:|---------:|
+| baseline | 432 | 55.8 | +0.107 |
+| **+disparity_gate (구현)** | 238 | 61.8 | **+0.405** |
+
+→ 구현 게이트가 §6 shadow의 `disp_pass`(238/61.8%/+0.405%)와 **정확히 일치** → 구현 정합성 확인.
+
+> ⚠️ 게이트는 **옵션으로만 추가**됨(default OFF). 종베 자체의 **라이브 활성**은 여전히 별도 (d) HITL(요율 협의·sim 정합·OOS 후).
+
+## 8. 다음 단계
+1. ✅ (완료) 삼박자 shadow 측정 → D-R43 이격도 최대 기여.
+2. ✅ (완료) 이격도 게이트 config-gated 구현(default-OFF) + 백테스트 정합 검증.
+3. 요율 협의 결과 반영 → 종베 net 재평가 → 5분봉/일봉 sim 정합 → OOS → **종베 라이브 + 게이트 ON** (d) 결정.
+4. 추가 seed·기간으로 이격도 게이트 robustness 확인(현재 단일 윈도우 한계).
 
 > 브랜치 `feat/thetrading-uplift-301delta`. 커밋까지 자동, **push·머지·라이브 활성은 HITL**.

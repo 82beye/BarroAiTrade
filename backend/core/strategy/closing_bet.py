@@ -24,6 +24,7 @@ from decimal import Decimal
 from typing import Any, List, Optional
 
 from backend.core.strategy.base import Strategy
+from backend.core.strategy.closing_bet_filters import disparity_yellow
 from backend.core.strategy.round_figure import resolve_sl_pct
 from backend.models.market import MarketType, OHLCV
 from backend.models.position import Position
@@ -65,6 +66,12 @@ class ClosingBetParams:
     min_atr_pct: float = 0.0              # default 0 = 비활성 (회귀 보존)
     atr_n: int = 14
     min_candles: int = 70                 # new_high_lookback + 여유
+
+    # ── 이격도 노란불 게이트 (옵션, 기본 OFF) — D-R43 (thetrading-uplift 301delta) ──
+    #   종가 vs 5일선 이격 ≥ threshold 일 때만 진입. shadow 측정: 단독 net@0.90 +0.405%
+    #   (baseline +0.107%), 승률 61.8%. default False → 현행 스캐폴드 byte-identical 보존.
+    require_disparity_yellow: bool = False
+    disparity_yellow_threshold: float = 0.1425   # 5일선 이격 +14.25% ("노란불")
 
     # ── 익절 / 청산 ──
     tp_shoot_pct: float = 0.045           # 익일 슈팅 익절 +4.5%
@@ -145,6 +152,13 @@ class ClosingBetStrategy(Strategy):
             upper_wick_ratio = (today.high - today.close) / body_abs
             if upper_wick_ratio > p.base_upper_wick_max:
                 return None
+
+        # ④-b (옵션, 기본 off) 이격도 노란불 게이트 — D-R43 (thetrading-uplift 301delta).
+        #   종가 vs 5일선 이격 ≥ threshold. shadow 측정상 종베 net edge 핵심 동인.
+        if p.require_disparity_yellow and not disparity_yellow(
+            candles, threshold=p.disparity_yellow_threshold
+        ):
+            return None
 
         cur = float(today.close)
 

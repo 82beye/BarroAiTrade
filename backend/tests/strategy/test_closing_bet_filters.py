@@ -153,13 +153,11 @@ def test_triple_factor_buy_fails_when_not_strong():
     assert triple_factor_buy(flat, day_value_won=2.0e11) is False
 
 
-# ── inert 보장: 모듈이 어떤 전략/스캐너에도 import 되지 않음 ──
-def test_module_is_inert_not_imported_by_live_path():
+# ── 경계 보장: 스캐너는 closing_bet_filters 를 직접 import 하지 않음 ──
+# (closing_bet.py 는 disparity_yellow 를 gated default-OFF 로 사용 — parity 는 test_closing_bet 참조)
+def test_scanner_does_not_import_filters_directly():
     import backend.core.scanner.signal_scanner as sc
-    import backend.core.strategy.closing_bet as cb
-    src = (sc.__file__, cb.__file__)
-    for f in src:
-        with open(f, encoding="utf-8") as fh:
-            assert "closing_bet_filters" not in fh.read(), (
-                "closing_bet_filters 가 라이브 경로에 연결됨 — inert 위반"
-            )
+    with open(sc.__file__, encoding="utf-8") as fh:
+        assert "closing_bet_filters" not in fh.read(), (
+            "스캐너가 closing_bet_filters 를 직접 참조 — 게이트는 ClosingBetParams 경유여야 함"
+        )
