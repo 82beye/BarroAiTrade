@@ -1,0 +1,161 @@
+{
+  "eval_stock_days": 148211,
+  "baseline_signals": 3427,
+  "A_full": {
+    "baseline": {
+      "trips": 3427,
+      "win": 54.2,
+      "gross": 0.908,
+      "net90": 0.008
+    },
+    "gate": {
+      "trips": 1586,
+      "win": 62.3,
+      "gross": 1.42,
+      "net90": 0.52
+    }
+  },
+  "B_threshold_sweep": {
+    "0.1": {
+      "trips": 2384,
+      "win": 57.5,
+      "gross": 1.124,
+      "net90": 0.224
+    },
+    "0.1225": {
+      "trips": 1955,
+      "win": 59.4,
+      "gross": 1.242,
+      "net90": 0.342
+    },
+    "0.1425": {
+      "trips": 1586,
+      "win": 62.3,
+      "gross": 1.42,
+      "net90": 0.52
+    },
+    "0.1625": {
+      "trips": 1271,
+      "win": 65.1,
+      "gross": 1.58,
+      "net90": 0.68
+    },
+    "0.18": {
+      "trips": 1065,
+      "win": 67.7,
+      "gross": 1.715,
+      "net90": 0.815
+    }
+  },
+  "C_seeds": {
+    "1": {
+      "baseline": {
+        "trips": 1728,
+        "win": 52.9,
+        "gross": 0.819,
+        "net90": -0.081
+      },
+      "gate": {
+        "trips": 766,
+        "win": 60.4,
+        "gross": 1.317,
+        "net90": 0.417
+      },
+      "delta_net90": 0.498
+    },
+    "2": {
+      "baseline": {
+        "trips": 1624,
+        "win": 52.0,
+        "gross": 0.794,
+        "net90": -0.106
+      },
+      "gate": {
+        "trips": 758,
+        "win": 60.7,
+        "gross": 1.347,
+        "net90": 0.447
+      },
+      "delta_net90": 0.553
+    },
+    "3": {
+      "baseline": {
+        "trips": 1702,
+        "win": 55.0,
+        "gross": 0.968,
+        "net90": 0.068
+      },
+      "gate": {
+        "trips": 803,
+        "win": 63.8,
+        "gross": 1.509,
+        "net90": 0.609
+      },
+      "delta_net90": 0.5409999999999999
+    },
+    "4": {
+      "baseline": {
+        "trips": 1654,
+        "win": 53.7,
+        "gross": 0.856,
+        "net90": -0.044
+      },
+      "gate": {
+        "trips": 784,
+        "win": 62.1,
+        "gross": 1.38,
+        "net90": 0.48
+      },
+      "delta_net90": 0.524
+    },
+    "5": {
+      "baseline": {
+        "trips": 1668,
+        "win": 54.4,
+        "gross": 0.926,
+        "net90": 0.026
+      },
+      "gate": {
+        "trips": 788,
+        "win": 62.4,
+        "gross": 1.443,
+        "net90": 0.543
+      },
+      "delta_net90": 0.517
+    }
+  },
+  "D_period": {
+    "split_date": "2026-02-04",
+    "early": {
+      "baseline": {
+        "trips": 1708,
+        "win": 53.1,
+        "gross": 0.846,
+        "net90": -0.054
+      },
+      "gate": {
+        "trips": 717,
+        "win": 62.2,
+        "gross": 1.415,
+        "net90": 0.515
+      },
+      "delta_net90": 0.5690000000000001
+    },
+    "late": {
+      "baseline": {
+        "trips": 1719,
+        "win": 55.3,
+        "gross": 0.97,
+        "net90": 0.07
+      },
+      "gate": {
+        "trips": 869,
+        "win": 62.4,
+        "gross": 1.424,
+        "net90": 0.524
+      },
+      "delta_net90": 0.454
+    }
+  },
+  "verdict": "seeds OK · period OK · sweep(net>0) OK → ROBUST"
+}
