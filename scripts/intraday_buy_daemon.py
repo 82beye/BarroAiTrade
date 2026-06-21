@@ -48,6 +48,7 @@ from backend.core.risk.live_order_gate import (
 from backend.core.backtester.market_regime import (
     MarketRegime, classify_regime, regime_weights,
 )
+from backend.core.strategy.trap_guard import TrapGuardConfig, evaluate_trap_guard
 from backend.core.supertrend_auto_trader import (
     SupertrendAutoTrader, SupertrendAutoConfig,
 )
@@ -652,6 +653,42 @@ def _zone_entry_cutoff_passed() -> bool:
         return False  # 파싱 실패 시 차단하지 않음(기존 동작 보존)
 
 
+# [2026-06-21] 6월 트랩(가짜 상승/개미 꼬시기) 진입 가드 env 토글 — 모든 값 0/미설정 →
+#   비활성(FZoneParams/GoldZoneParams 의 trap_* default 0 유지 = 기존 동작 byte-identical).
+#   진입 재검증(reval) 게이트의 분봉 analyze 에서 트랩(과확장·윗꼬리·고갭ATR) 차단.
+#   설계: backend/core/strategy/trap_guard.py. sf_zone 은 FZoneParams 상속이라 자동 적용.
+#   ※ 실제 차단 활성은 진입 동작을 바꾸므로 (d) HITL — env 설정 자체가 인간 승인 게이트
+#     (_GAP_GUARD_STRATEGIES 와 동일 정책). 활성 전 측정(shadow/백테스트) 권장.
+_TRAP_OVER_EXT_K_ATR = float(os.environ.get("BARRO_TRAP_OVER_EXT_K_ATR", "0"))
+_TRAP_OVER_EXT_BASELINE = os.environ.get("BARRO_TRAP_OVER_EXT_BASELINE", "ma").strip() or "ma"
+_TRAP_OVER_EXT_MA_PERIOD = int(os.environ.get("BARRO_TRAP_OVER_EXT_MA_PERIOD", "20"))
+_TRAP_UPPER_WICK_MAX = float(os.environ.get("BARRO_TRAP_UPPER_WICK_MAX", "0"))
+_TRAP_GAP_ATR_MULT = float(os.environ.get("BARRO_TRAP_GAP_ATR_MULT", "0"))
+_TRAP_GAP_ABS_MAX_PCT = float(os.environ.get("BARRO_TRAP_GAP_ABS_MAX_PCT", "0"))
+
+
+def _apply_trap_env(params):
+    """env BARRO_TRAP_* 를 전략 params 의 trap_* 필드에 주입. 미설정(전부 0)이면 무변경."""
+    params.trap_over_ext_k_atr = _TRAP_OVER_EXT_K_ATR
+    params.trap_over_ext_baseline = _TRAP_OVER_EXT_BASELINE
+    params.trap_over_ext_ma_period = _TRAP_OVER_EXT_MA_PERIOD
+    params.trap_upper_wick_max = _TRAP_UPPER_WICK_MAX
+    params.trap_gap_atr_mult = _TRAP_GAP_ATR_MULT
+    params.trap_gap_abs_max_pct = _TRAP_GAP_ABS_MAX_PCT
+    return params
+
+
+# [2026-06-21] 데몬 후처리 트랩필터 — 일봉 선정 단계 enforcement(전 전략, swing_38 포함).
+#   reval(5분봉)의 한계 보완: ① swing_38 미지원(5분봉 부적합) ② bar-gap proxy 로 시초갭 무력.
+#   여기선 일봉 후보 캔들(과확장·윗꼬리)과 LeaderPicker 실 flu_rate(전일比 시초갭)를 직접 사용 →
+#   _ZONE_MAX_FLU 절대갭가드와 직교 보강. 모든 env 0(미설정) → any_enabled()=False → 무동작.
+_DAEMON_TRAP = TrapGuardConfig(
+    over_ext_k_atr=_TRAP_OVER_EXT_K_ATR, over_ext_baseline=_TRAP_OVER_EXT_BASELINE,
+    over_ext_ma_period=_TRAP_OVER_EXT_MA_PERIOD, upper_wick_max=_TRAP_UPPER_WICK_MAX,
+    gap_atr_mult=_TRAP_GAP_ATR_MULT, gap_abs_max_pct=_TRAP_GAP_ABS_MAX_PCT,
+)
+
+
 def _build_reval_strategy(strategy_id: str):
     """진입 재검증용 분봉 전략 인스턴스 (분봉 min_atr 0.01)."""
     from backend.core.strategy.f_zone import FZoneStrategy, FZoneParams
@@ -660,9 +697,12 @@ def _build_reval_strategy(strategy_id: str):
     if strategy_id in ("f_zone", "sf_zone"):
         p = FZoneParams.for_intraday()
         p.min_atr_pct = _REVAL_MIN_ATR
+        _apply_trap_env(p)
         return SFZoneStrategy(p) if strategy_id == "sf_zone" else FZoneStrategy(p)
     if strategy_id == "gold_zone":
-        return GoldZoneStrategy(GoldZoneParams(min_atr_pct=_REVAL_MIN_ATR))
+        gp = GoldZoneParams(min_atr_pct=_REVAL_MIN_ATR)
+        _apply_trap_env(gp)
+        return GoldZoneStrategy(gp)
     return None
 
 
@@ -924,6 +964,17 @@ async def _scan_and_buy(
                     f"등락률 +{float(c.flu_rate):.1f}% ≥ {_ZONE_MAX_FLU}% — 갭상승 추격 차단"
                 )
                 continue
+            # [2026-06-21] 트랩가드 후처리(default-OFF) — 일봉 후보 + 실 flu_rate 로 가짜돌파/개미꼬시기
+            #   차단(전 전략, swing_38 포함). 과확장·윗꼬리·시초갭(flu_rate). env BARRO_TRAP_* 미설정→무동작.
+            if _DAEMON_TRAP.any_enabled():
+                _tb, _tr = evaluate_trap_guard(candles, _DAEMON_TRAP, flu_rate=float(c.flu_rate))
+                if _tb:
+                    ts_t = _now_kst().strftime("%H:%M:%S")
+                    print(
+                        f"  [{ts_t}][SKIP-TRAP] {c.symbol} {c.name:<14} 전략={best_strategy} "
+                        f"— 트랩가드 차단({_tr})"
+                    )
+                    continue
             # [BAR-OPS-39 P0] 진입 컷오프 — 늦은 진입(이월 후보) 차단. swing_38(다일보유)은 예외.
             #   6/11 f_zone 14:33 현대무벡스 진입 이월이 실증(st 전용 컷오프의 사각지대).
             if (_zone_entry_cutoff_passed()

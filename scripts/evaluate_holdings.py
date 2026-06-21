@@ -43,6 +43,29 @@ from backend.core.risk.holding_evaluator import (
     render_decisions_table,
 )
 from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate
+from backend.core.risk.regime_exit import RegimeExitConfig
+
+
+def _load_today_regime():
+    """daemon 이 refined_signals.json 에 저장한 '당일(KST)' 시장국면 로드.
+
+    국면 적응 청산(default-OFF)의 동적 입력. stale(전일)/부재/파싱실패 → None
+    (fail-safe: 무조정 = 기존 청산 동작). 전일 국면을 당일 청산에 오적용하지 않도록
+    timestamp 당일(KST) 검증. daemon `_save_refined_signals` 가 top-level "regime"/"timestamp" 저장.
+    """
+    try:
+        import json
+        from datetime import timedelta
+        from backend.core.backtester.market_regime import MarketRegime
+
+        data = json.loads((_DATA_DIR / "refined_signals.json").read_text(encoding="utf-8"))
+        file_date = datetime.fromisoformat(str(data.get("timestamp", ""))).date()
+        today_kst = (datetime.now(timezone.utc) + timedelta(hours=9)).date()
+        if file_date != today_kst:
+            return None
+        return MarketRegime(str(data["regime"]))
+    except Exception:
+        return None
 
 
 def _eod_force_close_disabled(force_mode: bool, env: dict | None = None) -> bool:
@@ -121,6 +144,9 @@ async def _run(args) -> int:
 
     # PolicyConfig 자동 로드 (BAR-OPS-32) — CLI default 인 경우만 override
     cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
+    # 국면 적응 청산 (default-OFF) — cfg 가 enabled=False/배수 1.0 이면 무조정.
+    regime_exit_cfg = RegimeExitConfig.from_policy_config(cfg)
+    today_regime = _load_today_regime() if regime_exit_cfg.enabled else None
     tp = args.tp if args.tp != 5.0 else cfg.take_profit_pct
     sl = args.sl if args.sl != -4.0 else cfg.stop_loss_pct
     policy = ExitPolicy(
@@ -166,6 +192,8 @@ async def _run(args) -> int:
                     partial_tp_done=pos.partial_tp_done,
                     entry_time=pos.entry_time,
                     strategy=pos.strategy,
+                    regime=today_regime,            # default-OFF 시 None (무조정)
+                    regime_exit=regime_exit_cfg,
                 )
 
     decisions = evaluate_all(holdings, policy, contexts)

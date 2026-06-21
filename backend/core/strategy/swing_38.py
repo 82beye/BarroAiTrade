@@ -23,6 +23,7 @@ import pandas as pd
 
 from backend.core.strategy.base import Strategy
 from backend.core.strategy.round_figure import resolve_sl_pct
+from backend.core.strategy.trap_guard import TrapGuardConfig, evaluate_trap_guard
 from backend.models.market import MarketType, OHLCV
 from backend.models.position import Position
 from backend.models.signal import EntrySignal
@@ -95,6 +96,26 @@ class Swing38Params:
     second_entry_size_ratio: float = 0.5  # 1차 진입 수량 × 0.5 (신호 metadata, 운영이 적용)
     second_entry_support_tolerance: float = 0.005  # 기준봉 low * (1 - 0.005) 까지 지지 인정
 
+    # 6월 트랩(가짜 상승/개미 꼬시기) 방어 가드 — config-gated, **default-OFF**.
+    # 모든 임계 0 → 기존 진입 경로 byte-identical. 설계: backend/core/strategy/trap_guard.py.
+    trap_over_ext_k_atr: float = 0.0
+    trap_over_ext_baseline: str = "ma"
+    trap_over_ext_ma_period: int = 20
+    trap_upper_wick_max: float = 0.0
+    trap_gap_atr_mult: float = 0.0
+    trap_gap_abs_max_pct: float = 0.0
+
+    def _trap_guard_config(self) -> TrapGuardConfig:
+        return TrapGuardConfig(
+            over_ext_k_atr=self.trap_over_ext_k_atr,
+            over_ext_baseline=self.trap_over_ext_baseline,
+            over_ext_ma_period=self.trap_over_ext_ma_period,
+            upper_wick_max=self.trap_upper_wick_max,
+            gap_atr_mult=self.trap_gap_atr_mult,
+            gap_abs_max_pct=self.trap_gap_abs_max_pct,
+            atr_n=self.atr_n,
+        )
+
 
 class Swing38Strategy(Strategy):
     """38스윙 — 임펄스 + Fib 0.382 되돌림 + 반등."""
@@ -121,6 +142,13 @@ class Swing38Strategy(Strategy):
         if p.min_atr_pct > 0:
             atr_pct = self._atr_pct(ctx.candles, n=p.atr_n)
             if atr_pct < p.min_atr_pct:
+                return None
+
+        # 6월 트랩(가짜 상승/개미 꼬시기) 방어 가드 (default-OFF) — 모든 임계 0 이면 no-op.
+        _trap_cfg = p._trap_guard_config()
+        if _trap_cfg.any_enabled():
+            _blocked, _reason = evaluate_trap_guard(ctx.candles, _trap_cfg)
+            if _blocked:
                 return None
 
         # BAR-OPS-09 Phase 8c: 진입 시간 게이트 — 장 후반 진입 차단 (청산 여유 부족 손실 방지).

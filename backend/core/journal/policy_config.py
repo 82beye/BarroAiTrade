@@ -9,6 +9,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 
 @dataclass
@@ -31,6 +32,17 @@ class PolicyConfig:
     partial_tp_ratio: float = 0.5         # 1차 익절 매도 비율
     hold_days_tighten: int = 5            # N일 이상 보유 시 SL 강화
     tightened_sl_pct: float = -2.0        # 장기 보유 시 강화 SL (%)
+    # 2026-06-21 — 국면 적응 청산 (default-OFF). evaluate_holdings 가 RegimeExitConfig 로 조립해
+    # PositionContext 로 전달. enabled=False 또는 배수 1.0 → 청산 무변경(byte-identical).
+    # SIDEWAYS(6월 변동성장) SL 타이트·보유 단축, BULL TP 확장. 설계: backend/core/risk/regime_exit.py.
+    # 활성화는 측정 후 (d) HITL. load() 가 known-fields-only 라 forward-compatible.
+    regime_exit_enabled: bool = False
+    regime_sideways_sl_mult: float = 1.0
+    regime_sideways_tp_mult: float = 1.0
+    regime_sideways_max_hold_days: Optional[int] = None
+    regime_bull_tp_mult: float = 1.0
+    regime_bull_sl_mult: float = 1.0
+    regime_bearish_sl_mult: float = 1.0
     history: list[dict] = field(default_factory=list)         # 변경 이력
 
     def as_dict(self) -> dict:
