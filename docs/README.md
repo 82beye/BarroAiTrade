@@ -84,6 +84,25 @@ docs/
 
 ---
 
+## 📌 문서 위치 규칙 (필수)
+
+**모든 프로젝트 문서(.md)는 반드시 `/Users/beye/workspace/BarroAiTrade/docs/` 하위에 생성한다.** repo 밖·임시 경로·홈 디렉터리에 두지 않는다(분실·미추적 방지).
+
+| 문서 유형 | 위치 |
+|-----------|------|
+| 계획(Plan) | `docs/01-plan/features/` |
+| 설계(Design) | `docs/02-design/features/` |
+| 분석(Analysis)·갭 | `docs/03-analysis/` |
+| 완료 보고·검증·OOS 리포트 | `docs/04-report/features/` |
+| 운영 런북·인프라 | `docs/operations/` (또는 `docs/05-paperclip/`) |
+| 인덱스·대시보드 | `docs/00-index/` |
+| 템플릿 | `docs/99-templates/` |
+
+- 파일명: kebab-case. `04-report/features/` 등 산출물은 날짜 프리픽스(`YYYY-MM-DD-...`) 권장.
+- 신규 문서는 관련 문서와 wikilink(`[[...]]`)로 연결한다.
+
+---
+
 ## 🎯 주요 마일스톤
 
 ### Phase 0~6 — Master Plan v2 (40 BAR) ✅ 완료
