@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>2026-06-18-closing-bet-auto-execution.design</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<hr />
+<h2 id="tags-design-featureclosing-bet-auto-strategyclosing_bet-statusdraft">tags: [design, feature/closing-bet-auto, strategy/closing_bet, status/draft]</h2>
+<h1 id="_1">자동 종가베팅(종베) 실행 전략 — 최적 타이밍 매수/매도 상세 설계</h1>
+<blockquote>
+<p><strong>연관</strong>: [[2026-06-17-thetrading-methodology-uplift.design|방법론 설계]] · [[../../04-report/features/2026-06-18-closing-bet-validation.report|검증 리포트(OOS)]]
+<strong>Project</strong>: BarroAiTrade · <strong>Date</strong>: 2026-06-18 · <strong>Status</strong>: Draft (설계만 — <strong>라이브 미구현</strong>)</p>
+<p><strong>★활성화 게이트(절대 조건)</strong>: 이 자동 실행은 <strong>수동 테스트로 종가진입 종베의 net 수익(비용 0.9% 차감 후 양(+))이 1~2주 확인된 뒤에만</strong> 구현·활성화한다. 현재 백테스트는 브레이크이븐 추정 — 미확인 상태로 실자본 자동매매 금지.</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 목표 &amp; 현재 가진 것</h2>
+<p><strong>목표</strong>: 종베를 "15:00~15:20 최적 진입 → 익일 아침 트레일링 청산"으로 <strong>자동 실행</strong>. 사용자가 다른 전략을 모두 중지했으므로 종베 전용 운영.</p>
+<p><strong>이미 구현됨(재사용)</strong>:
+- <code>closing_bet_alert_daemon.scan_buy</code>: 주도주 선정 + 일봉(신고가·장대양봉) + <strong>5분봉+money_flow 게이트</strong> + ctx 주입 → 종베 매수 시그널 산출. <strong>(알림만, 주문 X)</strong>
+- <code>evaluate_holdings.py:90</code>: 종베 보유분 <strong>강제청산/평가 제외</strong>(수동관리 전용) → 자동 종베는 <strong>전용 매도 모니터</strong>가 필요(일반 청산엔 안 걸림).
+- <code>_scan_and_buy</code>의 주문 실행부: <code>LiveOrderGate.place_buy</code>(dry_run·일일손실·재시도) — 매수 주문 재사용 대상.
+- <code>STRATEGY_EXIT_PROFILES["closing_bet"]</code>(min1/max3), <code>closing_bet_positions.json</code>(포지션 추적), 타 전략 재진입 차단(완료).</p>
+<p><strong>신규 구현(활성화 단계)</strong>: ①매수 시그널 → <strong>실주문 경로</strong>(현재 알림→주문) ②<strong>익일 아침 트레일링 매도 모니터</strong>(전용).</p>
+<hr />
+<h2 id="2">2. 매수 — 최적 진입 타이밍</h2>
+<h3 id="21-scan_buy">2.1 진입 조건 (검증된 코어, 이미 scan_buy에 존재)</h3>
+<ul>
+<li><strong>시간창</strong>: 15:00~15:20 KST.</li>
+<li><strong>선정</strong>: 거래대금 주도주(top N) 중 <strong>신고가 돌파 + 장대양봉</strong>(몸통 ≥5%, 윗꼬리/몸통 ≤1.0).</li>
+<li><strong>분봉 자금유입 게이트(ON)</strong>: 오전(09:00~11:30)+오후(13:00~15:20) 거래대금 → BOTH/PM_ONLY 통과, <strong>오전유입후死 차단</strong>.</li>
+<li>(zone 게이트는 검증서 악화 확인 → <strong>OFF 유지</strong>.)</li>
+</ul>
+<h3 id="22">2.2 ★최적 진입 미세타이밍 (신규)</h3>
+<p>종가 페이드(15:00 강했다가 종가에 무너짐)를 피하려고 <strong>창 안에서 늦게 확정 진입</strong>:
+- <code>entry_confirm_time = 15:15</code> (기본): <strong>15:15 이후 첫 적격 봉</strong>에서만 진입. 15:00~15:15 동안 신고가·장대양봉·money_flow가 <strong>유지되는지 확인</strong> 후 진입(오후 지지 확인 = 방법론 "오후에 돈 들어오면 산다").
+- 진입가 ≈ 그 시점 현재가(종가 근접).
+- <strong>분할 vs 단일</strong>: 동시호가 부분체결 평단왜곡(sync-loss) 회피 위해 <strong>기본 단일 시장가</strong>(limit_up_chase single_tranche 교훈). 옵션으로 15:12+15:18 2분할.</p>
+<h3 id="23">2.3 사이징 (소액 시작)</h3>
+<ul>
+<li><code>max_per_position = 0.02~0.03</code>(2~3%), <strong>동시 1~2종</strong>, 종베 전용 carry 한도 10%.</li>
+<li><code>LiveOrderGate</code> 재사용(일일손실 한도·재시도·dry_run).</li>
+</ul>
+<hr />
+<h2 id="3">3. 매도 — 트레일링 (아침 고점 추종) ★사용자 선택</h2>
+<p>익일 아침(09:00~10:00) 전용 모니터가 1~3분 폴링하며 다음 상태머신을 돈다:</p>
+<pre><code>상태: armed(트레일 가동 여부), peak(arm 이후 최고가)
+매 폴링(현재가 cur):
+  ① 하드 손절:  cur ≤ entry×(1−sl_pct)        → 즉시 매도(&quot;손절&quot;)
+  ② 갭하락 가드: 시초 갭 ≤ −gap_down_pct        → 즉시 매도(&quot;갭하락&quot;)
+  ③ arm:  not armed AND cur ≥ entry×(1+tp_arm) → armed=True, peak=cur   (트레일 가동)
+  ④ trail: armed → peak=max(peak,cur);
+           cur ≤ peak×(1−trail_offset)          → 매도(&quot;트레일 청산&quot;)
+  ⑤ 정산: 시각 ≥ morning_force_time(10:00)      →
+           armed면 시장가 매도(이익 잠금) / 미armed면 시장가 매도(&quot;10시 정산&quot;)
+</code></pre>
+<p><strong>파라미터(대형주 기본)</strong>:
+| 항목 | 기본값 | 의미 |
+|------|--------|------|
+| <code>tp_arm_pct</code> | 2.0% | +2% 도달 시 트레일 가동(대형주 정석) |
+| <code>trail_offset_pct</code> | 1.0% | arm 후 고점 대비 −1% 하락 시 청산 |
+| <code>sl_pct</code> | 3.0% | 하드 손절 (또는 0.618 이탈 중 보수적) |
+| <code>gap_down_pct</code> | 3.0% | 시초 갭하락 즉시 손절 |
+| <code>morning_window</code> | 09:00~10:00 | 트레일 모니터 구간 |
+| <code>morning_force_time</code> | 10:00 | 미청산 시 시장가 정산("10시까지 정산") |
+| <code>max_hold_days</code> | 1 (옵션 3) | 기본 1박. D1~D3 모드 시 매일 아침 트레일 반복 |</p>
+<p><strong>트레일 효과</strong>: +2%만 먹고 끝나는 고정TP와 달리, 아침 슈팅이 +4%·+5%로 이어지면 고점−1%까지 따라가 <strong>업사이드를 더 포착</strong>. 단 슈팅이 +2%서 꺾이면 +1% 근처 청산(고정TP보다 약간 적음) — 평균적으로 아침 연속성(OOS 엣지 원천)을 더 먹는 설계.</p>
+<blockquote>
+<p>주의: 종베는 <code>evaluate_holdings</code>에서 제외돼 있으므로 이 <strong>전용 모니터가 유일한 자동 매도 경로</strong>. 일반 청산과 충돌 없음.</p>
+</blockquote>
+<hr />
+<h2 id="4">4. 자동 실행 배선 (활성화 단계 구현)</h2>
+<table>
+<thead>
+<tr>
+<th>단계</th>
+<th>무엇</th>
+<th>재사용</th>
+<th>신규</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>매수</strong></td>
+<td>15:00~15:20 → scan_buy 시그널 → <strong>실주문</strong></td>
+<td>scan_buy(시그널)·<code>LiveOrderGate.place_buy</code>·<code>closing_bet_positions.json</code> 등록</td>
+<td>시그널→주문 연결 함수(<code>_closing_bet_buy</code>), 진입확정 15:15 게이트</td>
+</tr>
+<tr>
+<td><strong>매도</strong></td>
+<td>09:00~10:00 전용 트레일 모니터 → 실주문</td>
+<td><code>_live_price</code>·<code>LiveOrderGate</code>(매도)·포지션파일</td>
+<td>트레일 상태머신(<code>_closing_bet_sell_monitor</code>)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>cron</strong>(기존 4건 형식): 매수 <code>0,5,10,15,18 15 * * 1-5</code>(15:15 확정 진입), 매도 <code>*/2 9 * * 1-5</code>(09:00~09:59 2분폴링) + <code>0 10 * * 1-5</code>(10:00 정산).</li>
+<li><strong>격리</strong>: 다른 전략 미가동(사용자 중지)이라 충돌 없음. 종베 전용 데몬/스크립트로 운영.</li>
+<li><strong>dry_run 기본</strong>: <code>--no-dry-run</code> 일 때만 실주문(알림 데몬 → 주문 데몬 승격은 명시 플래그).</li>
+</ul>
+<hr />
+<h2 id="5">5. 안전 게이트 &amp; 활성화 절차</h2>
+<ol>
+<li><strong>수동 수익 확인(전제)</strong>: 알림 데몬으로 1~2주 → 진입/청산 기록 → <strong>net(비용 0.9% 차감) 양(+)</strong> 확인. 음(−)/브레이크이븐이면 자동화 보류(수수료 협의·진입방식 재검토로 회귀).</li>
+<li><strong>소액 자동(1차)</strong>: <code>max_per_position</code> 2%, 동시 1종, <code>--no-dry-run</code>. 1~2주 실측 모니터(<code>_daily_strategy_audit</code>·<code>verify_eod_data</code>).</li>
+<li><strong>비중 확대(2차)</strong>: 실측 net 양(+)·체결 슬리피지 허용범위 확인 후 비중 단계 상향.</li>
+<li><strong>롤백</strong>: env/플래그로 즉시 dry_run 복귀. 실측 승률·트레일 슬립이 OOS와 괴리되면 중단.</li>
+</ol>
+<hr />
+<h2 id="6-config-gating">6. config-gating &amp; 신규 파라미터</h2>
+<p><code>ClosingBetParams</code>/신규 <code>ClosingBetAutoConfig</code>(dataclass)에 <strong>기본 보수값</strong>:
+- 진입: <code>entry_confirm_time=15:15</code>, <code>single_tranche=True</code>.
+- 트레일: <code>tp_arm_pct=2.0</code>, <code>trail_offset_pct=1.0</code>, <code>sl_pct=3.0</code>, <code>gap_down_pct=3.0</code>, <code>morning_force_time=10:00</code>, <code>max_hold_days=1</code>.
+- 사이징: <code>max_per_position=0.02</code>, <code>max_concurrent=1</code>, <code>carry_limit_ratio=0.10</code>.
+- 실행: <code>dry_run=True</code>(기본), 활성 시 <code>--no-dry-run</code>.</p>
+<p>모두 env override(기존 <code>BARRO_*</code> 패턴). 실거래 숫자 변경은 <code>barrotrade-code-surgeon</code> 위임(HITL).</p>
+<hr />
+<h2 id="7">7. 구현 단계 (수동 수익 확인 후)</h2>
+<ol>
+<li><code>ClosingBetAutoConfig</code> + 진입확정(15:15)·트레일 파라미터.</li>
+<li><code>_closing_bet_buy()</code> — scan_buy 시그널 → <code>LiveOrderGate.place_buy</code> + 포지션 등록(entry_date·entry_price). default dry_run.</li>
+<li><code>_closing_bet_sell_monitor()</code> — 트레일 상태머신(§3) → <code>LiveOrderGate</code> 매도. default dry_run.</li>
+<li>cron 3줄(매수 확정·아침 트레일·10시 정산).</li>
+<li>테스트: 상태머신 단위테스트(arm/trail/SL/gap/force 경로), dry_run 통합.</li>
+<li>활성화: 소액 <code>--no-dry-run</code> → 모니터 → 확대.</li>
+</ol>
+<hr />
+<h2 id="8">8. 리스크</h2>
+<ul>
+<li><strong>종가진입 엣지 미확인</strong>: OOS PASS는 익일시초 진입 변형 → 종가진입은 브레이크이븐 추정. <strong>수동 수익 확인이 절대 전제.</strong></li>
+<li><strong>오버나잇 갭</strong>: 익일 시초 갭하락(가드 −3%로 1차 방어, 그래도 갭은 종베 최대 리스크).</li>
+<li><strong>트레일 휩쏘</strong>: 변동성 큰 아침에 trail_offset 1%가 너무 타이트하면 조기청산 → 파라미터 튜닝(측정 후).</li>
+<li><strong>단일 시장가 슬리피지</strong>: 종가 동시호가/아침 시장가 체결 슬립 → 실측으로 OOS 가정 재현 여부 확인.</li>
+<li><strong>데이터 의존</strong>: 이브닝 파이프라인 회귀(6/15·6/18) 지속 시 실측 모니터 불가 → P0 운영 복구 선행.</li>
+</ul>
+</body>
+</html>
