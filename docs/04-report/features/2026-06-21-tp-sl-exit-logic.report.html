@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>2026-06-21-tp-sl-exit-logic.report</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<hr />
+<h2 id="tags-report-exit-logic-tp-sl-audit-strategyall-statusfinal">tags: [report, exit-logic, tp-sl, audit, strategy/all, status/final]</h2>
+<h1 id="tpsl">기존 시스템 TP/SL 수익률 청산 로직 — 코드 감사 리포트</h1>
+<blockquote>
+<p><strong>Project</strong>: BarroAiTrade · <strong>Date</strong>: 2026-06-21 · <strong>Status</strong>: Final (read-only 코드 감사, 파일:라인 근거)
+<strong>목적</strong>: 자동매매 시스템에 이미 구현돼 있는 익절(TP)/손절(SL)·트레일링·시간청산 등 <strong>수익률 청산 로직 전체</strong>를 코드 기준으로 정리. 종베(closing_bet) 고도화·비용 정정 논의의 토대.
+<strong>연관</strong>: [[2026-06-18-closing-bet-auto-execution.design]] · <code>docs/operations/strategy-restart-toggles.md</code></p>
+</blockquote>
+<hr />
+<h2 id="0-executive-summary">0. Executive Summary — 한 줄 결론</h2>
+<p>청산 로직은 <strong>두 세계로 분리</strong>돼 있고, 같은 전략이라도 레이어마다 SL 숫자가 다르다.</p>
+<table>
+<thead>
+<tr>
+<th>세계</th>
+<th>코드</th>
+<th>SL 예(f_zone)</th>
+<th>기준</th>
+<th>실제 작동</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>백테스트 세계</strong></td>
+<td><code>ExitEngine</code> + 전략 <code>exit_plan()</code></td>
+<td><strong>−2%</strong></td>
+<td>분봉 close</td>
+<td>시뮬레이터 전용</td>
+</tr>
+<tr>
+<td><strong>실거래 세계</strong></td>
+<td><code>HoldingEvaluator</code>(STRATEGY_EXIT_PROFILES)</td>
+<td><strong>−4%</strong></td>
+<td>브로커 평가손익률(gross)</td>
+<td>★라이브 매도 지배</td>
+</tr>
+</tbody>
+</table>
+<p><strong>핵심 발견 3가지:</strong>
+1. <strong>ExitEngine은 라이브에서 호출되지 않는다</strong>(데몬 4개 모두 참조 0건, <code>live_trading.py:4</code>에 "설계 구상"으로만 남고 미실장). 백테스트에서 본 SL −2%는 실거래에 적용되지 않는다.
+2. <strong>실거래 SL이 백테스트보다 2~2.5%p 더 너그럽다</strong>(f/sf/gold: −4%). 의도된 2차 안전망(<code>holding_evaluator.py:80-94</code>)이지만, 백테스트 손절폭을 실거래 손실폭으로 해석하면 안 된다.
+3. <strong>TP/SL 임계가 전부 gross(비용 미차감) 기준</strong>이다. 왕복 비용(모델 0.55% / 실측 역산 ~0.9%)은 사후 audit에서만 차감 → 한계 셋업은 gross 흑자·net 적자가 구조적으로 발생.</p>
+<hr />
+<h2 id="1-6">1. 청산 트리거 6종 &amp; 평가 우선순위</h2>
+<p><code>ExitEngine.evaluate</code>(<code>backend/core/execution/exit_engine.py:24-164</code>)와 라이브 <code>HoldingEvaluator.evaluate_all</code>(<code>backend/core/risk/holding_evaluator.py:262-417</code>)이 공유하는 평가 순서:</p>
+<table>
+<thead>
+<tr>
+<th>순위</th>
+<th>트리거</th>
+<th>동작</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>max_hold_days</strong> 도달</td>
+<td>전량 강제 청산(TIME_EXIT)</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>min_hold_days</strong> 미달</td>
+<td>모든 청산 평가 <strong>차단</strong>(고점만 갱신)</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>time_exit</strong></td>
+<td>시각 도달 시 전량(예: 14:50 정규장 청산)</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Stop Loss</strong></td>
+<td>trail SL &gt; breakeven SL &gt; 시간단계 SL &gt; 고정 SL 중 가장 보수적 채택</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Take Profit</strong></td>
+<td>가격 단계별 <strong>분할</strong> 청산(오름차순)</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>breakeven_trigger</strong></td>
+<td>TP1 발동 <strong>후에만</strong> SL을 진입가+α로 상향</td>
+</tr>
+</tbody>
+</table>
+<p>SL 결정 우선순위 근거: <code>exit_engine.py:81-102</code>.</p>
+<hr />
+<h2 id="2-exitplan-dataclass">2. 공통 엔진 구조 — <code>ExitPlan</code> dataclass</h2>
+<p><code>backend/models/strategy.py:139-210</code> (frozen dataclass):</p>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>의미</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>take_profits</code></td>
+<td><code>TakeProfitTier(price=절대가, qty_pct=수량비율)</code> 리스트, 최대 3단 분할익절. 가격 자동 오름차순 정렬(<code>strategy.py:177</code>)</td>
+</tr>
+<tr>
+<td><code>stop_loss</code></td>
+<td><code>fixed_pct</code> + 선택적 <code>trailing_pct</code> + <code>time_stages</code>(예: 2분 −1.5% / 5분 −2% / 이후 −2.5%)</td>
+</tr>
+<tr>
+<td><code>time_exit</code></td>
+<td>강제 시간청산 시각(예: <code>dtime(14,50)</code>)</td>
+</tr>
+<tr>
+<td><code>breakeven_trigger</code></td>
+<td>TP1 도달 후 SL을 <code>진입가×(1+trigger)</code>로 상향(이익 잠금)</td>
+</tr>
+<tr>
+<td><code>trail_stages</code></td>
+<td>5단계 변동성 트레일링(아래)</td>
+</tr>
+<tr>
+<td><code>min_hold_days</code> / <code>max_hold_days</code></td>
+<td>보유기간 게이트(swing_38만 활성)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>트레일링 기본값</strong> <code>TRAIL_STAGES_AITRADE</code>(<code>strategy.py:802-808</code>) — 수익 클수록 타이트하게 추종:</p>
+<table>
+<thead>
+<tr>
+<th>peak 수익률</th>
+<th>청산선</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>+5% ↑</td>
+<td>peak × 0.99 (−1%)</td>
+</tr>
+<tr>
+<td>+4% ↑</td>
+<td>peak × 0.988 (−1.2%)</td>
+</tr>
+<tr>
+<td>+3% ↑</td>
+<td>peak × 0.985 (−1.5%)</td>
+</tr>
+<tr>
+<td>+2% ↑</td>
+<td>peak × 0.98 (−2%)</td>
+</tr>
+<tr>
+<td>+1.5% ↑</td>
+<td>peak × 0.975 (−2.5%)</td>
+</tr>
+</tbody>
+</table>
+<p>상태머신: <code>high_water_mark</code>(peak)는 상향만, <code>trail_sl_for_peak()</code>이 peak 기준 offset 청산가 산출(<code>strategy.py:148-209</code>). <strong>백테스트 기본 ON</strong>(<code>intraday_simulator.py:650-651</code> <code>_scaled_exit_plan</code>).</p>
+<hr />
+<h2 id="3-tpsl-3">3. 전략별 TP/SL 숫자 — 3개 레이어 비교</h2>
+<p>같은 전략이라도 <strong>레이어마다 SL이 다르다.</strong> ★표시가 <strong>실거래를 실제로 지배</strong>하는 값.</p>
+<table>
+<thead>
+<tr>
+<th>전략</th>
+<th>전략 native <code>exit_plan()</code> (백테스트)</th>
+<th>★라이브 HoldingEvaluator</th>
+<th>실거래 청산 주체</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>f_zone</strong></td>
+<td>TP +3%/+5%, <strong>SL −2%</strong>, 14:50, BE +1.5%</td>
+<td>TP 5%, partial 3%, <strong>SL −4%</strong>, trail 3.5/1.0, BE 2.5</td>
+<td>HoldingEvaluator</td>
+</tr>
+<tr>
+<td><strong>sf_zone</strong></td>
+<td>TP +3%/+5%/+7%(ATR동적), <strong>SL −1.5%</strong>, 14:50, BE +1%</td>
+<td>TP 7%, partial 3%, <strong>SL −4%</strong>, trail 3.0/1.5, BE 2.0</td>
+<td>HoldingEvaluator</td>
+</tr>
+<tr>
+<td><strong>gold_zone</strong></td>
+<td>TP +2%/+4%, <strong>SL −1.5%</strong>, 14:50, BE +1%</td>
+<td>TP 4%, partial 2%, <strong>SL −4%</strong>, trail 3.0/1.0, BE 2.5</td>
+<td>HoldingEvaluator</td>
+</tr>
+<tr>
+<td><strong>swing_38</strong></td>
+<td>TP +20%/+50%, <strong>SL −15%</strong>, min3/max20, BE +10%</td>
+<td>TP 50%, partial 20%, <strong>SL −15%</strong>, trail 20/5, BE 10</td>
+<td>HoldingEvaluator (값 일치)</td>
+</tr>
+<tr>
+<td><strong>supertrend</strong></td>
+<td>TP 없음(트레일만), SL −1~−8% ATR trail</td>
+<td>— (HoldingEvaluator 제외)</td>
+<td><strong>자체 트레이더</strong>(시그널 기반)</td>
+</tr>
+<tr>
+<td><strong>limit_up_chase</strong></td>
+<td>—</td>
+<td>— (HoldingEvaluator 제외)</td>
+<td><strong>자체 트레이더</strong>(Runner+EOD)</td>
+</tr>
+<tr>
+<td><strong>closing_bet(종베)</strong></td>
+<td>TP +4.5%(대형 +2%), SL −3% or fib0.618, 익일10:00, max3</td>
+<td>(정의 존재하나 평가 제외)</td>
+<td><strong>알림 전용 / 수동</strong></td>
+</tr>
+<tr>
+<td>(보조) ob_scalp</td>
+<td>TP=비용커버+2틱, SL −3틱, 15:10</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>(보조) scalping_consensus</td>
+<td>TP +1.5%/+3%, SL −1%, 14:50</td>
+<td>—</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>파일:라인 근거 — f_zone <code>f_zone.py:317-338</code> / sf_zone <code>sf_zone.py:58-83</code> / gold_zone <code>gold_zone.py:232-246</code> / swing_38 <code>swing_38.py:260-273</code> / closing_bet <code>closing_bet.py:70-77,181,303-332</code> / supertrend <code>supertrend.py:267-499</code> / 라이브 프로파일 <code>holding_evaluator.py:99-163</code>.</p>
+</blockquote>
+<p><strong>핵심 격차</strong>: f/sf/gold는 백테스트에서 −1.5~−2%로 손절되지만 <strong>실거래는 −4%까지 버틴다</strong>. <code>holding_evaluator.py:80-94</code>에 "ExitEngine 누락·분봉 fetch 실패 대비 2차 안전망"으로 의도 명시. swing_38만 −15%로 일치.</p>
+<hr />
+<h2 id="4-3">4. 실거래를 실제로 지배하는 3개 청산 경로</h2>
+<p><strong>ExitEngine은 백테스트 전용</strong>(grep 결과 <code>intraday_simulator.py:22,330</code>·테스트만 import; <code>intraday_buy_daemon.py</code>·<code>evaluate_holdings.py</code>·<code>run_telegram_bot.py</code>·<code>supertrend_auto_trader.py</code>·<code>limit_up_chase_trader.py</code> 모두 참조 0건). 실거래 매도는 아래 3경로:</p>
+<h3 id="1-fsfgoldswing_38-holdingevaluator">경로 1 — 일반 단타(f/sf/gold/swing_38): HoldingEvaluator</h3>
+<p><code>scripts/evaluate_holdings.py</code>(cron) → <code>evaluate_all()</code>(<code>holding_evaluator.py:171</code>) → 브로커 <code>kt00018</code> <strong>평가손익률(prft_rt, gross)</strong>로 STRATEGY_EXIT_PROFILES SL(−4%)·TP·트레일·분할익절 판정 → <code>LiveOrderGate.place_sell</code>(<code>evaluate_holdings.py:261-262</code>).</p>
+<h3 id="2-supertrend-holdingevaluator">경로 2 — supertrend: 자체 트레이더 (HoldingEvaluator 제외)</h3>
+<p><code>backend/core/supertrend_auto_trader.py:309-395</code>. 우선순위: Hard Stop(기본 OFF) → Trail(고점−3×ATR) → 이월 갭스톱(−3%) → TP(+5%) → 5분봉 <strong>Supertrend SELL 시그널</strong>(2봉) → Runner. <strong>TP 없는 순수 트레일/시그널 전략.</strong> 제외 근거: <code>evaluate_holdings.py:310-311</code> <code>--exclude-strategy supertrend</code>.</p>
+<h3 id="3-limit_up_chase-holdingevaluator">경로 3 — limit_up_chase(상따): 자체 트레이더 (HoldingEvaluator 제외)</h3>
+<p><code>backend/core/limit_up_chase_trader.py:175-233</code>. EOD 강제청산(15:15) → Trail → Hard Stop → <strong>Runner 강제 ON</strong>(고점추종) → TP → 시초갭 부분익절.</p>
+<hr />
+<h2 id="5">5. 수익률·비용 반영 — 구조적 한계</h2>
+<ul>
+<li><strong>라이브 TP/SL 임계는 전부 gross(수수료·세금 미차감) 기준.</strong> 브로커 평가손익률을 그대로 비교(<code>holding_evaluator.py:353</code>). 시장가 체결 비용은 예측 불가라 임계에 미반영.</li>
+<li><strong>net 수익률은 사후 audit에서만 계산</strong>: <code>_daily_strategy_audit.py:44-116</code> FIFO 왕복 손익에서 차감. 비용 모델 = 편도 수수료 <strong>0.175%</strong>(<code>trading_costs.py:24</code> <code>COMMISSION_RATE</code>) + 매도세 <strong>0.20%</strong>(<code>:26</code>) → <strong>왕복 0.55%</strong>(<code>ROUND_TRIP_COST_RATE</code>). env <code>BARRO_COMMISSION_RATE</code>로 오버라이드.</li>
+<li><strong>함의</strong>: TP +3% 익절도 비용 0.55%(실측 역산 ~0.9%) 차감 후 net이 그만큼 줄어든다. <strong>임계가 비용을 고려하지 않아 gross 흑자·net 적자</strong>가 한계 셋업에서 발생(메모리상 "4일 연속 비용이 손익을 결정"한 구조와 동일).</li>
+<li><strong>LiveOrderGate</strong>(<code>live_order_gate.py:155-204</code>): SL 매도는 일일손실 한도를 <strong>무조건 통과</strong>(손절은 막지 않음), 단 <code>LIVE_TRADING_ENABLED</code>·dry_run·일일매수 한도는 적용.</li>
+</ul>
+<hr />
+<h2 id="6-vs">6. 전역 정책 vs 전략별 프로파일</h2>
+<p><code>data/policy.json</code>(현재 운영값): <code>stop_loss_pct −2.0%</code>, <code>take_profit 5.0%</code>, <code>daily_loss_limit −100%</code>(사실상 OFF), <code>daily_max_orders 300</code>, <code>max_per_position 10%</code>. <code>PolicyConfig</code> 기본값은 SL −4.0%(<code>policy_config.py:17</code>)·daily_loss_limit −3.0%. evaluate_holdings는 CLI <code>--tp/--sl</code> 미지정 시 policy.json 로드하되, <strong>전략을 알면 STRATEGY_EXIT_PROFILES(−4%)가 우선</strong>하고 policy.json은 force-mode/fallback(<code>evaluate_holdings.py:123-136</code>).</p>
+<hr />
+<h2 id="7-closing_bet">7. 종베(closing_bet)의 위치</h2>
+<p>종베는 <strong>모든 자동 청산에서 완전 제외</strong>(<code>evaluate_holdings.py:90-96</code>이 <code>closing_bet_positions.json</code>으로 필터). 현재 <strong>알림 전용</strong>이며, §3의 종베 파라미터(TP +4.5%/대형 +2%, SL −3% or fib0.618, 익일 10:00, max3)는 <code>closing_bet.py</code>에 <strong>정의만 존재</strong>·라이브 자동집행 미연결. 자동 종베 설계의 트레일링 청산은 이 기존 인프라가 아니라 <strong>종베 전용 신규 모니터</strong>로 가게 설계됨([[2026-06-18-closing-bet-auto-execution.design]]).</p>
+<hr />
+<h2 id="8">8. 주목할 점 (시사점)</h2>
+<ol>
+<li><strong>백테스트 SL ≠ 라이브 SL</strong> (f/sf/gold: −2% vs −4%). 백테스트 손절 결과를 실거래 손실폭으로 읽으면 안 됨 — 실거래는 2배 더 깊게 버팀.</li>
+<li><strong>ExitEngine(정밀 분봉 엔진) 미실장.</strong> 실거래는 시간단위 브로커 평가손익률 폴링이라, 장중 분봉 급락 시 −4% 도달 전 실제 체결가가 더 미끄러짐(메모리상 손절슬립 평균 −1.3%p와 일치).</li>
+<li><strong>TP/SL이 gross 기준</strong> → 비용(왕복 0.55~0.9%)이 임계에 미반영. 타이트한 TP(+1.5~+3%)일수록 net 잠식 비율 큼.</li>
+<li><strong>전략마다 청산 주체가 제각각</strong>(HoldingEvaluator / supertrend 자체 / limit_up_chase 자체 / 종베 수동) — 단일 청산 엔진 아님.</li>
+</ol>
+<hr />
+<h2 id="9">9. 후속 개선 후보 (참고 — 본 리포트는 감사만, 변경 없음)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>후보</th>
+<th>분류</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>백테스트−라이브 SL 정합(또는 ExitEngine 라이브 실장)</td>
+<td>(d) 실거래 파라미터</td>
+<td>HITL — 손실폭 직접 변경</td>
+</tr>
+<tr>
+<td>2</td>
+<td>TP/SL 임계를 net 기준으로(비용 가산)</td>
+<td>(d) 실거래 파라미터</td>
+<td>HITL — 선정/청산 동작 변경</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>COMMISSION_RATE</code> 실측 2배 과소 정정(0.00175→0.0035)</td>
+<td>(d) 실거래 파라미터</td>
+<td>HITL — 메모리 기존 발견, code-surgeon 위임 준비됨</td>
+</tr>
+<tr>
+<td>4</td>
+<td>청산 주체 분산 구조 문서화(운영 RUNBOOK)</td>
+<td>(c) 안전 개선</td>
+<td>자동 구현 가능</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>실거래 숫자 변경(1~3)은 <code>barrotrade-code-surgeon</code> 위임 + AskUserQuestion 승인 후에만((d) HITL). 본 리포트는 <strong>감사 보고이며 어떤 청산 파라미터도 변경하지 않음.</strong></p>
+</blockquote>
+</body>
+</html>
