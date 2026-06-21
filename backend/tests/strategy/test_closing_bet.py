@@ -117,6 +117,105 @@ class TestClosingBetEntry:
         assert sig is not None and sig.signal_type == "closing_bet"
 
 
+def _near_high_candles(n: int = 80, body: float = 0.06, prior_high_mult: float = 1.15) -> list[OHLCV]:
+    """직전 N-1봉 고점 = price×prior_high_mult, 당일은 윗꼬리 없는 +body% 장대양봉.
+
+    당일 고점(=종가)이 직전 고점보다 낮은 '전고점 근접(미돌파)' 케이스. near-high 모드
+    (new_high_tolerance>0) 검증용.
+    """
+    base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    out: list[OHLCV] = []
+    price = 100_000.0
+    for i in range(n - 1):
+        out.append(OHLCV(
+            symbol="TEST",
+            timestamp=base_time.replace(day=(i % 27) + 1, month=((i // 27) % 12) + 1),
+            open=price, high=price * prior_high_mult, low=price * 0.99,
+            close=price, volume=1_000_000.0, market_type=MarketType.STOCK,
+        ))
+    open_px = price
+    close_px = open_px * (1 + body)
+    out.append(OHLCV(
+        symbol="TEST", timestamp=base_time.replace(day=28, month=2),
+        open=open_px, high=close_px, low=open_px * 0.99,   # 윗꼬리 없음(high=close)
+        close=close_px, volume=3_000_000.0, market_type=MarketType.STOCK,
+    ))
+    return out
+
+
+class TestClosingBetShinjeongjaeFilters:
+    """신정재 종목선정 보강 게이트 — 전부 default-OFF parity + ON gating."""
+
+    # ── A. 전고점 이격(near-high) = new_high_tolerance 재사용 ──
+    def test_near_high_default_rejects_non_breakout(self):
+        """default(new_high_tolerance=0): 전고점 미돌파(이격 ~7.8%) 장대양봉 → None."""
+        s = ClosingBetStrategy()
+        assert s._analyze_v2(_ctx(_near_high_candles())) is None
+
+    def test_near_high_tolerance_accepts_near(self):
+        """new_high_tolerance=0.08: 전고점 이격 ≤8% 근접이면 신고가 미돌파라도 신호."""
+        s = ClosingBetStrategy(ClosingBetParams(new_high_tolerance=0.08))
+        sig = s._analyze_v2(_ctx(_near_high_candles()))
+        assert sig is not None and sig.signal_type == "closing_bet"
+
+    # ── B. 기간조정 게이트 ──
+    def test_consolidation_off_is_parity(self):
+        s = ClosingBetStrategy()
+        assert s._analyze_v2(_ctx(_candles(80, 0.07, True))) is not None
+
+    def test_consolidation_on_rejects_short(self):
+        """조정 경과봉(≤59) 미달하는 min_days=70 → 차단."""
+        s = ClosingBetStrategy(ClosingBetParams(
+            consolidation_min_days=70, consolidation_lookback=60))
+        assert s._analyze_v2(_ctx(_candles(80, 0.07, True))) is None
+
+    # ── C. 상대 거래대금 급증 (당일 vol 3e6 vs 평균 1e6 = ~3.2배) ──
+    def test_rel_volume_off_is_parity(self):
+        s = ClosingBetStrategy()
+        assert s._analyze_v2(_ctx(_candles(80, 0.07, True))) is not None
+
+    def test_rel_volume_on_passes_surge(self):
+        s = ClosingBetStrategy(ClosingBetParams(
+            rel_volume_lookback=20, rel_volume_min_mult=2.0))
+        assert s._analyze_v2(_ctx(_candles(80, 0.07, True))) is not None
+
+    def test_rel_volume_on_rejects_when_below_mult(self):
+        s = ClosingBetStrategy(ClosingBetParams(
+            rel_volume_lookback=20, rel_volume_min_mult=5.0))
+        assert s._analyze_v2(_ctx(_candles(80, 0.07, True))) is None
+
+    # ── D. 외인/기관 양매수 (theme_context 의존) ──
+    def test_dual_net_buy_off_is_parity(self):
+        s = ClosingBetStrategy()
+        assert s._analyze_v2(_ctx(_candles(80, 0.07, True))) is not None
+
+    def test_dual_net_buy_on_no_meta_passes(self):
+        """ON 이어도 theme_context 없으면 통과(placeholder/하위호환)."""
+        s = ClosingBetStrategy(ClosingBetParams(require_dual_net_buy=True))
+        assert s._analyze_v2(_ctx(_candles(80, 0.07, True))) is not None
+
+    def test_dual_net_buy_on_rejects_negative(self):
+        s = ClosingBetStrategy(ClosingBetParams(require_dual_net_buy=True))
+        ctx = AnalysisContext(
+            symbol="TEST", name="테스트", candles=_candles(80, 0.07, True),
+            market_type=MarketType.STOCK,
+            timestamp=datetime(2026, 6, 17, 15, 10, tzinfo=_KST),
+            theme_context={"inst_net_buy": -1.0, "foreign_net_buy": 5.0},
+        )
+        assert s._analyze_v2(ctx) is None
+
+    def test_dual_net_buy_on_accepts_both_positive(self):
+        s = ClosingBetStrategy(ClosingBetParams(require_dual_net_buy=True))
+        ctx = AnalysisContext(
+            symbol="TEST", name="테스트", candles=_candles(80, 0.07, True),
+            market_type=MarketType.STOCK,
+            timestamp=datetime(2026, 6, 17, 15, 10, tzinfo=_KST),
+            theme_context={"inst_net_buy": 3.0, "foreign_net_buy": 5.0},
+        )
+        sig = s._analyze_v2(ctx)
+        assert sig is not None and sig.signal_type == "closing_bet"
+
+
 class TestClosingBetExit:
     def test_exit_plan_overnight_semantics(self):
         s = ClosingBetStrategy()

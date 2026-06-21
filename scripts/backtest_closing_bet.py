@@ -165,6 +165,20 @@ def main() -> None:
          ClosingBetParams(require_eod_window=False, require_new_high=False)),
         ("ablation: +ATR필터 0.035",
          ClosingBetParams(require_eod_window=False, min_atr_pct=0.035)),
+        # ── 신정재 보강 게이트 ON 비교 (전부 default-OFF 옵트인) ──
+        ("신정재 A: 전고점 이격(near-high tol 0.03)",
+         ClosingBetParams(require_eod_window=False, new_high_tolerance=0.03)),
+        ("신정재 B: 기간조정 10봉",
+         ClosingBetParams(require_eod_window=False, consolidation_min_days=10)),
+        ("신정재 B': 기간조정 10봉+저점상승",
+         ClosingBetParams(require_eod_window=False, consolidation_min_days=10,
+                          require_higher_lows=True)),
+        ("신정재 C: 상대 거래대금 ≥2.0×(20봉)",
+         ClosingBetParams(require_eod_window=False, rel_volume_lookback=20,
+                          rel_volume_min_mult=2.0)),
+        ("신정재 B+C 결합",
+         ClosingBetParams(require_eod_window=False, consolidation_min_days=10,
+                          rel_volume_lookback=20, rel_volume_min_mult=2.0)),
     ]
     results = []
     for label, params in variants:

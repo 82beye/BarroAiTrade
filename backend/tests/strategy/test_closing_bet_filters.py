@@ -9,11 +9,13 @@ from datetime import datetime, timezone
 
 from backend.core.strategy.closing_bet_filters import (
     body_new_high,
+    consolidation_ok,
     disparity_5ma,
     disparity_yellow,
     envelope_upper_break,
     liquidity_ok,
     overheat_warning,
+    rel_volume_surge,
     remaining_upside_ratio,
     triple_factor_buy,
 )
@@ -151,6 +153,60 @@ def test_triple_factor_buy_fails_on_value_floor():
 def test_triple_factor_buy_fails_when_not_strong():
     flat = [_c(100) for _ in range(20)] + [_c(101)]  # 엔벨·이격 모두 미달
     assert triple_factor_buy(flat, day_value_won=2.0e11) is False
+
+
+# ── rel_volume_surge (신정재: 상대 거래대금 급증) ──
+def test_rel_volume_surge_true():
+    # 직전 20봉 거래대금 100(close1×vol100), 당일 250 → 평균 100, 2.5배 ≥ 2.0
+    prior = [_c(1.0, vol=100.0) for _ in range(20)]
+    assert rel_volume_surge(prior + [_c(1.0, vol=250.0)], lookback=20, min_mult=2.0) is True
+
+
+def test_rel_volume_surge_false_below_mult():
+    prior = [_c(1.0, vol=100.0) for _ in range(20)]
+    assert rel_volume_surge(prior + [_c(1.0, vol=150.0)], lookback=20, min_mult=2.0) is False
+
+
+def test_rel_volume_surge_insufficient_data_false():
+    assert rel_volume_surge([_c(1.0, vol=100.0)] * 5, lookback=20, min_mult=2.0) is False
+
+
+# ── consolidation_ok (신정재: 충분한 기간조정 + 저점 우상향) ──
+def _bar(low: float, high: float) -> OHLCV:
+    mid = (low + high) / 2
+    return OHLCV(symbol="000000", timestamp=_TS, open=mid, high=high, low=low,
+                 close=mid, volume=1.0, market_type=MarketType.STOCK)
+
+
+def test_consolidation_ok_true_long_pullback():
+    # window[0]=전고점(high 200), 이후 30봉 조정(high 120) → 조정 30봉 ≥ min_days 10
+    window = [_bar(150, 200)] + [_bar(100, 120) for _ in range(30)]
+    candles = window + [_bar(100, 130)]  # +오늘
+    assert consolidation_ok(candles, min_days=10, lookback=len(window)) is True
+
+
+def test_consolidation_ok_false_short_pullback():
+    # 전고점이 어제 직전(조정 2봉뿐) → min_days 10 미달
+    window = [_bar(100, 120) for _ in range(29)] + [_bar(150, 200)] + [_bar(140, 160)]
+    candles = window + [_bar(140, 170)]
+    assert consolidation_ok(candles, min_days=10, lookback=len(window)) is False
+
+
+def test_consolidation_ok_higher_lows_gate():
+    # 전고점 후 조정: 전반부 저점 90, 후반부 저점 100 → higher lows True
+    window = [_bar(150, 200)] + [_bar(90, 120) for _ in range(10)] + [_bar(100, 120) for _ in range(10)]
+    candles = window + [_bar(110, 130)]
+    assert consolidation_ok(candles, min_days=10, lookback=len(window),
+                            require_higher_lows=True) is True
+    # 후반부 저점이 더 낮으면(80) higher lows False
+    window2 = [_bar(150, 200)] + [_bar(100, 120) for _ in range(10)] + [_bar(80, 120) for _ in range(10)]
+    candles2 = window2 + [_bar(110, 130)]
+    assert consolidation_ok(candles2, min_days=10, lookback=len(window2),
+                            require_higher_lows=True) is False
+
+
+def test_consolidation_ok_insufficient_data_false():
+    assert consolidation_ok([_bar(100, 120)] * 5, min_days=10, lookback=60) is False
 
 
 # ── 경계 보장: 스캐너는 closing_bet_filters 를 직접 import 하지 않음 ──

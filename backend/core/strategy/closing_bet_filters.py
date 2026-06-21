@@ -85,6 +85,74 @@ def liquidity_ok(
     return (min1_value_won >= min1_floor_won) and (day_volume >= prev_day_volume * vol_mult)
 
 
+def rel_volume_surge(
+    candles: List[OHLCV], lookback: int = 20, min_mult: float = 2.0
+) -> bool:
+    """신정재 — 상대 거래대금 급증. 당일 거래대금 ≥ 직전 lookback봉 평균 × min_mult.
+
+    신정재(종베 종목선정 2): "거래대금은 절대값이 아니라 상대값 — 최근 일 대비 눈에
+    띄는!!!". 절대 하한(min_trade_value)과 달리 종목별 평소 대비 급증을 정량화한다.
+    `liquidity_ok`(전일比 ×3) 의 N봉 평균 일반화 버전.
+
+    Args:
+        candles: 일봉 OHLCV(오래된→최신). 최소 lookback+1 필요.
+        lookback: 평균 산출 구간(직전 N봉, 기본 20).
+        min_mult: 평균 대비 배율 하한(기본 2.0배).
+    Returns:
+        당일 거래대금이 평균의 min_mult배 이상이면 True. 데이터 부족/평균 ≤0 시 False.
+    """
+    if len(candles) < lookback + 1:
+        return False
+    prior = candles[-lookback - 1:-1]
+    avg = sum(c.close * c.volume for c in prior) / len(prior)
+    if avg <= 0:
+        return False
+    today_value = candles[-1].close * candles[-1].volume
+    return today_value >= avg * min_mult
+
+
+def consolidation_ok(
+    candles: List[OHLCV],
+    min_days: int = 10,
+    lookback: int = 60,
+    require_higher_lows: bool = False,
+) -> bool:
+    """신정재 — 충분한 기간 조정 + (옵션) 조정구간 저점 우상향.
+
+    신정재(종베 종목선정 5): "전고점 찍고 시간이 흐를수록 매물대가 얕아진다 — 충분한
+    기간 조정 필요". + "조정 구간에서 저점을 높여가는 종목 선호(higher lows)".
+    조정 짧은 과열주(일동제약류)를 거른다.
+
+    직전 `lookback`봉(당일 제외) 중 최고가(전고점) 발생 봉 이후 ~ 어제까지를 '조정구간'
+    으로 보고, 그 길이 ≥ min_days 이어야 통과. require_higher_lows 면 조정구간 후반부
+    저점이 전반부 저점보다 높아야 한다.
+
+    Args:
+        candles: 일봉 OHLCV(오래된→최신). 최소 lookback+1 필요.
+        min_days: 전고점 이후 최소 조정 경과봉(기본 10).
+        lookback: 전고점 탐색 구간(직전 N봉, 기본 60).
+        require_higher_lows: 조정구간 저점 우상향 요구 여부.
+    Returns:
+        조건 충족 시 True. 데이터 부족/조정 부족 시 False(보수적).
+    """
+    if len(candles) < lookback + 1:
+        return False
+    window = candles[-lookback - 1:-1]                  # 직전 lookback봉(당일 제외)
+    peak_i = max(range(len(window)), key=lambda i: window[i].high)
+    seg = window[peak_i + 1:]                           # 전고점 이후 ~ 어제 = 조정구간
+    if len(seg) < min_days:
+        return False
+    if require_higher_lows:
+        half = len(seg) // 2
+        if half < 1:
+            return False
+        first_low = min(b.low for b in seg[:half])
+        second_low = min(b.low for b in seg[half:])
+        if second_low <= first_low:
+            return False
+    return True
+
+
 def remaining_upside_ratio(
     current_price: float,
     target_high: float,

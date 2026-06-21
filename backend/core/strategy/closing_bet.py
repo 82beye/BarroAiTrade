@@ -24,7 +24,11 @@ from decimal import Decimal
 from typing import Any, List, Optional
 
 from backend.core.strategy.base import Strategy
-from backend.core.strategy.closing_bet_filters import disparity_yellow
+from backend.core.strategy.closing_bet_filters import (
+    consolidation_ok,
+    disparity_yellow,
+    rel_volume_surge,
+)
 from backend.core.strategy.round_figure import resolve_sl_pct
 from backend.models.market import MarketType, OHLCV
 from backend.models.position import Position
@@ -57,6 +61,21 @@ class ClosingBetParams:
     require_new_high: bool = True
     new_high_lookback: int = 60           # 직전 N봉 고점 대비 돌파 판정
     new_high_tolerance: float = 0.0       # 직전 고점 대비 허용 미달폭(0=완전 돌파)
+    #   ↑ 신정재 '전고점 이격 모드(near-high)' = new_high_tolerance>0. 예: 0.03 이면
+    #   '신고가 갱신 OR 전고점 이격 ≤3%' 종목까지 허용(매물대 얕음, SD바이오센서류).
+    #   별도 필드 없이 기존 노브 재사용 — default 0.0 은 현행 '완전 돌파만' 보존.
+
+    # ── 신정재 종목선정 보강 게이트 (옵션, 전부 기본 OFF — 회귀 byte-identical) ──
+    # B. 기간조정: 전고점 이후 최소 조정 경과봉(0=OFF) + 조정구간 저점 우상향(higher lows).
+    consolidation_min_days: int = 0       # >0 이면 기간조정 필터 ON
+    consolidation_lookback: int = 60      # 전고점 탐색 구간
+    require_higher_lows: bool = False      # 조정구간 저점 우상향 요구
+    # C. 상대 거래대금 급증: 당일 거래대금 ≥ 직전 N봉 평균 × mult (둘 다 >0 이면 ON).
+    rel_volume_lookback: int = 0          # >0 이면 상대 거래대금 필터 ON
+    rel_volume_min_mult: float = 0.0      # 평균 대비 배율 하한
+    # D. 외인/기관 양매수: theme_context 에 net buy 메타 주입 시 둘 다 양수 요구.
+    #    데이터 없으면 통과(placeholder, 데이터 파이프라인 의존).
+    require_dual_net_buy: bool = False
 
     # ── 기준봉 = 신고가 돌파 장대양봉 (당일 일봉) ──
     base_min_gain_pct: float = 0.05       # 몸통 최소 상승률 5%
@@ -143,6 +162,15 @@ class ClosingBetStrategy(Strategy):
             if today.high < prior_high * (1.0 - p.new_high_tolerance):
                 return None
 
+        # ③-b (옵션, 기본 off) 기간조정 게이트 — 신정재 종목선정 5. 조정 짧은 과열주 차단.
+        if p.consolidation_min_days > 0 and not consolidation_ok(
+            candles,
+            min_days=p.consolidation_min_days,
+            lookback=p.consolidation_lookback,
+            require_higher_lows=p.require_higher_lows,
+        ):
+            return None
+
         # ④ 기준봉 = 장대양봉 (몸통 ≥5%, 윗꼬리 제한)
         body = (today.close - today.open) / today.open if today.open > 0 else 0.0
         if body < p.base_min_gain_pct:
@@ -160,6 +188,12 @@ class ClosingBetStrategy(Strategy):
         ):
             return None
 
+        # ④-c (옵션, 기본 off) 상대 거래대금 급증 — 신정재 종목선정 2 ("최근 일 대비 눈에 띄는").
+        if p.rel_volume_lookback > 0 and p.rel_volume_min_mult > 0 and not rel_volume_surge(
+            candles, lookback=p.rel_volume_lookback, min_mult=p.rel_volume_min_mult
+        ):
+            return None
+
         cur = float(today.close)
 
         # ⑤ (옵션, 기본 off) 거래대금 rank/시총 선정 메타 hard-cut — ctx.theme_context 주입 시.
@@ -172,6 +206,14 @@ class ClosingBetStrategy(Strategy):
             if rank is None or rank > p.max_trade_value_rank:
                 return None
             if tval is not None and tval < p.min_trade_value:
+                return None
+
+        # ⑤-b (옵션, 기본 off) 외인/기관 양매수 — 신정재 종목선정 6 ("특히 대형주").
+        #   theme_context 에 net buy 메타 주입 시에만 검사(없으면 통과=placeholder).
+        if p.require_dual_net_buy and leader is not None:
+            inst = leader.get("inst_net_buy")
+            foreign = leader.get("foreign_net_buy")
+            if inst is not None and foreign is not None and not (inst > 0 and foreign > 0):
                 return None
 
         # ⑥ (옵션) 존(골드존) 진입가 — 분봉(intraday_candles) 우선, 없으면 일봉 폴백.
