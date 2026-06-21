@@ -127,9 +127,9 @@ class TestCostModel:
     """수수료+제세금 내재화 — 스캘핑 생존의 핵심."""
 
     def test_round_trip_cost(self):
-        # [BAR-OPS-39] 브로커 실측: 수수료 0.175%×2 + 거래세 0.20% = 0.55%
+        # 브로커 실측(2026-06-21 정정): 수수료 0.35%×2 + 거래세 0.20% = 0.90%
         #   (import-time 바인딩 상수 — legacy fixture 와 무관하게 실측값이어야 함)
-        assert abs(ROUND_TRIP_COST_PCT - 0.0055) < 1e-9
+        assert abs(ROUND_TRIP_COST_PCT - 0.009) < 1e-9
 
     def test_breakeven_ticks(self):
         assert abs(breakeven_ticks(10000, 10) - 2.1) < 0.01   # 0.21%×10000/10

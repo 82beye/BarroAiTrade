@@ -19,12 +19,16 @@ if str(_ROOT) not in sys.path:
 
 class TestTradingCosts:
     def test_measured_defaults(self):
-        """실측 기본값 — 편도 0.175% / 매도세 0.20% / 왕복 0.55%."""
+        """실측 기본값(2026-06-21 정정) — 편도 0.35% / 매도세 0.20% / 왕복 0.90%.
+
+        fill_audit 298행 재도출: 수수료 1,768,040 / (매수+매도) 505,588,092 = 0.3497%/leg.
+        종전 0.00175 는 2배 과소(왕복을 편도로 오라벨 후 반감)였음.
+        """
         from backend.core import trading_costs as tc
-        assert float(tc.COMMISSION_RATE) == 0.00175
+        assert float(tc.COMMISSION_RATE) == 0.0035
         assert float(tc.TAX_RATE_SELL) == 0.0020
-        assert abs(float(tc.ROUND_TRIP_COST_RATE) - 0.0055) < 1e-12
-        assert tc.COMMISSION_PCT == 0.175
+        assert abs(float(tc.ROUND_TRIP_COST_RATE) - 0.009) < 1e-12
+        assert tc.COMMISSION_PCT == 0.35
         assert tc.TAX_PCT_ON_SELL == 0.20
 
     def test_etf_sell_tax_exempt(self):
@@ -36,19 +40,19 @@ class TestTradingCosts:
         """[6/11 발견] 라이브 선정 경로가 무인자 생성 — default 가 실측 비용이어야 함."""
         from backend.core.backtester.intraday_simulator import IntradaySimulator
         s = IntradaySimulator()
-        assert float(s._commission) == 0.00175
+        assert float(s._commission) == 0.0035
         assert float(s._tax) == 0.002
 
     def test_audit_constants_follow_central(self):
         from scripts._daily_strategy_audit import COMMISSION_RATE, TAX_RATE
-        assert COMMISSION_RATE == 0.00175
+        assert COMMISSION_RATE == 0.0035
         assert TAX_RATE == 0.0020
 
     def test_ob_scalp_breakeven_reflects_measured(self):
-        """왕복 0.55% — 10,000원/틱10 본전틱 ≈ 5.5틱 (종전 2.1틱의 2.6배)."""
+        """왕복 0.90%(정정) — 10,000원/틱10 본전틱 ≈ 9.0틱."""
         from backend.core.strategy.ob_scalp import breakeven_ticks, ROUND_TRIP_COST_PCT
-        assert abs(ROUND_TRIP_COST_PCT - 0.0055) < 1e-12
-        assert abs(breakeven_ticks(10_000, 10) - 5.5) < 1e-9
+        assert abs(ROUND_TRIP_COST_PCT - 0.009) < 1e-12
+        assert abs(breakeven_ticks(10_000, 10) - 9.0) < 1e-9
 
 
 # ── fill_audit 실측 매핑 ─────────────────────────────────────────────────────

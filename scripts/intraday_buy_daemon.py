@@ -665,6 +665,9 @@ _TRAP_OVER_EXT_MA_PERIOD = int(os.environ.get("BARRO_TRAP_OVER_EXT_MA_PERIOD", "
 _TRAP_UPPER_WICK_MAX = float(os.environ.get("BARRO_TRAP_UPPER_WICK_MAX", "0"))
 _TRAP_GAP_ATR_MULT = float(os.environ.get("BARRO_TRAP_GAP_ATR_MULT", "0"))
 _TRAP_GAP_ABS_MAX_PCT = float(os.environ.get("BARRO_TRAP_GAP_ABS_MAX_PCT", "0"))
+# [2026-06-21] SHADOW 측정 모드 — 1이면 트랩 임계 설정해도 '차단했을 것'만 로깅하고 미차단
+#   (enforce 전 차단율·오차단 측정). 기본 0=enforce. 임계 미설정이면 어차피 무동작.
+_TRAP_SHADOW = os.environ.get("BARRO_TRAP_SHADOW", "0").strip().lower() in ("1", "true", "yes")
 
 
 def _apply_trap_env(params):
@@ -970,11 +973,18 @@ async def _scan_and_buy(
                 _tb, _tr = evaluate_trap_guard(candles, _DAEMON_TRAP, flu_rate=float(c.flu_rate))
                 if _tb:
                     ts_t = _now_kst().strftime("%H:%M:%S")
-                    print(
-                        f"  [{ts_t}][SKIP-TRAP] {c.symbol} {c.name:<14} 전략={best_strategy} "
-                        f"— 트랩가드 차단({_tr})"
-                    )
-                    continue
+                    if _TRAP_SHADOW:
+                        # 측정 전용: 차단했을 것만 로깅, 실제 진입은 막지 않음(enforce 전 측정).
+                        print(
+                            f"  [{ts_t}][SHADOW-TRAP] {c.symbol} {c.name:<14} 전략={best_strategy} "
+                            f"— would-block({_tr}) [측정·미차단]"
+                        )
+                    else:
+                        print(
+                            f"  [{ts_t}][SKIP-TRAP] {c.symbol} {c.name:<14} 전략={best_strategy} "
+                            f"— 트랩가드 차단({_tr})"
+                        )
+                        continue
             # [BAR-OPS-39 P0] 진입 컷오프 — 늦은 진입(이월 후보) 차단. swing_38(다일보유)은 예외.
             #   6/11 f_zone 14:33 현대무벡스 진입 이월이 실증(st 전용 컷오프의 사각지대).
             if (_zone_entry_cutoff_passed()
