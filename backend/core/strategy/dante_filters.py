@@ -3,9 +3,10 @@
 분석: docs/03-analysis/2026-06-21-dante-methodology-extract.md
 설계: docs/02-design/features/2026-06-21-dante-uplift.design.md §6
 
-⚠️ 관측 전용 순수함수. 호출처 없음(inert) → **라이브 매매 동작 무영향**.
-   향후 전략/선정 레이어가 (d) HITL 단계에서 import 해 게이트로 켠다. 그 전까지는
-   shadow 측정(로그)·백테스트 비교용으로만 호출한다. 부작용 없음(반환만).
+⚠️ 순수함수 게이트. distribution_alert 만 `DistributionExitConfig`(config-gated,
+   **default-OFF**)를 통해 라이브 청산(holding_evaluator)에 연결된다 — enabled=False
+   default 라 라이브 무변경(byte-identical). 나머지 함수는 여전히 관측 전용(inert).
+   OOS 검증: docs/04-report/features/2026-06-22-dante-oos-validation.report.md.
 
 캔들 규약(indicators.py·closing_bet_filters.py 계승): List[OHLCV] 오래된→최신,
 candles[-1]=최신. 거래대금 필드는 OHLCV에 없으므로 호출측이 close*volume(원)로 산출.
@@ -15,6 +16,7 @@ candles[-1]=최신. 거래대금 필드는 OHLCV에 없으므로 호출측이 cl
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from backend.models.market import OHLCV
@@ -230,6 +232,53 @@ def rr_ratio_ok(
     return (reward / risk) >= min_rr
 
 
+@dataclass(frozen=True)
+class DistributionExitConfig:
+    """JD-R13 — distribution(세력 이탈 장대음봉) 청산 게이트 설정. config-gated, default-OFF.
+
+    `enabled=False`(default) → `fires()` 항상 False → 라이브 청산 무변경(byte-identical).
+    `holding_evaluator.evaluate_holding` 이 `PositionContext.distribution_exit` 로 받아
+    duck-typing(`.fires()`)으로 호출(strategy↔risk 순환 회피). 데몬이 일봉을 주입.
+
+    OOS 검증(2026-06-22): IS/OOS 모두 baseline 하회·음수, 임계 강화에 회피효과 단조 증가.
+    사용자 확정(2026-06-22): 액션=전량 청산, 임계=거래량 3.0배·몸통 3%(표준).
+    리포트: docs/04-report/features/2026-06-22-dante-oos-validation.report.md.
+    ★활성화(enabled=True)는 약세장 dry-run 후 별도 HITL.
+
+    Args(필드):
+        enabled: 게이트 활성(default False).
+        vol_mult: 전일 대비 거래량 배율 하한(기본 3.0).
+        body_min: 음봉 몸통 비율 하한(기본 0.03=3%).
+        require_uptrend: 정배열 확장구간(종가>SMA(ma_period))에서만 발동(OOS gate와 동일).
+        ma_period: 추세 확인 이동평균(기본 60).
+    """
+
+    enabled: bool = False
+    vol_mult: float = 3.0
+    body_min: float = 0.03
+    require_uptrend: bool = True
+    ma_period: int = 60
+
+    def fires(self, candles: Optional[List[OHLCV]]) -> bool:
+        """distribution 청산 발동 여부. default(enabled=False) → 항상 False."""
+        if not self.enabled or not candles:
+            return False
+        if self.require_uptrend:
+            ma = _sma(candles, self.ma_period)
+            if ma is None or candles[-1].close <= ma:
+                return False
+        return distribution_alert(candles, vol_mult=self.vol_mult, body_min=self.body_min)
+
+    @classmethod
+    def from_policy_config(cls, cfg) -> "DistributionExitConfig":
+        """PolicyConfig(또는 동등 객체)에서 조립. 필드 부재 시 default(비활성)."""
+        return cls(
+            enabled=bool(getattr(cfg, "distribution_exit_enabled", False)),
+            vol_mult=float(getattr(cfg, "distribution_exit_vol_mult", 3.0)),
+            body_min=float(getattr(cfg, "distribution_exit_body_min", 0.03)),
+        )
+
+
 __all__ = [
     "ma_alignment",
     "above_ma224",
@@ -239,4 +288,5 @@ __all__ = [
     "distribution_alert",
     "odori_cross",
     "rr_ratio_ok",
+    "DistributionExitConfig",
 ]

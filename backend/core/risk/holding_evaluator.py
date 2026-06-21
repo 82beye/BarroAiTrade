@@ -23,6 +23,7 @@ from backend.core.strategy.round_figure import resolve_sl_pct
 if TYPE_CHECKING:  # 런타임 미import (backtester ↔ risk 순환 회피). 훅은 duck-typing 사용.
     from backend.core.backtester.market_regime import MarketRegime
     from backend.core.risk.regime_exit import RegimeExitConfig
+    from backend.core.strategy.dante_filters import DistributionExitConfig
 
 
 class SellSignal(str, Enum):
@@ -34,6 +35,7 @@ class SellSignal(str, Enum):
     PARTIAL_TP = "partial_tp"
     TIME_TIGHTENED_SL = "time_tightened_sl"
     SHORT_TERM_HIGH = "short_term_high"   # 2026-05-21 — 단기 고점 캔들 패턴 매도
+    DISTRIBUTION = "distribution"         # 2026-06-22 — 세력 이탈(장대음봉) 청산 (JD-R13, default-OFF)
 
 
 @dataclass(frozen=True)
@@ -212,6 +214,11 @@ class PositionContext:
     # 2026-06-21 — net-aware TP(default-OFF). True 면 TP/분할익절 임계에 왕복 비용 가산
     # (net 기준 익절). default False → 기존 gross 임계 그대로. 설계: regime_exit.apply_net_aware_tp.
     net_aware_tp: bool = False
+    # 2026-06-22 — distribution 청산(default-OFF, JD-R13). daemon 이 일봉(오래된→최신) 주입,
+    # distribution_exit=DistributionExitConfig. 둘 다 None/disabled → 평가 skip(byte-identical).
+    # duck-typing(.fires) 으로 호출 → strategy↔risk 순환 회피. OOS: 2026-06-22 검증.
+    daily_candles: Optional[list] = None
+    distribution_exit: "Optional[DistributionExitConfig]" = None
 
 
 def _hold_days(entry_time: Optional[str]) -> int:
@@ -301,6 +308,19 @@ def evaluate_holding(
             pnl=h.pnl, pnl_rate=rate,
             signal=SellSignal.HOLD,
             reason=f"swing 최소 보유 {days}일 < min {policy.min_hold_days}일 → 청산 평가 차단",
+        )
+
+    # ── 0-β. distribution 청산 (default-OFF, JD-R13, 2026-06-22) ──────
+    # 세력 이탈(정배열 확장구간 거래량 300% 장대음봉) → 전량 청산. OOS 검증 2026-06-22.
+    # ctx.distribution_exit 미주입 또는 enabled=False → fires()=False → skip(byte-identical).
+    # duck-typing(.fires) 으로 strategy↔risk 순환 회피. min_hold 보호 이후 평가(신선 포지션 churn 방지).
+    if ctx.distribution_exit is not None and ctx.distribution_exit.fires(ctx.daily_candles):
+        return HoldingDecision(
+            symbol=h.symbol, name=h.name, qty=qty, sell_qty=qty,
+            avg_buy_price=h.avg_buy_price, cur_price=h.cur_price,
+            pnl=h.pnl, pnl_rate=rate,
+            signal=SellSignal.DISTRIBUTION,
+            reason="distribution(세력이탈 장대음봉): 거래량 전일×3·몸통≥3% (정배열) → 전량 청산",
         )
 
     # ── 0. 단기 고점 캔들 패턴 매도 (P10, 2026-05-21) ──────────────

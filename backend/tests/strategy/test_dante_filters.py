@@ -193,19 +193,20 @@ def test_rr_ratio_ok_invalid_risk_none():
     assert rr_ratio_ok(100, 102, 110) is None   # 손절가 > 진입(음수 위험)
 
 
-# ── inert 보장: 라이브 경로가 dante_filters 를 직접 import 하지 않음 ──
+# ── 경계 보장: 스캐너(매수 경로)는 dante_filters 를 직접 참조하지 않음 ──
+# (distribution 게이트는 청산 경로(holding_evaluator)에만 연결 — 매수 스캐너와 분리)
 def test_scanner_does_not_import_dante_filters():
     import backend.core.scanner.signal_scanner as sc
     with open(sc.__file__, encoding="utf-8") as fh:
         assert "dante_filters" not in fh.read(), (
-            "스캐너가 dante_filters 를 직접 참조 — inert(관측전용) 위반"
+            "스캐너가 dante_filters 를 직접 참조 — 매수 경로와 분리되어야 함"
         )
 
 
-def test_daemon_does_not_import_dante_filters():
-    import os
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-    daemon = os.path.join(repo_root, "scripts", "intraday_buy_daemon.py")
-    if os.path.exists(daemon):
-        with open(daemon, encoding="utf-8") as fh:
-            assert "dante_filters" not in fh.read(), "데몬이 dante_filters 직접 참조 — inert 위반"
+# ── (d) 배선 default-OFF 보장: 데몬은 DistributionExitConfig 를 import 하나
+#    신규 PolicyConfig → 게이트 비활성 → 라이브 청산 무변경(byte-identical) ──
+def test_distribution_gate_default_off_via_policy_config():
+    from backend.core.journal.policy_config import PolicyConfig
+    from backend.core.strategy.dante_filters import DistributionExitConfig
+    cfg = DistributionExitConfig.from_policy_config(PolicyConfig())
+    assert cfg.enabled is False, "신규 PolicyConfig 는 distribution 게이트 default-OFF 여야 함"
