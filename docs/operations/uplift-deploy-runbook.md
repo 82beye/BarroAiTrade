@@ -45,7 +45,13 @@ BARRO_CB_DISPARITY_YELLOW=1 python scripts/closing_bet_alert_daemon.py --mode lo
 #  → 1~2주: 신호빈도(게이트로 감소)·익일 슈팅 적중·오버나잇 갭. 익일 결과= _daily_strategy_audit.
 #  끄기: env 제거.   진입창=15:00~15:20, 청산=익일10:00 / D1~D3.
 ```
-⚠️ **종베 자동매매 실편입은 미배선** — 데몬 EOD dispatch 블록 + `_CUTOFF_EXEMPT_STRATEGIES`+=closing_bet(14:30 cutoff 면제) + 오버나잇 carry 한도(설계 §6.5/6.6) 구현 후 `enabled_strategies={"closing_bet":True}` + 실주문. **dry-run 통과 후 별도 HITL.** (2026-06-18 '종베 수동관리 전용' 결정 변경)
+**종베 라이프사이클** (현재 = 1단계):
+1. **dry-run(현재)** — 위 페이퍼/알림으로 1~2주 관찰. 측정원 `data/closing_bet_paper.csv` 익일 집계.
+2. **통과 기준(4개 모두)** — [[../02-design/features/2026-06-22-closing-bet-eod-auto-execution.design|EOD 설계]] §6.1:
+   ① 매수신호 ≥10건  ② 익일 평균 **net>0**(왕복 0.90% 차감, 이상적 ≥+0.4%)  ③ 익일슈팅 적중·오신호 없음  ④ 운영 무사고.
+   → 미달(특히 #2 net≤0 = '종가진입 브레이크이븐' caveat 현실화)이면 **구현 보류/재검토**.
+3. **자동매매 구현 (설계 완료·코드 미구현)** — [[../02-design/features/2026-06-22-closing-bet-eod-auto-execution.design|EOD 설계]]: `closing_bet_alert_daemon.py`에 executor 부착(`BARRO_CB_AUTOEXEC`, default-OFF) + ★`_eod_carry_limit`에서 종베 제외(안 하면 carry가 종베 즉시 청산) + 동시 1~2종·비중 10%·단일 트랜치. **통과 후 별도 PR로 구현.**
+4. **활성 (★HITL)** — ② `BARRO_CB_AUTOEXEC=1 --dry-run`(주문 로직) → ③ sim 정합 → ④ 라이브 `--no-dry-run` 소액 1종목. (2026-06-18 '종베 수동관리 전용' 결정 변경 → 명시 승인)
 
 ## 4) 실행 안 함 (참고)
 - `dante_filters`(공구리·매집봉·224레짐 등) = **inert(호출처 없음)**, 연구/관측용.
