@@ -62,8 +62,12 @@ def _build_oauth():
         base_url=os.environ.get("KIWOOM_BASE_URL", "https://mockapi.kiwoom.com"),
     )
 
+# 2026-06-22 — 이격도 게이트(disparity_yellow, 5일선 +14.25%) env 토글. default OFF(현행 byte-identical).
+#   사용자 dry-run 선택: BARRO_CB_DISPARITY_YELLOW=1 → ON(종베 net 개선, 알림 빈도↓).
+_CB_DISPARITY = os.environ.get("BARRO_CB_DISPARITY_YELLOW", "0").strip().lower() in ("1", "true", "yes", "on")
 PARAMS = ClosingBetParams(require_eod_window=False, require_money_flow=True,
-                          require_zone=False, require_leader_meta=False, min_atr_pct=0.035)
+                          require_zone=False, require_leader_meta=False, min_atr_pct=0.035,
+                          require_disparity_yellow=_CB_DISPARITY, disparity_yellow_threshold=0.1425)
 
 
 def _now() -> datetime:
