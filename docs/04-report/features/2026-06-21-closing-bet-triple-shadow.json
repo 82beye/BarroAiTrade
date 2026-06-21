@@ -1,0 +1,42 @@
+{
+  "eval_stock_days": 19700,
+  "value_floor_won": 100000000000.0,
+  "buckets": {
+    "baseline_all": {
+      "trades": 432,
+      "win_rate": 55.8,
+      "gross_exp_pct": 1.007,
+      "net_model_0.55": 0.457,
+      "net_real_0.90": 0.107
+    },
+    "triple_pass": {
+      "trades": 158,
+      "win_rate": 60.1,
+      "gross_exp_pct": 1.186,
+      "net_model_0.55": 0.636,
+      "net_real_0.90": 0.286
+    },
+    "triple_fail": {
+      "trades": 274,
+      "win_rate": 53.3,
+      "gross_exp_pct": 0.904,
+      "net_model_0.55": 0.354,
+      "net_real_0.90": 0.004
+    },
+    "env_pass": {
+      "trades": 359,
+      "win_rate": 56.5,
+      "gross_exp_pct": 1.044,
+      "net_model_0.55": 0.494,
+      "net_real_0.90": 0.144
+    },
+    "disp_pass": {
+      "trades": 238,
+      "win_rate": 61.8,
+      "gross_exp_pct": 1.305,
+      "net_model_0.55": 0.755,
+      "net_real_0.90": 0.405
+    }
+  },
+  "verdict": "삼박자 net@0.90 +0.286% vs baseline +0.107% (Δ+0.179%p, 트립 432→158) → 엣지 기여(net↑)"
+}

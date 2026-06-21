@@ -88,6 +88,23 @@ class TestClosingBetEntry:
         s = ClosingBetStrategy()
         assert s._analyze_v2(_ctx(_candles(80, 0.07, False))) is None
 
+    # ── 이격도 노란불 게이트 (D-R43, default-OFF) — thetrading-uplift 301delta ──
+    def test_disparity_gate_off_is_parity(self):
+        """default(require_disparity_yellow=False): 저이격(+5.5%) 신고가 장대양봉도 신호 → 현행 보존."""
+        s = ClosingBetStrategy()  # 기본 파라미터
+        assert s._analyze_v2(_ctx(_candles(80, 0.07, True))) is not None
+
+    def test_disparity_gate_on_rejects_low_disparity(self):
+        """게이트 ON: 이격 +5.5%(<14.25%)면 진입 거부."""
+        s = ClosingBetStrategy(ClosingBetParams(require_disparity_yellow=True))
+        assert s._analyze_v2(_ctx(_candles(80, 0.07, True))) is None
+
+    def test_disparity_gate_on_accepts_yellow(self):
+        """게이트 ON: 이격 +15.4%(≥14.25%, body 20%)면 신호 유지."""
+        s = ClosingBetStrategy(ClosingBetParams(require_disparity_yellow=True))
+        sig = s._analyze_v2(_ctx(_candles(80, 0.20, True)))
+        assert sig is not None and sig.signal_type == "closing_bet"
+
     def test_weak_body_none(self):
         """몸통 2% (<5% 장대양봉 기준 미달) → None."""
         s = ClosingBetStrategy()
