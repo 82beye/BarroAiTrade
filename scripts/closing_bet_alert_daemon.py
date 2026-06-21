@@ -239,11 +239,17 @@ async def _run(args) -> None:
     elif args.mode == "loop":
         while True:
             t = _now().time()
-            if BUY_WINDOW[0] <= t <= BUY_WINDOW[1]:
-                await scan_buy(args.dry_print, args.from_cache,
-                               [s.strip() for s in args.symbols.split(",") if s.strip()], args.top)
-            if dtime(9, 0) <= t <= dtime(15, 30):
-                await scan_sell(args.dry_print, args.from_cache)
+            # [2026-06-22] 루프 회복력 — scan_buy/scan_sell 의 API 에러(429/timeout/auth 등)가
+            #   루프를 죽이지 않게 격리(launchd KeepAlive 재기동 churn 방지). CancelledError 는
+            #   Exception 이 아니므로 SIGTERM/종료 신호는 그대로 전파된다.
+            try:
+                if BUY_WINDOW[0] <= t <= BUY_WINDOW[1]:
+                    await scan_buy(args.dry_print, args.from_cache,
+                                   [s.strip() for s in args.symbols.split(",") if s.strip()], args.top)
+                if dtime(9, 0) <= t <= dtime(15, 30):
+                    await scan_sell(args.dry_print, args.from_cache)
+            except Exception as e:  # noqa: BLE001 — 사이클 격리(다음 주기 계속)
+                print(f"[cb-loop-err] {type(e).__name__}: {e}")
             await asyncio.sleep(args.interval)
 
 

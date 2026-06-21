@@ -654,6 +654,25 @@ _GAP_GUARD_STRATEGIES = _parse_strategy_set(
 _ZONE_ENTRY_CUTOFF = os.environ.get("BARRO_ZONE_ENTRY_CUTOFF", "14:30").strip()
 _CUTOFF_EXEMPT_STRATEGIES = {"swing_38"}
 
+# [2026-06-22] EOD 강제청산(carry-limit 이월한도 트림) 제외 전략 — 다일보유가 설계인
+#   swing_38 은 이월이 의도(L653 참조)이므로, 이월총액 한도(20%) 초과 트림에서도 명시 보존한다.
+#   (종베는 _closing_bet_held() 로 별도 제외 — 수동관리 전용.) 장중 보유평가의 자체 손절·시간청산은
+#   그대로 적용되므로(여기서 제외하지 않음), 이 면제는 'EOD 강제 트림'에만 한정된다.
+_FORCE_CLOSE_EXEMPT_STRATEGIES = {"swing_38"}
+
+
+def _force_close_skip(symbol: str, strategy: str | None, cb_skip: set[str]) -> bool:
+    """EOD 강제청산(carry-limit)에서 해당 보유분을 건너뛸지 판정.
+
+    True 면 청산 제외: ① 종베(closing_bet) 보유분(수동관리 전용) ②다일보유 면제 전략(swing_38).
+    장중 보유평가의 자체 손절/시간청산과는 무관(여기는 'EOD 강제 트림' 전용 게이트).
+    """
+    if symbol in cb_skip:
+        return True
+    if strategy in _FORCE_CLOSE_EXEMPT_STRATEGIES:
+        return True
+    return False
+
 
 def _zone_entry_cutoff_passed() -> bool:
     """[BAR-OPS-39 P0] KST 현재시각이 일반 전략 진입 컷오프 이후면 True."""
@@ -1371,9 +1390,9 @@ async def _eod_carry_limit(args, oauth, notifier) -> int:
     for h in sorted(holdings, key=lambda x: float(x.eval_amount), reverse=True):
         if eval_sum <= limit_value:
             break
-        if h.symbol in _cb_skip:
-            continue  # 종베 보유분 강제청산 제외(수동관리)
         strategy = getattr(book.get(h.symbol), "strategy", None) if book else None
+        if _force_close_skip(h.symbol, strategy, _cb_skip):
+            continue  # 종베(수동관리) + 다일보유 면제전략(swing_38) EOD 강제청산 제외
         try:
             r = await gate.place_sell(symbol=h.symbol, qty=int(h.qty),
                                       strategy_id=strategy)
@@ -1695,9 +1714,9 @@ def main():
              "사이클마다 top-N×5분봉 조회로 인한 Kiwoom 429 rate-limit 회피.",
     )
     ap.add_argument(
-        "--strategies", default="f_zone,sf_zone,gold_zone",
-        help="일반 매수 스캔 전략(쉼표구분). 빈 값/none → 일반 전략 비활성(슈퍼트렌드 단독). "
-             "예: --strategies '' --supertrend (슈퍼트렌드만 운영).",
+        "--strategies", default="swing_38,f_zone,sf_zone,gold_zone",
+        help="일반 매수 스캔 전략(쉼표구분). 기본 = DEFAULT_ZONE_STRATEGIES(swing_38 포함, BAR-OPS-33). "
+             "빈 값/none → 일반 전략 비활성(슈퍼트렌드 단독). 예: --strategies '' --supertrend (슈퍼트렌드만 운영).",
     )
     args = ap.parse_args()
 
