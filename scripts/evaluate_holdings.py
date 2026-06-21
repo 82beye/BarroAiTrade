@@ -117,6 +117,13 @@ async def _run(args) -> int:
         _cb_held = {str(p["symbol"]) for p in _cb}
     except Exception:
         _cb_held = set()
+    # [2026-06-22] 수동관리 보유분(manual_hold_symbols.json)도 강제청산/평가 제외 — 사용자 직접 매도.
+    try:
+        import json as _json_mh
+        _mh = _json_mh.loads((_DATA_DIR / "manual_hold_symbols.json").read_text(encoding="utf-8"))
+        _cb_held |= {str(x) for x in (_mh if isinstance(_mh, list) else _mh.get("symbols", []))}
+    except Exception:
+        pass
     if _cb_held:
         _cbskip = [h.symbol for h in holdings if h.symbol in _cb_held]
         holdings = [h for h in holdings if h.symbol not in _cb_held]

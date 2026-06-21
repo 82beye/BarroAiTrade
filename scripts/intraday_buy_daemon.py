@@ -179,6 +179,17 @@ def _closing_bet_held() -> set[str]:
         return set()
 
 
+def _manual_hold_held() -> set[str]:
+    """수동관리 보유 종목 — 자동 손절/청산 제외(사용자 직접 매도). data/manual_hold_symbols.json.
+    [사용자 요청 2026-06-22] 예스티(122640) 등 수동 손절 종목을 자동매도(장중평가·carry-limit·EOD)에서 제외."""
+    try:
+        d = json.loads((_DATA_DIR / "manual_hold_symbols.json").read_text(encoding="utf-8"))
+        syms = d if isinstance(d, list) else d.get("symbols", [])
+        return {str(x) for x in syms}
+    except Exception:
+        return set()
+
+
 def _build_oauth() -> KiwoomNativeOAuth:
     app_key = os.environ.get("KIWOOM_APP_KEY", "")
     app_secret = os.environ.get("KIWOOM_APP_SECRET", "")
@@ -398,10 +409,10 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
             )
 
     decisions = evaluate_all(balance.holdings, policy, contexts)
-    # [사용자 요청 2026-06-18] 종베 보유분은 다른 전략이 청산 금지 — 수동관리 전용.
-    _cb_held = _closing_bet_held()
-    if _cb_held:
-        decisions = [d for d in decisions if d.symbol not in _cb_held]
+    # [사용자 요청 2026-06-18] 종베 보유분 + [2026-06-22] 수동관리 보유분(예스티 등)은 자동청산 제외 — 수동매도 전용.
+    _no_autosell = _closing_bet_held() | _manual_hold_held()
+    if _no_autosell:
+        decisions = [d for d in decisions if d.symbol not in _no_autosell]
 
     # DCA 분할매수
     _SELL_SIGNALS = {
@@ -1385,7 +1396,7 @@ async def _eod_carry_limit(args, oauth, notifier) -> int:
     )
     pos_store = ActivePositionStore(args.pos_log)
     book = pos_store.load_all()
-    _cb_skip = _closing_bet_held()
+    _cb_skip = _closing_bet_held() | _manual_hold_held()  # 종베 + 수동관리 보유분 EOD 강제청산 제외
     sold = 0
     for h in sorted(holdings, key=lambda x: float(x.eval_amount), reverse=True):
         if eval_sum <= limit_value:
