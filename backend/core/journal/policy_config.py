@@ -45,6 +45,13 @@ class PolicyConfig:
     regime_bearish_sl_mult: float = 1.0
     # 2026-06-21 — net-aware TP(default-OFF). True 면 TP/분할익절 임계에 왕복 비용 가산.
     net_aware_tp_enabled: bool = False
+    # 2026-06-22 — distribution(세력이탈 장대음봉) 청산 게이트 (default-OFF). JD-R13.
+    # evaluate_holding 이 DistributionExitConfig.from_policy_config 로 조립, daemon 이 일봉 주입.
+    # enabled=False → 청산 무변경(byte-identical). OOS 검증·임계: 거래량 3.0배·몸통 3%(표준).
+    # 설계: dante_filters.DistributionExitConfig. 활성화는 약세장 dry-run 후 (d) HITL.
+    distribution_exit_enabled: bool = False
+    distribution_exit_vol_mult: float = 3.0
+    distribution_exit_body_min: float = 0.03
     history: list[dict] = field(default_factory=list)         # 변경 이력
 
     def as_dict(self) -> dict:

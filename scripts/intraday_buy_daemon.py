@@ -41,6 +41,7 @@ from backend.core.risk.holding_evaluator import (
     ExitPolicy, PositionContext, SellSignal, STRATEGY_EXIT_PROFILES,
     evaluate_all, resolve_policy,
 )
+from backend.core.strategy.dante_filters import DistributionExitConfig
 from backend.core.risk.daily_gate_input import compute_daily_gate_input
 from backend.core.risk.live_order_gate import (
     GatePolicy, LiveOrderGate, DailyOrderLimitExceeded,
@@ -333,6 +334,8 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     # 익절 구간(rate ≥ partial_tp_pct) 도달 종목만 fetch (API 부담 절감).
     fetcher_for_exit = KiwoomNativeCandleFetcher(oauth=oauth)
     minute_cache: dict[str, list] = {}
+    # 2026-06-22 — distribution 청산 게이트(default-OFF). enabled 일 때만 일봉 fetch(API 절감).
+    _dist_cfg = DistributionExitConfig.from_policy_config(cfg)
 
     for h in balance.holdings:
         pos = active_positions.get(h.symbol)
@@ -376,12 +379,22 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
                 except Exception:
                     pass
 
+            # distribution 청산용 일봉 — 게이트 enabled 일 때만 fetch (default-OFF → fetch X).
+            daily_candles = None
+            if _dist_cfg.enabled:
+                try:
+                    daily_candles = await fetcher_for_exit.fetch_daily(symbol=h.symbol)
+                except Exception:
+                    daily_candles = None
+
             contexts[h.symbol] = PositionContext(
                 peak_pnl_rate=pos.peak_pnl_rate,
                 partial_tp_done=pos.partial_tp_done,
                 entry_time=pos.entry_time,
                 strategy=pos.strategy,
                 minute_candles=minute_candles,
+                daily_candles=daily_candles,
+                distribution_exit=_dist_cfg if _dist_cfg.enabled else None,
             )
 
     decisions = evaluate_all(balance.holdings, policy, contexts)
@@ -394,7 +407,7 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     _SELL_SIGNALS = {
         SellSignal.STOP_LOSS, SellSignal.TRAILING_STOP,
         SellSignal.BREAKEVEN_STOP, SellSignal.TIME_TIGHTENED_SL,
-        SellSignal.SHORT_TERM_HIGH,
+        SellSignal.SHORT_TERM_HIGH, SellSignal.DISTRIBUTION,
     }
     sl_symbols = {d.symbol for d in decisions if d.signal in _SELL_SIGNALS}
 
