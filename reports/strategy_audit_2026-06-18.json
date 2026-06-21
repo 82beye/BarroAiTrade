@@ -1,0 +1,102 @@
+{
+  "date": "2026-06-18",
+  "source": "1분봉 종가 추정",
+  "per_strategy": {
+    "sf_zone": {
+      "realized": 0.0,
+      "matched_basis": 0.0,
+      "wins": 0,
+      "sells": 0,
+      "syms": 2
+    },
+    "f_zone": {
+      "realized": 0.0,
+      "matched_basis": 0.0,
+      "wins": 0,
+      "sells": 0,
+      "syms": 1
+    },
+    "gold_zone": {
+      "realized": 0.0,
+      "matched_basis": 0.0,
+      "wins": 0,
+      "sells": 0,
+      "syms": 2
+    }
+  },
+  "per_symbol": {
+    "000500": {
+      "realized": 0.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "sf_zone"
+    },
+    "001820": {
+      "realized": 0.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "f_zone"
+    },
+    "006340": {
+      "realized": 0.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "gold_zone"
+    },
+    "052690": {
+      "realized": 0.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "sf_zone"
+    },
+    "085620": {
+      "realized": 0.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "gold_zone"
+    }
+  },
+  "carry": {
+    "sells": 0,
+    "sell_value": 0.0
+  },
+  "gap_records": [],
+  "estimate_total": 0.0,
+  "total_realized": 0.0,
+  "alarms": []
+}
