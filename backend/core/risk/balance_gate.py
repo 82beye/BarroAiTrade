@@ -84,7 +84,9 @@ def evaluate_risk_gate(
     if max_concurrent_positions < 1:
         raise ValueError(f"max_concurrent_positions must be >= 1, got {max_concurrent_positions}")
 
-    cash = deposit.cash
+    # [2026-06-22] 매수가능액 = 주문가능금액(orderable_cash=ord_alow_amt). 모의 entr(예수금)이
+    #   매도대금 즉시 미반영(음수/0)으로 사이징을 0으로 만드는 문제 → orderable 우선, 없으면 cash fallback.
+    cash = deposit.orderable_cash or deposit.cash
     current_eval = balance.total_eval
     max_total = cash * max_total_position_ratio
     max_per_cap = cash * max_per_position_ratio

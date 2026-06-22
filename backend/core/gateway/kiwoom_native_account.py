@@ -81,6 +81,7 @@ class AccountDeposit:
     margin_cash: Decimal           # 증거금현금
     bond_margin_cash: Decimal      # 보증금현금
     next_day_settlement: Decimal   # 익일정산금
+    orderable_cash: Decimal = Decimal("0")  # [2026-06-22] 주문가능금액(ord_alow_amt) — 매도대금 즉시반영분, 매수 사이징 기준
 
 
 @dataclass(frozen=True)
@@ -307,6 +308,7 @@ class KiwoomNativeAccountFetcher:
             margin_cash=_abs_decimal(data.get("profa_ch", "0")),
             bond_margin_cash=_abs_decimal(data.get("bncr_profa_ch", "0")),
             next_day_settlement=_abs_decimal(data.get("nxdy_bncr_sell_exct", "0")),
+            orderable_cash=_abs_decimal(data.get("ord_alow_amt", "0")),
         )
 
     async def _post(
