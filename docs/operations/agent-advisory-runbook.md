@@ -61,6 +61,7 @@ jq '. + {"agent_advisory_enabled": true, "agent_advisory_ttl_sec": 180}' data/po
   make advisory-writer ARGS=--market-llm          # 또는: python scripts/agent_advisory_writer.py --interval 30 --backend claude-cli --market-llm --telegram
   ```
   실패/응답불가 → 결정적 regime base 로 fail-open. 결정적 테마 집계·가드는 무관(LLM은 soft 신호만).
+- **실시간 표시**: writer `--telegram` 이면 verdict 외에 **시장국면·거래대금 집중 테마·포트폴리오(테마노출/집중/과다)** 요약도 텔레그램 전송(내용 변경 시만, 스팸 방지). 게이트 활성과 무관한 *표시*라 라이브 무영향.
 - **테마 매핑 유지보수**: `data/theme_map.json`(symbol→[테마]) 커버리지 = 쏠림 가드 정확도. 신규 주도주는 여기에 추가. 미매핑 종목은 가드 미적용(fail-open).
 - **활성(★HITL, off→soft→hard)**: `data/policy.json` 플래그(jq 로 키만):
 ```bash
