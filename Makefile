@@ -151,8 +151,8 @@ test: ## 전체 backend 단위 테스트 (legacy + config)
 advisory-setup: ## 에이전트 자문 부트스트랩 (git pull 후 1회, 멱등·라이브 무영향)
 	@bash scripts/setup_agent_advisory.sh
 
-advisory-writer: ## 자문 writer 루프 (claude-cli, advisory.json 생산 + 텔레그램 표시; 데몬 무영향)
-	@$(PYTHON) scripts/agent_advisory_writer.py --interval 30 --backend claude-cli --telegram
+advisory-writer: ## 자문 writer 루프 (claude-cli; 데몬 무영향). 시장국면 LLM: make advisory-writer ARGS=--market-llm
+	@$(PYTHON) scripts/agent_advisory_writer.py --interval 30 --backend claude-cli --telegram $(ARGS)
 
 advisory-writer-once: ## 자문 writer 1회 mock 스모크 (토큰 0, 라이브 무영향)
 	@$(PYTHON) scripts/agent_advisory_writer.py --once --backend mock

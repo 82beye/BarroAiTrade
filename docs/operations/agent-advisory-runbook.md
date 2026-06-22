@@ -56,6 +56,11 @@ jq '. + {"agent_advisory_enabled": true, "agent_advisory_ttl_sec": 180}' data/po
 ## 4b. 시장-맥락 add-on (regime · 테마 거래대금 집중 · 포트폴리오 쏠림/리스크)
 종목 verdict 외에 시장 전반 신호를 같은 advisory.json 으로 소비한다. 설계: [[2026-06-23-market-context-addons.design]].
 - **생산(자동)**: 데몬이 `data/market_snapshot.json`(regime·거래대금·보유)을 덤프 → writer 가 `data/theme_map.json` 과 조인해 advisory.json 의 `market_context`/`sector_themes`/`portfolio_signals` 섹션 생산. `git pull` 후 추가 설정 불요(생산은 결정적, 라이브 무영향).
+- **LLM 오버레이(opt-in)**: market_context(시장국면)에 LLM 판단을 얹으려면 writer 에 `--market-llm`(또는 env `BARRO_MARKET_LLM=1`):
+  ```bash
+  make advisory-writer ARGS=--market-llm          # 또는: python scripts/agent_advisory_writer.py --interval 30 --backend claude-cli --market-llm --telegram
+  ```
+  실패/응답불가 → 결정적 regime base 로 fail-open. 결정적 테마 집계·가드는 무관(LLM은 soft 신호만).
 - **테마 매핑 유지보수**: `data/theme_map.json`(symbol→[테마]) 커버리지 = 쏠림 가드 정확도. 신규 주도주는 여기에 추가. 미매핑 종목은 가드 미적용(fail-open).
 - **활성(★HITL, off→soft→hard)**: `data/policy.json` 플래그(jq 로 키만):
 ```bash
