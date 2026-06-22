@@ -2,7 +2,8 @@
 # Reference: docs/01-plan/MASTER-EXECUTION-PLAN-v1.md
 
 .PHONY: help legacy-scalping test-legacy test-config test \
-	advisory-setup advisory-writer advisory-writer-once advisory-shadow test-advisory
+	advisory-setup advisory-writer advisory-writer-once advisory-shadow test-advisory \
+	hermes-ops-setup
 
 help: ## 사용 가능한 타겟 출력
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -150,6 +151,9 @@ test: ## 전체 backend 단위 테스트 (legacy + config)
 
 advisory-setup: ## 에이전트 자문 부트스트랩 (git pull 후 1회, 멱등·라이브 무영향)
 	@bash scripts/setup_agent_advisory.sh
+
+hermes-ops-setup: ## Hermes+advisory 운영 셋업 점검·안내 (설치는 ARGS=--install-hermes 등 opt-in)
+	@bash scripts/setup_hermes_ops.sh $(ARGS)
 
 advisory-writer: ## 자문 writer 루프 (claude-cli; 데몬 무영향). 시장국면 LLM: make advisory-writer ARGS=--market-llm
 	@$(PYTHON) scripts/agent_advisory_writer.py --interval 30 --backend claude-cli --telegram $(ARGS)
