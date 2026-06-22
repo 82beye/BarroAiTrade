@@ -35,6 +35,14 @@ LLM 키 없거나 절약 시 `--backend mock`(결정적 룰)로도 표시 가능
 ## 3. Phase 2 — shadow 측정 (라이브 무영향)
 writer가 `data/advisory.json`을 계속 갱신한다. 데몬 리더는 코드에 이미 있으나 **OFF라 읽기만 안 함** → advisory가 게이트했을 매매를 사후 비교한다(≥1~2주, 진실원천 `_daily_strategy_audit.py`). net-of-cost 개선이 확인되면 Phase 3.
 
+**일자별 측정**(read-only, `logs/decisions/<date>.jsonl` + `order_audit.csv` + `reports/strategy_audit_<date>.json` 사용):
+```bash
+# 먼저 진실원천 audit 산출(없으면): python scripts/_daily_strategy_audit.py --date <D> --save
+make advisory-shadow DATE=2026-06-23          # → reports/advisory_shadow_<D>.md/.json
+#  improvement(+)=손실 회피 우위 / (−)=승자 제거 우위. ≥1~2주 누적 부호로 Phase3 판단.
+```
+판정은 **claude-cli 백엔드 실판단 누적**이 가장 의미 있다(mock은 룰 데모). 종목 단위 집계·자본 재배분 미반영은 도구가 한계로 명시한다.
+
 ## 4. Phase 3 — 게이트 활성 (★HITL)
 ```bash
 # data/policy.json 에 추가 (jq 로 키만 — 통째 덮어쓰기 금지)
