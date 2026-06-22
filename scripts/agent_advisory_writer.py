@@ -107,8 +107,11 @@ def claude_cli_verdict(sig: dict, *, timeout: float = 25.0) -> dict | None:
     return _parse_verdict_text(proc.stdout)
 
 
-def _parse_verdict_text(text: str) -> dict | None:
-    """LLM 출력에서 verdict JSON 추출. claude --output-format json 의 result 필드 또는 본문 JSON."""
+def _extract_json(text: str) -> dict | None:
+    """claude -p --output-format json 출력 → 본문 첫 {...} JSON dict. 실패 None.
+
+    (verdict·market 오버레이 공통 추출부.)
+    """
     if not text:
         return None
     raw = text.strip()
@@ -119,13 +122,34 @@ def _parse_verdict_text(text: str) -> dict | None:
             raw = str(outer["result"]).strip()
     except (json.JSONDecodeError, ValueError):
         pass
-    # 본문에서 첫 { ... } 블록 파싱
     start, end = raw.find("{"), raw.rfind("}")
     if start < 0 or end <= start:
         return None
     try:
         obj = json.loads(raw[start:end + 1])
     except (json.JSONDecodeError, ValueError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _run_claude_cli(prompt: str, timeout: float) -> dict | None:
+    """`claude -p` 헤드리스 호출 → JSON dict. 실패/타임아웃/비0 → None."""
+    try:
+        proc = subprocess.run(
+            ["claude", "-p", prompt, "--output-format", "json"],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return _extract_json(proc.stdout)
+
+
+def _parse_verdict_text(text: str) -> dict | None:
+    """LLM 출력 → verdict({action,confidence,reason}). 잘못된 action → None."""
+    obj = _extract_json(text)
+    if obj is None:
         return None
     action = str(obj.get("action", "")).strip().upper().replace("NOGO", "NO-GO")
     if action not in _ACTIONS:
@@ -194,12 +218,58 @@ def append_decision_log(logs_dir: Path, record: dict, now: datetime) -> None:
 
 _REGIME_RISK_ON = {"bull": True, "sideways": True, "bearish": False}
 
+_MARKET_LLM_PROMPT = """\
+너는 한국주식 장중 시장국면 판단 보조다. 아래 결정적 신호를 종합해 현재 시장이 위험선호(risk-on)인지
+위험회피(risk-off)인지, 활성 단타 전략별 매수 허용 여부를 판단한다. 결정적 regime 을 존중하되,
+거래대금 집중(특정 테마 과열 쏠림)·보유 테마 편중을 고려해 보수/공격을 조정한다.
+출력은 JSON 한 줄만:
+{{"risk_on":true|false,"confidence":0~1,"strategy_gates":{{"f_zone":true,"sf_zone":true,"gold_zone":true,"swing_38":true}},"reason":"한국어 한 문장"}}
+strategy_gates 는 각 전략 매수 허용(true)/차단(false).
 
-def produce_market_sections(snapshot: dict, theme_map: dict, now: datetime) -> dict:
+결정적 신호: regime={regime}
+오늘 거래대금 집중 테마(상위): {hot}
+보유 테마 노출: {exposure}
+"""
+
+
+def market_context_llm_overlay(base: dict, *, hot, exposure, regime,
+                               timeout: float = 30.0, llm_fn=None) -> dict:
+    """결정적 market_context base 에 LLM 판단(risk_on/confidence/strategy_gates/reason) 오버레이.
+
+    실패/응답불가 → base 그대로(fail-open). llm_fn 주입 시 테스트(실 claude 호출 회피).
+    결정적 regime/ts 는 보존 — LLM 은 soft 신호(risk_on/게이트/사유)만 덮어쓴다.
+    """
+    hot_str = ", ".join(f"{h.get('theme')}({h.get('turnover_pct', 0):.0%})"
+                        for h in (hot or [])[:5]) or "(없음)"
+    exp_str = ", ".join(f"{t}:{p:.0%}" for t, p in
+                        sorted((exposure or {}).items(), key=lambda kv: -kv[1])[:5]) or "(없음)"
+    prompt = _MARKET_LLM_PROMPT.format(regime=regime, hot=hot_str, exposure=exp_str)
+    fn = llm_fn or (lambda p: _run_claude_cli(p, timeout))
+    obj = fn(prompt)
+    if not isinstance(obj, dict):
+        return base                                   # fail-open
+    out = dict(base)
+    if obj.get("risk_on") is not None:
+        out["risk_on"] = bool(obj["risk_on"])
+    try:
+        out["confidence"] = float(obj.get("confidence", base.get("confidence", 0.5)))
+    except (TypeError, ValueError):
+        pass
+    gates = obj.get("strategy_gates")
+    if isinstance(gates, dict):
+        out["strategy_gates"] = {str(k): bool(v) for k, v in gates.items()}
+    if obj.get("reason"):
+        out["reason"] = str(obj["reason"])
+    out["source"] = "snapshot+llm"
+    return out
+
+
+def produce_market_sections(snapshot: dict, theme_map: dict, now: datetime, *,
+                            llm: bool = False, llm_fn=None, llm_timeout: float = 30.0) -> dict:
     """결정적 시장-맥락 섹션 생산 (market_snapshot.json + theme_map → advisory 섹션).
 
-    LLM 없이 결정적으로 산출(국면 risk_on, 거래대금 집중 테마, 포트폴리오 테마 노출/집중).
-    LLM 오버레이(국면 내러티브·테마 진위)는 후속 — 본 함수는 결정적 1차 신호.
+    결정적 1차 신호(국면 risk_on·거래대금 집중 테마·포트폴리오 노출/집중). `llm=True` 면
+    market_context 에 LLM 오버레이(opt-in) — 실패 시 결정적 base 로 fail-open.
     """
     if not isinstance(snapshot, dict):
         return {}
@@ -210,19 +280,22 @@ def produce_market_sections(snapshot: dict, theme_map: dict, now: datetime) -> d
 
     exposure = theme_exposure(positions, theme_map)
     concentration = max(exposure.values(), default=0.0)
+    hot = hot_themes(leaders, theme_map, top=10)
+    market_ctx = {
+        "regime": regime,
+        "risk_on": _REGIME_RISK_ON.get(regime),
+        "confidence": 0.5,                           # 결정적 base
+        "strategy_gates": {},
+        "reason": f"regime={regime}(결정적)",
+        "ts": ts, "source": "snapshot",
+    }
+    if llm:
+        market_ctx = market_context_llm_overlay(
+            market_ctx, hot=hot, exposure=exposure, regime=regime,
+            timeout=llm_timeout, llm_fn=llm_fn)
     return {
-        "market_context": {
-            "regime": regime,
-            "risk_on": _REGIME_RISK_ON.get(regime),
-            "confidence": 0.5,                       # 결정적 base(LLM 오버레이 전)
-            "strategy_gates": {},
-            "reason": f"regime={regime}(결정적)",
-            "ts": ts, "source": "snapshot",
-        },
-        "sector_themes": {
-            "hot": hot_themes(leaders, theme_map, top=10),
-            "ts": ts, "source": "snapshot",
-        },
+        "market_context": market_ctx,
+        "sector_themes": {"hot": hot, "ts": ts, "source": "snapshot"},
         "portfolio_signals": {
             "theme_exposure": exposure,
             "concentration_pct": round(concentration, 4),
@@ -234,8 +307,11 @@ def produce_market_sections(snapshot: dict, theme_map: dict, now: datetime) -> d
 
 def run_once(*, backend: str, data_dir: Path, logs_dir: Path, ttl_sec: int,
              keep_sec: int, top: int, now: datetime | None = None,
-             verdict_fn=None) -> list[dict]:
-    """1회: refined_signals 읽기 → verdict 산출 → advisory.json/decisions 기록. 신규 verdict 반환."""
+             verdict_fn=None, market_llm: bool = False, market_llm_fn=None) -> list[dict]:
+    """1회: refined_signals 읽기 → verdict 산출 → advisory.json/decisions 기록. 신규 verdict 반환.
+
+    market_llm=True 면 market_context 에 LLM 오버레이(opt-in, 실패 시 결정적 fail-open).
+    """
     now = now or _now()
     fn = verdict_fn or _BACKENDS[backend]
     signals = read_refined_signals(data_dir / "refined_signals.json")
@@ -272,7 +348,9 @@ def run_once(*, backend: str, data_dir: Path, logs_dir: Path, ttl_sec: int,
     except (OSError, json.JSONDecodeError, ValueError):
         snap = None
     if snap:
-        merged.update(produce_market_sections(snap, load_theme_map(data_dir / "theme_map.json"), now))
+        merged.update(produce_market_sections(
+            snap, load_theme_map(data_dir / "theme_map.json"), now,
+            llm=market_llm, llm_fn=market_llm_fn))
     write_json_atomic(adv_path, merged)
     return new_verdicts
 
@@ -304,16 +382,20 @@ def main(argv=None) -> int:
     ap.add_argument("--keep", type=int, default=900, help="advisory.json 보관 한도(초)")
     ap.add_argument("--top", type=int, default=0, help="상위 N 신호만(0=전체)")
     ap.add_argument("--telegram", action="store_true", help="verdict 텔레그램 실시간 표시")
+    ap.add_argument("--market-llm", action="store_true",
+                    help="market_context 에 LLM 오버레이(claude-cli). 미설정=결정적만. env BARRO_MARKET_LLM")
     ap.add_argument("--data-dir", default=str(_DATA_DIR))
     ap.add_argument("--logs-dir", default=str(_LOGS_DIR))
     args = ap.parse_args(argv)
 
     data_dir, logs_dir = Path(args.data_dir), Path(args.logs_dir)
     one_shot = args.once or args.interval <= 0
+    market_llm = args.market_llm or os.environ.get("BARRO_MARKET_LLM", "").strip().lower() in {"1", "true", "yes", "on"}
 
     def _tick():
         verdicts = run_once(backend=args.backend, data_dir=data_dir, logs_dir=logs_dir,
-                            ttl_sec=args.ttl, keep_sec=args.keep, top=args.top)
+                            ttl_sec=args.ttl, keep_sec=args.keep, top=args.top,
+                            market_llm=market_llm)
         ts = datetime.now().strftime("%H:%M:%S")
         print(f"[{ts}] advisory writer: {len(verdicts)}건 verdict (backend={args.backend})")
         for v in verdicts:
