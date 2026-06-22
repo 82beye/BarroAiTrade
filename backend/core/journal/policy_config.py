@@ -61,6 +61,30 @@ class PolicyConfig:
     agent_advisory_ttl_sec: int = 180
     agent_advisory_block_wait: bool = False    # True 면 WAIT 도 차단(보수적), 기본 NO-GO 만
     agent_advisory_min_confidence: float = 0.0
+    # 2026-06-23 — 시장-맥락 add-on (전부 default-OFF, mode soft). advisory.json top-level
+    # 섹션(market_context/sector_themes/portfolio_signals)을 _scan_and_buy 가 소비.
+    # 결정적 하드캡 + LLM 소프트. off → 무변경(byte-identical). 설계: market_context.py.
+    # 활성/하드 승격은 shadow 측정 후 (d) HITL. mode ∈ {soft, hard}.
+    # ① 시장국면: risk-off/bearish 시 max_buy 축소(soft)·전략게이트 차단(hard)
+    market_context_enabled: bool = False
+    market_context_mode: str = "soft"
+    market_context_ttl_sec: int = 600
+    # ② 거래대금 집중 테마: under-exposed 핫테마 우선/표시(soft, sector-expert)
+    sector_themes_enabled: bool = False
+    sector_themes_mode: str = "soft"
+    sector_themes_ttl_sec: int = 600
+    # ③ 포트폴리오 테마 쏠림 가드: 단일 테마 노출 ≥cap → 매수 차단(hard)/사이징 축소(soft)
+    portfolio_theme_enabled: bool = False
+    portfolio_theme_mode: str = "soft"
+    portfolio_theme_ttl_sec: int = 600
+    portfolio_max_theme_pct: float = 0.30
+    portfolio_theme_soft_factor: float = 0.5
+    # ④ 포트폴리오 리스크: 집중도≥cap 또는 leverage 경고 → 전역 사이징 throttle
+    portfolio_risk_enabled: bool = False
+    portfolio_risk_mode: str = "soft"
+    portfolio_risk_ttl_sec: int = 600
+    portfolio_max_concentration_pct: float = 0.40
+    portfolio_risk_throttle: float = 0.5
     history: list[dict] = field(default_factory=list)         # 변경 이력
 
     def as_dict(self) -> dict:
