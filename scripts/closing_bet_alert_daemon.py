@@ -43,6 +43,10 @@ from backend.core.strategy.closing_bet import (  # noqa: E402
     ClosingBetParams, ClosingBetStrategy,
 )
 from backend.models.market import MarketType, OHLCV  # noqa: E402
+from decimal import Decimal  # noqa: E402,F401
+from backend.core.gateway.kiwoom_native_account import KiwoomNativeAccountFetcher  # noqa: E402
+from backend.core.gateway.kiwoom_native_orders import KiwoomNativeOrderExecutor  # noqa: E402
+from backend.core.risk.live_order_gate import GatePolicy, LiveOrderGate  # noqa: E402
 from backend.models.strategy import AnalysisContext  # noqa: E402
 
 _KST = timezone(timedelta(hours=9))
@@ -97,6 +101,58 @@ def add_position(symbol, entry_price, qty, name, tp_pct, sl_pct, entry_date=None
                 "tp_pct": float(tp_pct), "sl_pct": float(sl_pct), "alerted": []})
     save_positions(pos)
     print(f"등록: {symbol} {name} @ {float(entry_price):,.0f} x{qty} (TP+{tp_pct}%/SL-{sl_pct}%)")
+
+
+# ── 종베 자동매수 (BARRO_CB_AUTOEXEC, default-OFF) — 설계 2026-06-22-closing-bet-eod-auto-execution ──
+def _cb_autoexec() -> bool:
+    return os.environ.get("BARRO_CB_AUTOEXEC", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+_CB_MAX_POS = int(os.environ.get("BARRO_CB_MAX_POS", "2"))       # 동시 보유 한도(종목)
+_CB_MAX_PCT = float(os.environ.get("BARRO_CB_MAX_PCT", "0.10"))  # 종목당 비중(주문가능액 대비)
+_CB_TP = float(os.environ.get("BARRO_CB_TP", "4.5"))            # 익절%(익일 슈팅, 설계)
+_CB_SL = float(os.environ.get("BARRO_CB_SL", "5.0"))            # 손절%(갭 흡수, 설계)
+
+
+async def _cb_auto_buy(sym, name, price, oauth, dry_run, dry_print) -> None:
+    """[2026-06-22] 종베 자동매수(config-gated). 단일 트랜치·동시 _CB_MAX_POS·비중 _CB_MAX_PCT·중복방지.
+    실체결 즉시 closing_bet_positions.json 등록(보호·모니터링). dry_run=True 면 미체결(주문로직만 검증).
+    SELL 은 현행 신호전용 유지(이 PR 범위=BUY 자동매수)."""
+    held = load_positions()
+    if any(p["symbol"] == sym for p in held):
+        print(f"  [CB-AUTOEXEC-SKIP] {sym} 이미 보유분 — 중복매수 방지"); return
+    if len(held) >= _CB_MAX_POS:
+        print(f"  [CB-AUTOEXEC-SKIP] 동시보유 한도 {_CB_MAX_POS} 도달 — {sym} 보류"); return
+    if price <= 0:
+        print(f"  [CB-AUTOEXEC-SKIP] {sym} 가격 이상 {price}"); return
+    try:
+        dep = await KiwoomNativeAccountFetcher(oauth=oauth).fetch_deposit()
+        orderable = float(getattr(dep, "orderable_cash", 0) or getattr(dep, "cash", 0) or 0)
+    except Exception as e:  # noqa: BLE001
+        print(f"  [CB-AUTOEXEC-SKIP] {sym} 잔고조회 실패 {type(e).__name__}: {e}"); return
+    qty = int((orderable * _CB_MAX_PCT) // price)
+    if qty <= 0:
+        print(f"  [CB-AUTOEXEC-SKIP] {sym} 수량 0 (주문가능 {orderable:,.0f}x{_CB_MAX_PCT:.0%}/{price:,.0f})"); return
+    notifier = None
+    if not dry_print:
+        try:
+            from backend.core.notify.telegram import TelegramNotifier
+            notifier = TelegramNotifier.from_env()
+        except Exception:  # noqa: BLE001
+            notifier = None
+    executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=dry_run)
+    gate = LiveOrderGate(executor=executor, audit_path=str(_MAIN_DATA / "order_audit.csv"),
+                         policy=GatePolicy(daily_max_orders=int(os.environ.get("BARRO_CB_MAX_ORDERS", "10"))),
+                         notifier=notifier)
+    try:
+        r = await gate.place_buy(symbol=sym, qty=qty, strategy_id="closing_bet")
+    except Exception as e:  # noqa: BLE001
+        print(f"  [CB-AUTOEXEC-ERR] {sym} 주문실패 {type(e).__name__}: {e}"); return
+    is_dry = bool(getattr(r, "dry_run", dry_run))
+    tag = "DRY_RUN" if is_dry else "BOUGHT"
+    await notify(f"\U0001f7e2 [\uc885\ubca0 \uc790\ub3d9\ub9e4\uc218-{tag}] {name}({sym}) {qty}\uc8fc @~{price:,.0f} "
+                 f"(\ube44\uc911 {_CB_MAX_PCT:.0%}\u00b7\uc8fc\ubb38\uac00\ub2a5 {orderable:,.0f}) order_no={getattr(r,'order_no','') or '-'}", dry_print)
+    if not is_dry:
+        add_position(sym, price, qty, name, _CB_TP, _CB_SL)   # 체결 즉시 등록(보호·모니터링)
 
 
 # ── 알림 전송 ────────────────────────────────────────────────────────────────
@@ -190,7 +246,7 @@ def _load_daily(symbol: str) -> list[OHLCV]:
     return out
 
 
-async def scan_buy(dry_print: bool, from_cache: bool, symbols: list[str], top_n: int) -> None:
+async def scan_buy(dry_print: bool, from_cache: bool, symbols: list[str], top_n: int, dry_run: bool = False) -> None:
     strat = ClosingBetStrategy(PARAMS)
     # [검증버전(paper_scan) 일치, 2026-06-18] 5분봉 + leader_meta 주입 → money_flow 게이트 활성화.
     #   candidates 튜플: (sym, name, daily, m5, meta)
@@ -219,11 +275,18 @@ async def scan_buy(dry_print: bool, from_cache: bool, symbols: list[str], top_n:
                                                 market_type=MarketType.STOCK,
                                                 intraday_candles=m5 or None, theme_context=meta))
         if sig:
-            await notify(
-                f"🔔 [종베 매수 시그널] {name}({sym})\n"
-                f"{sig.reason}\n"
-                f"진입가(종가) ~{sig.price:,.0f}  score={sig.score}\n"
-                f"※ 자동매수 안 함 — 직접 매수 판단하세요. 매수하면 --add 로 등록.", dry_print)
+            if _cb_autoexec() and not from_cache:
+                await notify(
+                    f"🔔 [종베 매수 시그널] {name}({sym})\n"
+                    f"{sig.reason}\n"
+                    f"진입가(종가) ~{sig.price:,.0f}  score={sig.score}", dry_print)
+                await _cb_auto_buy(sym, name, float(sig.price), oauth, dry_run, dry_print)
+            else:
+                await notify(
+                    f"🔔 [종베 매수 시그널] {name}({sym})\n"
+                    f"{sig.reason}\n"
+                    f"진입가(종가) ~{sig.price:,.0f}  score={sig.score}\n"
+                    f"※ 자동매수 안 함 — 직접 매수 판단하세요. 매수하면 --add 로 등록.", dry_print)
 
 
 # ── 메인 ─────────────────────────────────────────────────────────────────────
@@ -235,7 +298,7 @@ async def _run(args) -> None:
             print(f"매수창(15:00~15:20) 밖 — skip. --force 로 무시.")
             return
         await scan_buy(args.dry_print, args.from_cache,
-                       [s.strip() for s in args.symbols.split(",") if s.strip()], args.top)
+                       [s.strip() for s in args.symbols.split(",") if s.strip()], args.top, args.dry_run)
     elif args.mode == "loop":
         while True:
             t = _now().time()
@@ -245,7 +308,7 @@ async def _run(args) -> None:
             try:
                 if BUY_WINDOW[0] <= t <= BUY_WINDOW[1]:
                     await scan_buy(args.dry_print, args.from_cache,
-                                   [s.strip() for s in args.symbols.split(",") if s.strip()], args.top)
+                                   [s.strip() for s in args.symbols.split(",") if s.strip()], args.top, args.dry_run)
                 if dtime(9, 0) <= t <= dtime(15, 30):
                     await scan_sell(args.dry_print, args.from_cache)
             except Exception as e:  # noqa: BLE001 — 사이클 격리(다음 주기 계속)
@@ -268,6 +331,7 @@ def main() -> None:
     ap.add_argument("--interval", type=int, default=60)
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--from-cache", action="store_true")
+    ap.add_argument("--dry-run", action="store_true", help="주문 dry-run(미체결) — 자동매수 로직 검증용")
     ap.add_argument("--dry-print", action="store_true", help="텔레그램 대신 stdout")
     args = ap.parse_args()
 
