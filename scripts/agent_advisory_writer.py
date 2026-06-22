@@ -373,6 +373,43 @@ def _maybe_telegram(verdicts: list[dict]) -> None:
         pass
 
 
+_last_market_msg: str | None = None
+
+
+def build_market_message(data_dir: Path) -> str:
+    """advisory.json 의 market-context 섹션 → 텔레그램 메시지(빈 섹션 생략). 없으면 ''."""
+    from backend.core.notify.telegram import (
+        format_macro_alert, format_portfolio_alert, format_sector_alert,
+    )
+    try:
+        data = json.loads((data_dir / "advisory.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return ""
+    parts = [m for m in (format_macro_alert(data.get("market_context")),
+                         format_sector_alert(data.get("sector_themes")),
+                         format_portfolio_alert(data.get("portfolio_signals"))) if m]
+    return "\n\n".join(parts)
+
+
+def _maybe_telegram_market(data_dir: Path) -> None:
+    """market-context 섹션을 텔레그램 표시. 변경 없으면 재전송 안 함(스팸 방지). 실패 무시."""
+    global _last_market_msg
+    msg = build_market_message(data_dir)
+    if not msg or msg == _last_market_msg:
+        return
+    try:
+        import asyncio
+
+        from backend.core.notify.telegram import TelegramNotifier
+        notifier = TelegramNotifier.from_env()
+        if notifier is None:
+            return
+        asyncio.run(notifier.send(msg))
+        _last_market_msg = msg
+    except Exception:
+        pass
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="에이전트 자문 writer (advisory.json 생산자)")
     ap.add_argument("--backend", choices=list(_BACKENDS), default="claude-cli")
@@ -402,6 +439,7 @@ def main(argv=None) -> int:
             print(f"   {v['symbol']} {v['action']} ({v['confidence']:.0%}) {v['reason']}")
         if args.telegram:
             _maybe_telegram(verdicts)
+            _maybe_telegram_market(data_dir)   # 시장국면·핫테마·포트폴리오 표시
 
     if one_shot:
         _tick()

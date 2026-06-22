@@ -188,10 +188,71 @@ def format_blocked_alert(side: str, symbol: str, reason: str) -> str:
     )
 
 
+# ── 시장-맥락 add-on 표시 (advisory.json 섹션 → Telegram) ─────────────────────
+
+def format_macro_alert(market_context: dict | None) -> str:
+    """시장국면(market_context) 표시. 빈/unknown → ''(표시 생략)."""
+    mc = market_context or {}
+    regime = str(mc.get("regime", "unknown"))
+    if not mc or regime == "unknown":
+        return ""
+    risk = mc.get("risk_on")
+    risk_str = "risk-on 🟢" if risk is True else ("risk-off 🔴" if risk is False else "중립")
+    head = f"🧭 *시장국면* `{regime.upper()}` · {risk_str}"
+    conf = mc.get("confidence")
+    if isinstance(conf, (int, float)):
+        head += f" · 신뢰 {conf:.0%}"
+    if mc.get("source") == "snapshot+llm":
+        head += " 🤖"
+    lines = [head]
+    blocked = [k for k, v in (mc.get("strategy_gates") or {}).items() if v is False]
+    if blocked:
+        lines.append(f"전략 차단: {', '.join(_escape_md(b) for b in blocked)}")
+    reason = str(mc.get("reason", ""))
+    if reason:
+        lines.append(_escape_md(reason[:120]))
+    return "\n".join(lines)
+
+
+def format_sector_alert(sector_themes: dict | None, *, top: int = 3) -> str:
+    """오늘 거래대금 집중 핫테마 표시. 핫테마 없음 → ''."""
+    hot = (sector_themes or {}).get("hot") or []
+    items = [h for h in hot if isinstance(h, dict) and h.get("theme")][:top]
+    if not items:
+        return ""
+    parts = ", ".join(
+        f"{_escape_md(str(h['theme']))} {float(h.get('turnover_pct', 0) or 0):.0%}"
+        for h in items)
+    return f"🔥 *거래대금 집중 테마*\n{parts}"
+
+
+def format_portfolio_alert(portfolio_signals: dict | None, *,
+                           theme_cap: float = 0.30, top: int = 4) -> str:
+    """포트폴리오 테마 노출/집중/leverage 표시. 빈(보유 없음·경고 없음) → ''."""
+    ps = portfolio_signals or {}
+    exposure = ps.get("theme_exposure") or {}
+    lev = bool(ps.get("leverage_warn"))
+    if not exposure and not lev:
+        return ""
+    head = "📦 *포트폴리오*"
+    conc = ps.get("concentration_pct")
+    if isinstance(conc, (int, float)):
+        head += f" · 집중도 {conc:.0%}"
+    ranked = sorted(exposure.items(), key=lambda kv: -kv[1])[:top]
+    lines = [head, "테마노출: " + (", ".join(f"{_escape_md(t)} {p:.0%}" for t, p in ranked) or "(없음)")]
+    over = sorted(t for t, p in exposure.items() if p >= theme_cap)
+    if over:
+        lines.append(f"⚠️ 과다: {', '.join(_escape_md(t) for t in over)}")
+    if lev:
+        lines.append("⚠️ leverage 경고")
+    return "\n".join(lines)
+
+
 __all__ = [
     "TelegramNotifier",
     "format_buy_alert", "format_sell_alert",
     "format_simulation_summary", "format_blocked_alert",
+    "format_macro_alert", "format_sector_alert", "format_portfolio_alert",
     "SELL_TAGS",
 ]
 
