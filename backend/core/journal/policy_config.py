@@ -69,10 +69,12 @@ class PolicyConfig:
     market_context_enabled: bool = False
     market_context_mode: str = "soft"
     market_context_ttl_sec: int = 600
-    # ② 거래대금 집중 테마: under-exposed 핫테마 우선/표시(soft, sector-expert)
+    # ② 거래대금 집중 테마: 오늘 거래대금 쏠림 핫테마 중 under-exposed 신호를 우선순위 가점(soft 재정렬)
     sector_themes_enabled: bool = False
     sector_themes_mode: str = "soft"
     sector_themes_ttl_sec: int = 600
+    sector_underexposed_max_pct: float = 0.30   # 보유 노출 ≥ 이 값인 테마는 가점 제외(이미 충분)
+    sector_min_turnover_pct: float = 0.0        # 거래대금 share 이 미만인 핫테마는 무시
     # ③ 포트폴리오 테마 쏠림 가드: 단일 테마 노출 ≥cap → 매수 차단(hard)/사이징 축소(soft)
     portfolio_theme_enabled: bool = False
     portfolio_theme_mode: str = "soft"

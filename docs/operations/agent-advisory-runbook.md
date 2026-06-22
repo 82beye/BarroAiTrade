@@ -68,6 +68,8 @@ jq '. + {"agent_advisory_enabled": true, "agent_advisory_ttl_sec": 180}' data/po
 jq '. + {"portfolio_theme_enabled": true, "portfolio_theme_mode": "soft", "portfolio_max_theme_pct": 0.30}' data/policy.json > /tmp/p && mv /tmp/p data/policy.json
 # shadow 입증 후 hard(차단) 승격:  "portfolio_theme_mode": "hard"
 # 시장국면(risk-off → max_buy 축소):  "market_context_enabled": true
+# 거래대금 집중 핫테마 우선(under-exposed 신호 앞으로):  "sector_themes_enabled": true
+#   (옵션) "sector_underexposed_max_pct": 0.30  "sector_min_turnover_pct": 0.05
 # 포트폴리오 리스크 throttle:  "portfolio_risk_enabled": true
 ```
 - **롤백(즉시)**: 해당 `*_enabled` → `false`. 데몬 byte-identical(사이징 ×1.0) 복귀.

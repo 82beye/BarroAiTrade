@@ -177,6 +177,23 @@ class PortfolioRiskConfig:
                    throttle_factor=float(getattr(cfg, "portfolio_risk_throttle", 0.5)))
 
 
+@dataclass(frozen=True)
+class SectorThemesConfig:
+    enabled: bool = False
+    mode: str = SOFT
+    ttl_sec: int = 600
+    underexposed_max_pct: float = 0.30   # 이 이상 노출된 테마는 우선순위 가점 제외(이미 충분)
+    min_turnover_pct: float = 0.0        # 거래대금 share 가 이 미만인 hot 테마는 무시
+
+    @classmethod
+    def from_policy_config(cls, cfg):
+        return cls(enabled=bool(getattr(cfg, "sector_themes_enabled", False)),
+                   mode=str(getattr(cfg, "sector_themes_mode", SOFT)),
+                   ttl_sec=int(getattr(cfg, "sector_themes_ttl_sec", 600)),
+                   underexposed_max_pct=float(getattr(cfg, "sector_underexposed_max_pct", 0.30)),
+                   min_turnover_pct=float(getattr(cfg, "sector_min_turnover_pct", 0.0)))
+
+
 # ── apply (데몬 hook — off → 무변경) ─────────────────────────────────────────
 
 def apply_market_context(max_buy, signals, cfg: MarketContextConfig,
@@ -242,8 +259,47 @@ def apply_portfolio_risk(cfg: PortfolioRiskConfig, psig: PortfolioSignals, now):
     return 1.0, None
 
 
+def apply_sector_priority(signals, cfg: SectorThemesConfig, sector: SectorThemes,
+                          psig: PortfolioSignals, theme_map: dict, now):
+    """거래대금 집중(핫) 테마 우선순위 가점 — 신호 재정렬(soft).
+
+    오늘 거래대금이 쏠리는 핫테마의 신호를 앞으로 당겨, 슬롯 경합(`buyable[:max_buy]`) 시
+    우선 매수. 단 **이미 충분히 노출된 테마(exposure ≥ underexposed_max_pct)는 가점 제외**
+    (쏠림 가드가 처리) → 자본이 핫하면서도 *덜 담은* 테마로 흐른다.
+
+    반환: (reordered_signals, boosted[(symbol, bonus)]). off/stale/핫테마 없음 → (signals, [])
+    (재정렬 없음 = byte-identical). 가점 동률은 원순서 보존(stable).
+    """
+    if not cfg.enabled or not sector.is_fresh(now, cfg.ttl_sec):
+        return signals, []
+    hot_pct = {h.get("theme"): float(h.get("turnover_pct", 0.0))
+               for h in sector.hot if isinstance(h, dict) and h.get("theme")}
+    if not hot_pct:
+        return signals, []
+    exposure = psig.theme_exposure or {}
+
+    def _bonus(s) -> float:
+        sym = getattr(s[0], "symbol", None)
+        b = 0.0
+        for t in themes_of(sym, theme_map):
+            tp = hot_pct.get(t, 0.0)
+            if tp <= 0.0 or tp < cfg.min_turnover_pct:
+                continue
+            if exposure.get(t, 0.0) >= cfg.underexposed_max_pct:
+                continue                       # 이미 충분히 노출 → 가점 제외
+            b = max(b, tp)
+        return b
+
+    scored = [(_bonus(s), i, s) for i, s in enumerate(signals)]
+    scored.sort(key=lambda x: (-x[0], x[1]))   # 가점 desc, 동률은 원순서(stable)
+    reordered = [s for _, _, s in scored]
+    boosted = [(getattr(s[0], "symbol", None), b) for b, _, s in scored if b > 0]
+    return reordered, boosted
+
+
 __all__ = [
     "SOFT", "HARD", "MarketContext", "SectorThemes", "PortfolioSignals", "MarketAdvisory",
     "load_market_advisory", "MarketContextConfig", "PortfolioThemeConfig", "PortfolioRiskConfig",
-    "apply_market_context", "apply_theme_guard", "apply_portfolio_risk", "parse_ts",
+    "SectorThemesConfig", "apply_market_context", "apply_theme_guard", "apply_portfolio_risk",
+    "apply_sector_priority", "parse_ts",
 ]
