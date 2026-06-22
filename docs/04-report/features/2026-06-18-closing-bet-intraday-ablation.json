@@ -1,33 +1,33 @@
 {
-  "eval_stock_days": 19670,
+  "eval_stock_days": 19700,
   "variants": {
     "baseline": {
-      "trades": 448,
-      "win_rate": 55.1,
-      "gross_exp_pct": 0.966,
-      "net_model_0.55": 0.416,
-      "net_real_0.90": 0.066
+      "trades": 432,
+      "win_rate": 55.8,
+      "gross_exp_pct": 1.007,
+      "net_model_0.55": 0.457,
+      "net_real_0.90": 0.107
     },
     "+money_flow": {
-      "trades": 274,
-      "win_rate": 55.5,
-      "gross_exp_pct": 0.985,
-      "net_model_0.55": 0.435,
-      "net_real_0.90": 0.085
+      "trades": 264,
+      "win_rate": 55.3,
+      "gross_exp_pct": 0.997,
+      "net_model_0.55": 0.447,
+      "net_real_0.90": 0.097
     },
     "+zone": {
-      "trades": 58,
-      "win_rate": 51.7,
-      "gross_exp_pct": 0.711,
-      "net_model_0.55": 0.161,
-      "net_real_0.90": -0.189
+      "trades": 53,
+      "win_rate": 54.7,
+      "gross_exp_pct": 0.88,
+      "net_model_0.55": 0.33,
+      "net_real_0.90": -0.02
     },
     "+both": {
-      "trades": 38,
-      "win_rate": 47.4,
-      "gross_exp_pct": 0.355,
-      "net_model_0.55": -0.195,
-      "net_real_0.90": -0.545
+      "trades": 35,
+      "win_rate": 48.6,
+      "gross_exp_pct": 0.369,
+      "net_model_0.55": -0.181,
+      "net_real_0.90": -0.531
     }
   }
 }

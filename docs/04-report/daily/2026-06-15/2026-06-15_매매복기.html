@@ -1,198 +1,107 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BarroAiTrade 매매복기 2026-06-15</title>
-<style>
-body{font-family:-apple-system,'Apple SD Gothic Neo',Segoe UI,Roboto,sans-serif;max-width:960px;margin:0 auto;padding:24px;color:#1a1a1a;line-height:1.6}
-h1{border-bottom:3px solid #c0392b;padding-bottom:8px}
-h2{margin-top:1.8em;border-left:4px solid #2c3e50;padding-left:10px}
-table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px}
-th,td{border:1px solid #ddd;padding:6px 9px;text-align:right}
-th{background:#2c3e50;color:#fff;text-align:center}
-td:first-child,th:first-child,td:nth-child(2){text-align:left}
-tr:nth-child(even){background:#f7f9fb}
-code{background:#eef1f3;padding:1px 5px;border-radius:3px;font-size:13px}
-blockquote{color:#666;border-left:3px solid #ccc;margin:0;padding-left:12px;font-size:14px}
-strong{color:#c0392b} li{margin:3px 0} hr{border:none;border-top:1px solid #ddd;margin:24px 0}
-</style></head><body>
-<h1>BarroAiTrade 매매복기 — 2026-06-15 (월)</h1>
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BarroAiTrade 매매복기 2026-06-15 (정정)</title>
+<style>body{font-family:-apple-system,'Apple SD Gothic Neo',Segoe UI,Roboto,sans-serif;max-width:980px;margin:0 auto;padding:24px;color:#1a1a1a;line-height:1.6}
+h1{border-bottom:3px solid #c0392b;padding-bottom:8px}h2{margin-top:1.8em;border-left:4px solid #2c3e50;padding-left:10px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}th,td{border:1px solid #ddd;padding:6px 9px;text-align:right}
+th{background:#2c3e50;color:#fff;text-align:center}td:first-child,th:first-child,td:nth-child(2){text-align:left}tr:nth-child(even){background:#f7f9fb}
+code{background:#eef1f3;padding:1px 5px;border-radius:3px;font-size:13px}blockquote{color:#666;border-left:3px solid #ccc;margin:0;padding-left:12px;font-size:14px}
+strong{color:#c0392b}li{margin:3px 0}hr{border:none;border-top:1px solid #ddd;margin:24px 0}</style></head><body>
+<h1>BarroAiTrade 매매복기 — 2026-06-15 (월) · 브로커 실측 정정판(REVISED)</h1>
 
-<blockquote>생성: 2026-06-16 07:22 KST · 6/13~14 주말 휴장, 직전 거래일 6/12</blockquote>
+<blockquote>생성: 2026-06-17 06:35 KST · 직전 거래일 6/12 · <strong>브로커 실측(fill_audit 84행)</strong></blockquote>
+<blockquote>정정: 최초 6/15 복기는 fill_audit 부재로 <strong>추정(-290,124)</strong>이었으나, 6/16 아카이브에 6/15 체결 84행이 백필되어 <strong>실측(-466,023)</strong>으로 교체. <code>_daily_strategy_audit.py --source auto</code> 진실원천(<code>reports/strategy_audit_2026-06-15.json</code>).</blockquote>
 
-<h2>⚠️ 데이터 완전성 경고 (먼저 읽으세요)</h2>
+<h2>⚠️ 정정 요약 (추정 → 실측)</h2>
 
-<p>이번 복기는 <strong>브로커 실측이 아닌 추정</strong>입니다. 6/15 EOD 스냅샷에 다음이 빠졌습니다:</p>
-
-<table><thead><tr><th>항목</th><th>6/11</th><th>6/12</th><th><strong>6/15</strong></th><th>의미</th></tr></thead><tbody>
-<tr><td><code>fill_audit.csv</code> (브로커 실측 체결·손익)</td><td>51행</td><td>53행</td><td><strong>0행</strong></td><td>실현손익 원천 부재 → 1분봉으로 체결가 추정</td></tr>
-<tr><td>EOD balance (정산 잔고)</td><td>O</td><td>O</td><td><strong>09:05 아침분만</strong></td><td>손익 교차검증·T+2 예측 불가</td></tr>
-<tr><td><code>buy_audit.csv</code> (BAR-OPS-39 EOD 매수 스냅샷)</td><td>없음</td><td>없음</td><td><strong>없음</strong></td><td>BAR-OPS-39 여전히 미배포</td></tr>
-<tr><td><code>order_audit.avg_fill_price</code></td><td>공란</td><td>공란</td><td><strong>공란</strong></td><td>전량 시장가(MKT), 체결가 미기록</td></tr>
+<table><thead><tr><th>항목</th><th>최초(추정)</th><th><strong>정정(실측)</strong></th><th>차이</th></tr></thead><tbody>
+<tr><td>실현 순손익</td><td>-290,124</td><td><strong>-466,023</strong></td><td>-175,899</td></tr>
+<tr><td>supertrend</td><td>-147,281</td><td><strong>-288,030</strong></td><td>-140,749</td></tr>
+<tr><td>f_zone</td><td>(gold/f 합산)</td><td>-147,142</td><td>–</td></tr>
+<tr><td>sf_zone</td><td>+123,612</td><td>+116,356</td><td>-7,256</td></tr>
 </tbody></table>
+<li>추정이 <strong>176K 낙관</strong>이었음 — 주원인 ①시장가 슬리피지·부분체결(특히 supertrend) ②추정 비용모델(왕복 0.55%)이 실측(0.90%)의 절반. (수수료 실측 편도 0.35% = 모델 0.175%의 2배)</li>
 
-<li>order_audit 마지막 기록은 <strong>14:40 KST</strong>(15:20 강제청산 미포함). 파일 mtime: order_audit 14:40 / balance 09:05.</li>
-<li>즉 6/15 <strong>이브닝 파이프라인(ka10073 체결수집 + EOD 정산)이 실행/반영되지 않았습니다</strong>. 6/11·6/12엔 있었으므로 회귀입니다.</li>
-<li><strong>부분 복구</strong>: <code>_active_positions_history/</code> 스냅샷(350개)에 브로커 <strong>실측 매수 체결가(filled_price)</strong>가 남아 있어, 매수 레그 중 <strong>16건(order_no 매칭)을 실측으로 교체</strong>(나머지 9건은 빠른 스캘프로 스냅샷 미포착 → 1분봉 추정).</li>
-<li><strong>추정 방법론 검증</strong>: 실측이 확보된 16 lot에서 1분봉 추정가와 비교 시 편차는 최대 +1.2%, <strong>매수총액 기준 +0.03%</strong>로 사실상 일치 → 1분봉 추정의 신뢰도 입증.</li>
-<li><strong>매도 레그는 전량 1분봉 추정</strong>(스냅샷은 매도가 미기록). 시장가 호가 스프레드·슬리피지 미반영으로 <strong>실제는 추정보다 다소 나쁠 가능성</strong>.</li>
-<li>order_audit 종목집합 = 스냅샷 종목집합과 일치(누락 없음) → <strong>order_audit은 6/15 거래 완전</strong>(브로커 실측 손익만 부재).</li>
-<li>전략 귀속은 order_audit 의 <code>strategy_id</code>(6/15는 54/54 채워짐)를 신뢰. *(참고: 6/12도 21/22 채워져 있었음 — strategy_id 공란은 이전 진단의 오해였고, 실제 미배포 신호는 buy_audit·fill_audit·EOD balance 부재임)*</li>
+<h2>데이터 무결성 (부분 복구)</h2>
+
+<li><code>fill_audit</code> <strong>84행 복구</strong>(복기 당시 0행) → 실현손익 실측 가능. verify_eod_data: fill <strong>PASS</strong>.</li>
+<li>단 <strong>EOD balance 미복구</strong>(09:05 아침만, NG)·<strong>buy_audit 부재</strong> → 백필이 체결(ka10073)만 복구하고 정산잔고·매수스냅샷은 미복구. (추가 백필 필요)</li>
 
 <h2>한 줄 요약</h2>
 
-<p><strong>실현(추정) -290,124원 / 25트립 11승 14패 (승률 44%).</strong> gross(추정) +62,210원을 비용 352,334원(gross의 <strong>5.7배</strong>)이 적자 전환. EOD 보유 2종목 미실현(gross) +174,000원 반영 시 종합 추정 <strong>-116,124원</strong>. 6/12(실측 -90,805) 대비 악화됐으나 6/15는 추정치임에 유의.</p>
+<p><strong>실현 순손익(실측) -466,023원 / 21체결 9승 (승률 43%).</strong> gross +110,059를 비용 576,083원(gross의 5.2배)이 적자 전환. HL만도(204320) +370K 단일 견인에도 다수 손실종목으로 -46.6만. sf_zone만 흑자(+116K, 3/3).</p>
 
-<h2>종합 손익 (추정)</h2>
+<h2>종합 손익 (실측)</h2>
 
-<table><thead><tr><th>구분</th><th>금액(추정)</th></tr></thead><tbody>
-<tr><td>실현 gross (매도-매수)</td><td>+62,210</td></tr>
-<tr><td>거래비용 (수수료 0.175%×2 + 매도세 0.20%)</td><td>-352,334</td></tr>
-<tr><td><strong>실현 순손익</strong></td><td><strong>-290,124</strong></td></tr>
-<tr><td>EOD 보유 미실현 (gross, 매도세 전)</td><td>+174,000</td></tr>
-<tr><td><strong>종합(추정)</strong></td><td><strong>-116,124</strong></td></tr>
+<table><thead><tr><th>구분</th><th>금액</th></tr></thead><tbody>
+<tr><td>실현 gross</td><td>+110,059</td></tr>
+<tr><td>수수료(실측 편도 0.35%)</td><td>-447,920</td></tr>
+<tr><td>매도세(0.20%)</td><td>-128,163</td></tr>
+<tr><td><strong>실현 순손익</strong></td><td><strong>-466,023</strong></td></tr>
 </tbody></table>
 
-<li>회전대금(매수+매도) 약 128.1백만원, 실효 비용률 0.275% (왕복 0.55% 기준).</li>
-<li>주문 집계: 매수 25 · 매도 21 · FAILED 4 · BLOCKED 4.</li>
-<li>balance 6/15(09:05 아침): cash 45,721,376 / est_asset 47,844,240 (6/12 cash 48,055,432 대비 -2,334,056, T+2 정산 반영). <strong>EOD 잔고 없음.</strong></li>
+<li>비용/gross 5.23배. 회전대금 약 128백만원.</li>
+<li>balance 6/15는 아침(09:05)만 → EOD 종합자산 미확정. EOD 보유 011070·009150(supertrend)은 6/16 시초 청산 <strong>+447K 실현</strong>(6/16 복기).</li>
 
-<h2>라운드트립 (FIFO · 매수 실측 16/추정 9 · 매도 추정)</h2>
+<h2>전략별 (실측)</h2>
 
-<table><thead><tr><th>종목</th><th>명</th><th>수량</th><th>매수→매도</th><th>순손익</th><th>수익률</th><th>전략</th><th>시각</th></tr></thead><tbody>
-<tr><td>089030</td><td>테크윙</td><td>30</td><td>72,700→68,000</td><td>-152,467</td><td>-6.46%</td><td>gold_zone</td><td>09:12→09:20</td></tr>
-<tr><td>089030</td><td>테크윙</td><td>20</td><td>70,400→68,000</td><td>-55,564</td><td>-3.41%</td><td>gold_zone</td><td>09:16→09:20</td></tr>
-<tr><td>009150</td><td>삼성전기</td><td>1</td><td>1,927,000→1,915,000</td><td>-22,554</td><td>-0.62%</td><td>supertrend</td><td>09:34→10:14</td></tr>
-<tr><td>093370</td><td>후성</td><td>185</td><td>19,920→19,530</td><td>-92,148</td><td>-1.96%</td><td>supertrend</td><td>09:34→10:14</td></tr>
-<tr><td>003490</td><td>대한항공</td><td>122</td><td>29,850→30,600</td><td>+71,128</td><td>+2.51%</td><td>supertrend</td><td>09:34→10:17</td></tr>
-<tr><td>034020</td><td>두산에너빌</td><td>36</td><td>100,100→99,100</td><td>-55,685</td><td>-1.00%</td><td>supertrend</td><td>09:34→10:17</td></tr>
-<tr><td>204320</td><td>HL만도</td><td>54</td><td>67,300→70,900</td><td>+173,683</td><td>+5.35%</td><td>supertrend</td><td>09:39→10:17</td></tr>
-<tr><td>028050</td><td>삼성E&amp;A</td><td>23</td><td>51,700→53,200</td><td>+27,831</td><td>+2.90%</td><td>sf_zone</td><td>09:05→10:22</td></tr>
-<tr><td>028050</td><td>삼성E&amp;A</td><td>20</td><td>51,700→53,100</td><td>+22,208</td><td>+2.71%</td><td>sf_zone</td><td>09:05→10:29</td></tr>
-<tr><td>028050</td><td>삼성E&amp;A</td><td>28</td><td>50,800→53,100</td><td>+56,335</td><td>+4.53%</td><td>sf_zone</td><td>09:18→10:29</td></tr>
-<tr><td>000660</td><td>SK하이닉스</td><td>1</td><td>2,313,000→2,285,000</td><td>-40,616</td><td>-1.21%</td><td>supertrend</td><td>10:00→10:35</td></tr>
-<tr><td>403870</td><td>HPSP</td><td>14</td><td>78,500→81,300</td><td>+33,008</td><td>+3.57%</td><td>gold_zone</td><td>10:32→10:52</td></tr>
-<tr><td>403870</td><td>HPSP</td><td>14</td><td>78,500→81,200</td><td>+31,614</td><td>+3.44%</td><td>gold_zone</td><td>10:32→10:54</td></tr>
-<tr><td>066570</td><td>LG전자</td><td>8</td><td>253,500→245,000</td><td>-78,899</td><td>-3.35%</td><td>f_zone</td><td>09:30→10:55</td></tr>
-<tr><td>066570</td><td>LG전자</td><td>6</td><td>251,000→245,000</td><td>-44,148</td><td>-2.39%</td><td>f_zone</td><td>09:30→10:55</td></tr>
-<tr><td>028050</td><td>삼성E&amp;A</td><td>69</td><td>53,000→52,500</td><td>-54,484</td><td>-0.94%</td><td>supertrend</td><td>10:30→10:58</td></tr>
-<tr><td>018880</td><td>한온시스템</td><td>388</td><td>5,660→5,710</td><td>+7,249</td><td>+0.88%</td><td>sf_zone</td><td>09:30→11:02</td></tr>
-<tr><td>018880</td><td>한온시스템</td><td>258</td><td>5,640→5,710</td><td>+9,989</td><td>+1.24%</td><td>sf_zone</td><td>10:18→11:02</td></tr>
-<tr><td>204320</td><td>HL만도</td><td>51</td><td>71,100→75,700</td><td>+213,777</td><td>+6.47%</td><td>supertrend</td><td>11:19→12:16</td></tr>
-<tr><td>028050</td><td>삼성E&amp;A</td><td>69</td><td>52,900→52,100</td><td>-75,069</td><td>-1.51%</td><td>supertrend</td><td>11:14→13:03</td></tr>
-<tr><td>003490</td><td>대한항공</td><td>121</td><td>30,100→29,600</td><td>-80,305</td><td>-1.66%</td><td>supertrend</td><td>11:14→13:08</td></tr>
-<tr><td>005930</td><td>삼성전자</td><td>10</td><td>338,500→335,500</td><td>-48,505</td><td>-0.89%</td><td>supertrend</td><td>09:39→14:35</td></tr>
-<tr><td>010120</td><td>LS ELECTRIC</td><td>14</td><td>254,500→256,500</td><td>+8,298</td><td>+0.79%</td><td>supertrend</td><td>09:44→14:40</td></tr>
-<tr><td>015760</td><td>한국전력</td><td>87</td><td>41,950→41,050</td><td>-98,079</td><td>-2.15%</td><td>supertrend</td><td>10:20→14:40</td></tr>
-<tr><td>066570</td><td>LG전자</td><td>14</td><td>244,500→242,500</td><td>-46,722</td><td>-0.82%</td><td>supertrend</td><td>10:56→14:40</td></tr>
+<table><thead><tr><th>전략</th><th>종목</th><th>체결</th><th>승</th><th>실현</th></tr></thead><tbody>
+<tr><td>supertrend</td><td>11</td><td>14</td><td>4</td><td>-288,030</td></tr>
+<tr><td>gold_zone</td><td>2</td><td>3</td><td>2</td><td>-147,207</td></tr>
+<tr><td>f_zone</td><td>1</td><td>1</td><td>0</td><td>-147,142</td></tr>
+<tr><td>sf_zone</td><td>2</td><td>3</td><td>3</td><td>+116,356</td></tr>
 </tbody></table>
 
-<h2>전략별 분석</h2>
+<li><strong>sf_zone +116,356 (3/3 전승)</strong>: 삼성E&amp;A·한온시스템, 고갭에도 진입가 눌림 → 6/16 대우건설 sf(+20.6%갭 -181K)와 대비(진입가 위치가 승패).</li>
+<li><strong>supertrend -288,030 (4/14)</strong>: 회전 과다 + 슬리피지. 추정(-147K)보다 2배 악화 — 1분봉 추정이 supertrend 체결을 크게 낙관했음.</li>
+<li><strong>gold_zone -147,207·f_zone -147,142</strong>: 테크윙(gold) -206K·LG전자(f) -207K, 고갭 추격.</li>
 
-<table><thead><tr><th>전략</th><th>트립</th><th>승</th><th>실현(추정)</th><th>gross</th><th>비용</th></tr></thead><tbody>
-<tr><td>supertrend</td><td>14</td><td>4</td><td>-147,281</td><td>+113,850</td><td>261,131</td></tr>
-<tr><td>gold_zone</td><td>4</td><td>2</td><td>-143,408</td><td>-112,000</td><td>31,408</td></tr>
-<tr><td>f_zone</td><td>2</td><td>0</td><td>-123,047</td><td>-104,000</td><td>19,047</td></tr>
-<tr><td>sf_zone</td><td>5</td><td>5</td><td>+123,612</td><td>+164,360</td><td>40,748</td></tr>
+<h2>종목별 실현 (실측, 상하위)</h2>
+
+<table><thead><tr><th>종목</th><th>명</th><th>전략</th><th>수량</th><th>매수→매도(평균)</th><th>실현</th><th>수익률</th></tr></thead><tbody>
+<tr><td>066570</td><td>LG전자</td><td>f_zone</td><td>28</td><td>248,393→243,214</td><td>-206,780</td><td>-2.1%</td></tr>
+<tr><td>089030</td><td>테크윙</td><td>gold_zone</td><td>50</td><td>72,092→68,600</td><td>-206,047</td><td>-4.8%</td></tr>
+<tr><td>015760</td><td>한국전력</td><td>supertrend</td><td>87</td><td>41,950→41,060</td><td>-109,853</td><td>-2.1%</td></tr>
+<tr><td>034020</td><td>두산에너빌</td><td>supertrend</td><td>36</td><td>100,200→98,900</td><td>-78,988</td><td>-1.3%</td></tr>
+<tr><td>093370</td><td>후성</td><td>supertrend</td><td>185</td><td>19,747→19,504</td><td>-77,566</td><td>-1.2%</td></tr>
+<tr><td>018880</td><td>한온시스템</td><td>sf_zone</td><td>646</td><td>5,661→5,720</td><td>+5,064</td><td>+1.0%</td></tr>
+<tr><td>403870</td><td>HPSP</td><td>gold_zone</td><td>28</td><td>78,489→81,311</td><td>+58,840</td><td>+3.6%</td></tr>
+<tr><td>204320</td><td>HL만도</td><td>supertrend</td><td>105</td><td>69,275→73,446</td><td>+370,097</td><td>+6.0%</td></tr>
 </tbody></table>
 
-<li><strong>sf_zone (+124K, 유일 흑자·5/5 전승)</strong>: 삼성E&amp;A 3트립 전승(+2.7~4.5%), 한온시스템(갭 +20~22%) 2트립도 실측 매수가로 보니 둘 다 흑자. 고갭에도 진입가가 눌림이었음.</li>
-<li><strong>supertrend (실현 -147K, 그러나 gross +114K)</strong>: 14트립으로 회전 과다. gross는 플러스였으나 비용 261K가 전부 잠식. HL만도 2트립 +388K(gross)가 견인했으나 잦은 손절(삼성전자·한국전력·대한항공)이 상쇄. <strong>추세전략인데 장중 단타처럼 회전</strong>(09:34 매수→10:14 매도 다수).</li>
-<li><strong>gold_zone (-143K)·f_zone (-123K)</strong>: 둘 다 갭 추격 손실. 테크윙 +11% 갭 -208K(09시), LG전자 +12% 갭 f_zone 2트립 전패.</li>
-<li>보유 2종목(011070·009150)은 supertrend 이며 EOD 미실현 둘 다 +. supertrend의 본질 엣지(추세 보유)는 살아있으나 <strong>장중 청산 회전이 비용으로 엣지를 까먹는 구조</strong>.</li>
+<li>최대 승자 <strong>204320 HL만도 +370K</strong>(2회전), 최대 패자 <strong>066570 LG전자 -207K·089030 테크윙 -206K</strong>(고갭).</li>
 
-<h2>시간대별 (매도시각 KST)</h2>
+<h2>진입 갭 (6/12 종가 대비, 실측 매수평단)</h2>
 
-<table><thead><tr><th>시간</th><th>건수</th><th>순손익(추정)</th></tr></thead><tbody>
-<tr><td>09시</td><td>2</td><td>-208,031</td></tr>
-<tr><td>10시</td><td>14</td><td>+27,273</td></tr>
-<tr><td>11시</td><td>2</td><td>+17,238</td></tr>
-<tr><td>12시</td><td>1</td><td>+213,777</td></tr>
-<tr><td>13시</td><td>2</td><td>-155,373</td></tr>
-<tr><td>14시</td><td>4</td><td>-185,007</td></tr>
+<table><thead><tr><th>종목</th><th>전략</th><th>매수평단</th><th>6/12종가</th><th>갭</th><th>실현</th></tr></thead><tbody>
+<tr><td>018880 한온시스템</td><td>sf_zone</td><td>5,661</td><td>4,700</td><td><strong>+20.4% ⚠️</strong></td><td>+5,064</td></tr>
+<tr><td>010120 LS ELECTRIC</td><td>supertrend</td><td>254,214</td><td>222,500</td><td><strong>+14.3% ⚠️</strong></td><td>+4,812</td></tr>
+<tr><td>009150 삼성전기</td><td>supertrend</td><td>1,934,000</td><td>1,714,000</td><td><strong>+12.8% ⚠️</strong></td><td>-41,270</td></tr>
+<tr><td>003490 대한항공</td><td>supertrend</td><td>29,961</td><td>26,600</td><td><strong>+12.6% ⚠️</strong></td><td>-35,362</td></tr>
+<tr><td>015760 한국전력</td><td>supertrend</td><td>41,950</td><td>37,650</td><td><strong>+11.4%</strong></td><td>-109,853</td></tr>
+<tr><td>089030 테크윙</td><td>gold_zone</td><td>72,092</td><td>65,300</td><td><strong>+10.4%</strong></td><td>-206,047</td></tr>
+<tr><td>066570 LG전자</td><td>f_zone</td><td>248,393</td><td>225,500</td><td><strong>+10.2%</strong></td><td>-206,780</td></tr>
+<tr><td>028050 삼성E&amp;A</td><td>sf_zone</td><td>52,331</td><td>47,600</td><td><strong>+9.9%</strong></td><td>-49,015</td></tr>
+<tr><td>403870 HPSP</td><td>gold_zone</td><td>78,489</td><td>71,500</td><td><strong>+9.8%</strong></td><td>+58,840</td></tr>
 </tbody></table>
 
-<li>09시(-208K)·14시(-185K) 양끝이 적자. 개장 직후 갭 추격 진입과 장 후반 손절 청산이 손실 집중 구간.</li>
-<li>12시(+214K)는 HL만도 재진입(+6.5%)이 단독 견인.</li>
+<li>고갭(+11~22%) 다수 통과 = 갭가드 미배포 정황(임계 15%, gold/f만). 단 고갭이 손실(테크윙·LG전자)·흑자(한온 sf) 양쪽 → 진입가 위치가 승패.</li>
 
-<h2>진입 갭 분석 (6/12 종가 대비 추정 매수가)</h2>
+<h2>6/12·6/16 대비 (전부 실측)</h2>
 
-<p>6/12 복기의 핵심 처방이 <strong>갭 추격 차단(임계 ~12%)</strong>이었으나, 6/15에도 +10% 이상 갭 진입이 다수 통과 → <strong>갭가드 미배포 재확인</strong>.</p>
-
-<table><thead><tr><th>종목</th><th>전략</th><th>매수(추정)</th><th>6/12종가</th><th>갭</th></tr></thead><tbody>
-<tr><td>018880 한온시스템</td><td>sf_zone</td><td>5,660</td><td>4,700</td><td><strong>+20.4% ⚠️</strong></td></tr>
-<tr><td>018880 한온시스템</td><td>sf_zone</td><td>5,640</td><td>4,700</td><td><strong>+20.0% ⚠️</strong></td></tr>
-<tr><td>010120 LS ELECTRIC</td><td>supertrend</td><td>254,500</td><td>222,500</td><td><strong>+14.4% ⚠️</strong></td></tr>
-<tr><td>003490 대한항공</td><td>supertrend</td><td>30,100</td><td>26,600</td><td><strong>+13.2% ⚠️</strong></td></tr>
-<tr><td>009150 삼성전기</td><td>supertrend</td><td>1,927,000</td><td>1,714,000</td><td><strong>+12.4% ⚠️</strong></td></tr>
-<tr><td>066570 LG전자</td><td>f_zone</td><td>253,500</td><td>225,500</td><td><strong>+12.4% ⚠️</strong></td></tr>
-<tr><td>003490 대한항공</td><td>supertrend</td><td>29,850</td><td>26,600</td><td><strong>+12.2% ⚠️</strong></td></tr>
-<tr><td>015760 한국전력</td><td>supertrend</td><td>41,950</td><td>37,650</td><td><strong>+11.4%</strong></td></tr>
-<tr><td>028050 삼성E&amp;A</td><td>supertrend</td><td>53,000</td><td>47,600</td><td><strong>+11.3%</strong></td></tr>
-<tr><td>089030 테크윙</td><td>gold_zone</td><td>72,700</td><td>65,300</td><td><strong>+11.3%</strong></td></tr>
-<tr><td>066570 LG전자</td><td>f_zone</td><td>251,000</td><td>225,500</td><td><strong>+11.3%</strong></td></tr>
-<tr><td>028050 삼성E&amp;A</td><td>supertrend</td><td>52,900</td><td>47,600</td><td><strong>+11.1%</strong></td></tr>
-<tr><td>403870 HPSP</td><td>gold_zone</td><td>78,500</td><td>71,500</td><td><strong>+9.8%</strong></td></tr>
-<tr><td>204320 HL만도</td><td>supertrend</td><td>71,100</td><td>65,000</td><td><strong>+9.4%</strong></td></tr>
-<tr><td>028050 삼성E&amp;A</td><td>sf_zone</td><td>51,700</td><td>47,600</td><td><strong>+8.6%</strong></td></tr>
-<tr><td>066570 LG전자</td><td>supertrend</td><td>244,500</td><td>225,500</td><td><strong>+8.4%</strong></td></tr>
+<table><thead><tr><th>항목</th><th>6/12</th><th><strong>6/15(정정)</strong></th><th>6/16</th></tr></thead><tbody>
+<tr><td>실현</td><td>-90,805</td><td><strong>-466,023</strong></td><td>+13,862</td></tr>
+<tr><td>gross</td><td>+152,617</td><td>+110,059</td><td>+438,315</td></tr>
+<tr><td>비용/gross</td><td>1.59배</td><td><strong>5.23배</strong></td><td>0.97배</td></tr>
 </tbody></table>
-
-<li>⚠️ = 12% 초과(6/12 처방 임계). 한온시스템 +22%/+20%(sf_zone, 그래도 흑자), LS ELECTRIC +14.4%, 삼성전기 +12.4%, 대한항공 +12~13%, LG전자 +12.2%(f_zone 전패), HPSP +10.1%.</li>
-<li>단 6/15엔 고갭 진입이 항상 손실은 아님(한온·삼성E&amp;A sf_zone 흑자). 갭 자체보다 <strong>진입가 위치(눌림 vs 고점)</strong>가 승패를 가른 6/11·6/12 패턴 반복.</li>
-
-<h2>EOD 보유 (6/16 이월)</h2>
-
-<table><thead><tr><th>종목</th><th>전략</th><th>수량</th><th>진입가</th><th>6/15종가</th><th>미실현(gross)</th><th>수익률</th></tr></thead><tbody>
-<tr><td>011070</td><td>LG이노텍(supertrend)</td><td>3</td><td>1,180,000</td><td>1,209,000</td><td>+87,000</td><td>+2.46%</td></tr>
-<tr><td>009150</td><td>삼성전기(supertrend)</td><td>1</td><td>1,912,000</td><td>1,999,000</td><td>+87,000</td><td>+4.55%</td></tr>
-</tbody></table>
-
-<li>둘 다 supertrend, 미실현 합계(gross) +174,000. 6/16 시초 갭에 따라 확정 손익 변동.</li>
-
-<h2>비용 분석 — 이번에도 결정 변수</h2>
-
-<li>gross(추정) +62,210 vs 비용 352,334 → <strong>비용이 gross의 5.7배</strong>. 6/12(1.6배)보다 악화.</li>
-<li>원인: gross 자체가 거의 본전(+62K)인데 회전대금이 커서(약 128백만원) 왕복 0.55% 비용이 절대액으로 크게 발생.</li>
-<li><strong>수수료 요율 협의가 여전히 #1 레버</strong>. 실측 0.175%(편도)는 가정(0.015%)의 11.6배. 요율 인하 없이는 잦은 회전 전략(supertrend 14트립)이 구조적으로 비용에 진다.</li>
-
-<h2>신규/특이 관찰</h2>
-
-<li><strong>limit_up_chase 전략 6/15 신규 가동</strong>(6/12엔 없음). 일일 매수 한도 가드가 4건 BLOCK:</li>
-<li style='margin-left:1.2em'><code>089590 일일 매수 한도 초과: 20 ≥ 6</code></li>
-<li style='margin-left:1.2em'><code>018880 일일 매수 한도 초과: 21 ≥ 6</code></li>
-<li style='margin-left:1.2em'><code>018880 일일 매수 한도 초과: 21 ≥ 6</code></li>
-<li style='margin-left:1.2em'><code>018880 일일 매수 한도 초과: 21 ≥ 6</code></li>
-<li>이는 limit_up_chase 경로(telegram_bot/evaluate_holdings)의 <strong>보수적 캡(6)</strong> 때문 — 당일 매수 20+건 누적 후 정상 차단. 메인 데몬은 policy <code>daily_max_orders=300</code>이라 미저촉. <strong>버그 아님, 의도된 보수 가드.</strong></li>
-<li><strong>FAILED 4건(005930·000660·011070·015760) 전부 HTTPStatusError → 전부 직후 재시도 성공.</strong> 일시적 브로커 API 오류로 실손실 없음. 단 재시도까지 5~25분 지연 발생(011070 01:00실패→01:15성공).</li>
-
-<h2>6/12 대비 / 반복 패턴</h2>
-
-<table><thead><tr><th>항목</th><th>6/12 (실측)</th><th>6/15 (추정)</th></tr></thead><tbody>
-<tr><td>실현 손익</td><td>-90,805</td><td>-290,124</td></tr>
-<tr><td>트립/승률</td><td>8트립 50%</td><td>25트립 44%</td></tr>
-<tr><td>비용/gross</td><td>1.6배</td><td>5.7배</td></tr>
-<tr><td>갭 추격</td><td>f_zone -374K</td><td>gold/f_zone -280K</td></tr>
-<tr><td>supertrend</td><td>+259K(3일강세)</td><td>실현 -147K(회전과다)/보유 미실현 +</td></tr>
-<tr><td>데이터</td><td>브로커 실측 완비</td><td><strong>실측 부재(추정)</strong></td></tr>
-</tbody></table>
-
-<li>반복: ① <strong>비용&gt;gross 적자전환</strong> ② <strong>갭 추격(gold/f_zone) 손실</strong> ③ <strong>진입가 위치가 승패</strong> ④ <strong>BAR-OPS-39 미배포(buy_audit 부재)</strong>.</li>
-<li>신규 악화: <strong>이브닝 파이프라인 미실행</strong>으로 6/15 브로커 실측 자체가 사라짐(6/11·6/12엔 있었음).</li>
+<li>3일 누계 실현 -542,966 / gross +700,990 / 비용 1,243,956(1.77배). 전략 원천엣지는 +지만 비용이 적자전환.</li>
 
 <h2>권고 (우선순위)</h2>
 
-<p><strong>P0 — 운영/데이터 (사용자 액션, 코드 신규 아님)</strong></p>
-<p>1. <strong>이브닝 파이프라인 6/15 미실행 원인 점검 + 재실행.</strong> ka10073(브로커 체결) 재수집으로 6/15 <code>fill_audit</code>·EOD balance 를 복구하면 본 추정복기를 실측으로 교체 가능(브로커 D+2 조회 가능 기간 내). 미복구 시 6/15 손익은 영구 추정치로 남음.</p>
-<p>2. <strong>운영 머신 배포(반복):</strong> <code>cd /Users/beye/BarroAiTrade &amp;&amp; git pull origin main &amp;&amp; bash scripts/verify_deploy.sh</code>. buy_audit·갭가드·비용반영 선정이 5거래일째 라이브 미적용. (RUNBOOK §11)</p>
-<p>3. <strong>수수료 요율 협의</strong> 후 <code>BARRO_COMMISSION_RATE</code> 설정. 비용이 2일 연속 손익 결정 변수.</p>
-
-<p><strong>P1 — 측정 후 결정 (배포·실측 누적 전 코드변경 금지)</strong></p>
-<p>4. supertrend <strong>회전 과다</strong> 진단: 14트립 중 다수가 장중 단타 청산. 추세전략의 청산 로직(트레일/부분익절)이 너무 타이트한지 실측 누적 후 검토. *(HITL 승인 전 파라미터 변경 금지)*</p>
-<p>5. 갭가드 임계(12%) 배포 후 효과 측정: 6/15엔 고갭이 흑자도 냈으므로 일괄차단보다 <strong>진입가 위치(눌림 여부) 결합</strong> 검토.</p>
-
-<p><strong>P2 — 분석/관찰</strong></p>
-<p>6. limit_up_chase 신규 가동 성과 추적(6/15엔 전량 BLOCK되어 체결 0). 캡(6) 적정성은 데이터 누적 후 판단.</p>
-<p>7. FAILED HTTPStatusError 재시도 지연(최대 25분) — 재시도 백오프/큐 점검.</p>
+<p>1. <strong>[P0] 수수료율 모델 정정</strong>: 실측 편도 0.35% ≠ 모델 0.175%(<code>COMMISSION_RATE=0.00175</code>) → 시뮬/선정 비용 2배 과소 → 과매매. 0.0035로 정정 검토(선정 동작 변경 → HITL).</p>
+<p>2. <strong>[P0] 0.35% 정체 분해</strong>: 위탁수수료(협의 가능) vs 유관기관 번들 — 협의 여지 판단.</p>
+<p>3. <strong>[P1] 수수료 요율 협의</strong>: 3일 -543K, 0.10%면 +147K. 단연 #1 레버.</p>
+<p>4. <strong>[P1] 6/15 EOD balance·buy_audit 추가 백필</strong>(현재 fill만 복구).</p>
+<p>5. <strong>[P2] supertrend 회전·갭가드</strong>: 측정 후 결정(데이터 누적 중).</p>
 
 <hr>
-<p>*주의: fill_audit·EOD balance 부재. 매수 레그는 active_positions_history 스냅샷의 브로커 실측 16건 + 1분봉 추정 9건, 매도 레그는 전량 1분봉 추정(추정·실측 편차 매수총액 0.03% 검증). 시장가 슬리피지 미반영으로 실제는 추정보다 나쁠 수 있음. 브로커 ka10073 재수집 시 매도까지 완전 실측 교체 권장.*</p>
+<p>*브로커 실측(fill_audit 84행, strategy_audit_2026-06-15.json 진실원천). EOD balance 미복구로 종합자산 미확정. 최초 추정판(-290,124)을 본 실측판(-466,023)으로 정정.*</p>
 </body></html>

@@ -1,0 +1,241 @@
+{
+  "date": "2026-06-15",
+  "source": "실측(ka10073 체결 백필)",
+  "per_strategy": {
+    "gold_zone": {
+      "realized": -147207.01,
+      "matched_basis": 5802300.119999999,
+      "wins": 2,
+      "sells": 3,
+      "syms": 2
+    },
+    "supertrend": {
+      "realized": -288030.01,
+      "matched_basis": 47385630.56,
+      "wins": 4,
+      "sells": 14,
+      "syms": 11
+    },
+    "sf_zone": {
+      "realized": 116356.0,
+      "matched_basis": 7282360.65,
+      "wins": 3,
+      "sells": 3,
+      "syms": 2
+    },
+    "f_zone": {
+      "realized": -147142.0,
+      "matched_basis": 3531999.94,
+      "wins": 0,
+      "sells": 1,
+      "syms": 1
+    }
+  },
+  "per_symbol": {
+    "000660": {
+      "realized": -46673.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "supertrend"
+    },
+    "003490": {
+      "realized": -35361.990000000005,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "supertrend"
+    },
+    "005930": {
+      "realized": -53282.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "supertrend"
+    },
+    "009150": {
+      "realized": -41270.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "supertrend"
+    },
+    "010120": {
+      "realized": 4811.99,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "supertrend"
+    },
+    "011070": {
+      "realized": 0.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "supertrend"
+    },
+    "015760": {
+      "realized": -109853.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "supertrend"
+    },
+    "018880": {
+      "realized": 5064.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "sf_zone"
+    },
+    "028050": {
+      "realized": -49015.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "sf_zone"
+    },
+    "034020": {
+      "realized": -78988.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "supertrend"
+    },
+    "066570": {
+      "realized": -206780.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "f_zone"
+    },
+    "089030": {
+      "realized": -206047.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "gold_zone"
+    },
+    "093370": {
+      "realized": -77566.0,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "supertrend"
+    },
+    "204320": {
+      "realized": 370096.99,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "supertrend"
+    },
+    "403870": {
+      "realized": 58839.99,
+      "buy_value": 0.0,
+      "sell_value": 0.0,
+      "matched_basis": 0.0,
+      "n_buys": 0,
+      "n_sells": 0,
+      "wins": 0,
+      "sells": 0,
+      "carry_sell_value": 0.0,
+      "carry_sells": 0,
+      "strategy": "gold_zone"
+    }
+  },
+  "carry": {
+    "sells": 0,
+    "sell_value": 0.0
+  },
+  "gap_records": [],
+  "estimate_total": 0.0,
+  "total_realized": -466023.02,
+  "alarms": [
+    "⚠️ f_zone 자본가중 손익 -4.2% ≤ -3% → 사후분석 권고"
+  ]
+}
