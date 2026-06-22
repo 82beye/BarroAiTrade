@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.barro.advisory-writer — 에이전트 자문 writer(생산자) launchd 템플릿.
+  설치(운영 머신, 1회):
+    1) 아래 USERNAME / 경로 / env 를 수정.
+    2) cp infra/com.barro.advisory-writer.plist.example ~/Library/LaunchAgents/com.barro.advisory-writer.plist
+    3) launchctl load -w ~/Library/LaunchAgents/com.barro.advisory-writer.plist
+  중지: launchctl unload ~/Library/LaunchAgents/com.barro.advisory-writer.plist
+  주의: 이 writer 는 advisory.json 생산 + 텔레그램 표시만 — 라이브 주문 무영향.
+        데몬 게이트 활성은 별도(data/policy.json agent_advisory_enabled, ★HITL).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.barro.advisory-writer</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/USERNAME/workspace/BarroAiTrade/venv/bin/python</string>
+    <string>/Users/USERNAME/workspace/BarroAiTrade/scripts/agent_advisory_writer.py</string>
+    <string>--interval</string><string>30</string>
+    <string>--backend</string><string>claude-cli</string>
+    <string>--ttl</string><string>180</string>
+    <string>--telegram</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/USERNAME/workspace/BarroAiTrade</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key><string>/Users/USERNAME/workspace/BarroAiTrade</string>
+    <!-- ANTHROPIC_API_KEY / TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID 는 키체인/셸 env 로 주입 권장 -->
+  </dict>
+  <!-- 장중에만(08:50~15:30) 가동하려면 StartCalendarInterval 로 분할하거나 RunAtLoad+KeepAlive 사용 -->
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key>
+  <string>/Users/USERNAME/workspace/BarroAiTrade/logs/advisory-writer.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/USERNAME/workspace/BarroAiTrade/logs/advisory-writer.err.log</string>
+</dict>
+</plist>

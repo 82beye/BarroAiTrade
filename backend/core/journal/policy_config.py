@@ -52,6 +52,15 @@ class PolicyConfig:
     distribution_exit_enabled: bool = False
     distribution_exit_vol_mult: float = 3.0
     distribution_exit_body_min: float = 0.03
+    # 2026-06-22 — 에이전트 자문(advisory) 매수 게이트 (default-OFF).
+    # Hermes/quick-decider verdict(data/advisory.json) 로 매수 신호 필터. _scan_and_buy 가
+    # AgentAdvisoryConfig.from_policy_config 로 조립. enabled=False → 신호 무변경(byte-identical).
+    # verdict 없음/TTL stale/저신뢰 → fail-open(베이스라인 매매). LLM 은 주문 동기경로에 없음.
+    # 설계: backend/core/risk/agent_advisory.py. 활성화는 shadow 측정 후 (d) HITL.
+    agent_advisory_enabled: bool = False
+    agent_advisory_ttl_sec: int = 180
+    agent_advisory_block_wait: bool = False    # True 면 WAIT 도 차단(보수적), 기본 NO-GO 만
+    agent_advisory_min_confidence: float = 0.0
     history: list[dict] = field(default_factory=list)         # 변경 이력
 
     def as_dict(self) -> dict:

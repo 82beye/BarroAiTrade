@@ -42,6 +42,9 @@ from backend.core.risk.holding_evaluator import (
     evaluate_all, resolve_policy,
 )
 from backend.core.strategy.dante_filters import DistributionExitConfig
+from backend.core.risk.agent_advisory import (
+    AgentAdvisoryConfig, apply_buy_advisory, load_advisory,
+)
 from backend.core.risk.daily_gate_input import compute_daily_gate_input
 from backend.core.risk.live_order_gate import (
     GatePolicy, LiveOrderGate, DailyOrderLimitExceeded,
@@ -1116,11 +1119,26 @@ async def _scan_and_buy(
             signals.append((c, best_strategy, best_pnl))
             print(f"  [SIGNAL] {c.symbol} {c.name:<14} 전략={best_strategy} PnL={best_pnl:+,.0f} (w={weights.get(best_strategy, 1.0):.1f})")
 
-    # 정제된 시그널을 파일에 저장 (대시보드 노출용)
+    # 정제된 시그널을 파일에 저장 (대시보드 노출용) — advisory 필터 이전의 전체 탐지 신호.
     _save_refined_signals(signals, regime)
 
     if not signals:
         return 0
+
+    # ── 에이전트 자문(advisory) 매수 게이트 (config-gated, default-OFF) ──────────
+    #   Hermes/quick-decider 가 data/advisory.json 에 기록한 verdict(GO/WAIT/NO-GO)로 신호 필터.
+    #   enabled=False → 무변경(byte-identical). verdict 없음/TTL stale/저신뢰 → fail-open.
+    #   ★LLM은 주문 동기경로에 없음 — 미리 계산된 advisory.json 만 읽음. 활성은 shadow 후 HITL.
+    _adv_cfg = AgentAdvisoryConfig.from_policy_config(cfg)
+    if _adv_cfg.enabled:
+        signals, _adv_skipped = apply_buy_advisory(
+            signals, _adv_cfg, load_advisory(_DATA_DIR / "advisory.json"), _now_kst(),
+        )
+        for _sym, _name, _action, _reason in _adv_skipped:
+            _ts_a = _now_kst().strftime("%H:%M:%S")
+            print(f"  [{_ts_a}][ADVISORY-{_action}] {_sym} {_name:<14} — {_reason}")
+        if not signals:
+            return 0
 
     # 자금 한도 체크
     deposit = await account.fetch_deposit()
