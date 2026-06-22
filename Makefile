@@ -1,7 +1,8 @@
 # BarroAiTrade Makefile
 # Reference: docs/01-plan/MASTER-EXECUTION-PLAN-v1.md
 
-.PHONY: help legacy-scalping test-legacy test-config test
+.PHONY: help legacy-scalping test-legacy test-config test \
+	advisory-setup advisory-writer advisory-writer-once test-advisory
 
 help: ## 사용 가능한 타겟 출력
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -146,3 +147,15 @@ baseline: ## BAR-44 베이스라인 측정 실행 (4 전략 합성 데이터)
 
 test: ## 전체 backend 단위 테스트 (legacy + config)
 	@$(PYTHON) -m pytest backend/tests/ -v
+
+advisory-setup: ## 에이전트 자문 부트스트랩 (git pull 후 1회, 멱등·라이브 무영향)
+	@bash scripts/setup_agent_advisory.sh
+
+advisory-writer: ## 자문 writer 루프 (claude-cli, advisory.json 생산 + 텔레그램 표시; 데몬 무영향)
+	@$(PYTHON) scripts/agent_advisory_writer.py --interval 30 --backend claude-cli --telegram
+
+advisory-writer-once: ## 자문 writer 1회 mock 스모크 (토큰 0, 라이브 무영향)
+	@$(PYTHON) scripts/agent_advisory_writer.py --once --backend mock
+
+test-advisory: ## 자문 게이트(소비자)+writer(생산자) 단위 테스트
+	@$(PYTHON) -m pytest backend/tests/risk/test_agent_advisory.py backend/tests/risk/test_agent_advisory_writer.py -v

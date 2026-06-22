@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+"""에이전트 자문(advisory) writer — 생산자 측 (Phase 1~2).
+
+`data/refined_signals.json`(데몬이 매 사이클 기록한 탐지 신호)을 폴링해, 각 신호에
+quick-decider verdict(GO/WAIT/NO-GO)를 산출하고 `data/advisory.json` + `logs/decisions/<date>.jsonl`
+에 기록한다.
+
+설계 원칙(불변):
+  · 데몬과 **분리된 프로세스** — Hermes/cron/launchd 가 스케줄. 데몬은 advisory.json 을 읽기만.
+  · **LLM은 여기서만 호출** — 라이브 데몬 주문 경로엔 LLM 없음. 출력 부재/오류 시 데몬 fail-open.
+  · advisory.json 의 소비자 계약 = backend/core/risk/agent_advisory.load_advisory.
+  · git pull → 바로 사용: 런타임 디렉터리 자동 생성, 비밀값은 env(.env.example 참조).
+
+백엔드(--backend):
+  · mock       : 결정적 룰 기반 verdict (토큰 0). 스모크/테스트/Phase0 검증용.
+  · claude-cli : `claude -p` 헤드리스 호출 (barrotrade-quick-decider 계약). 실 LLM 판단.
+
+사용:
+  python scripts/agent_advisory_writer.py --once --backend mock
+  python scripts/agent_advisory_writer.py --interval 30 --backend claude-cli --telegram
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from backend.core.risk.agent_advisory import GO, NOGO, WAIT  # noqa: E402
+
+_ROOT = Path(__file__).resolve().parents[1]
+_DATA_DIR = _ROOT / "data"
+_LOGS_DIR = _ROOT / "logs"
+
+_ACTIONS = {GO, WAIT, NOGO}
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _iso(dt: datetime) -> str:
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+def read_refined_signals(path: Path) -> list[dict]:
+    """refined_signals.json → signals 리스트. 부재/오류 시 [](fail-safe)."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    return [s for s in (data.get("signals") or []) if isinstance(s, dict) and s.get("symbol")]
+
+
+# ── verdict 백엔드 ────────────────────────────────────────────────────────────
+
+def mock_verdict(sig: dict) -> dict:
+    """결정적 mock — quick-decider 의도 모사(과열 추격 차단). 토큰 0, 테스트용.
+
+    flu_rate(등락률) 과열·고점추격이면 NO-GO, 점수 낮으면 WAIT, 그 외 GO.
+    """
+    flu = float(sig.get("flu_rate", 0.0) or 0.0)
+    score = float(sig.get("score", 0.0) or 0.0)
+    if flu >= 25.0:
+        return {"action": NOGO, "confidence": 0.8, "reason": f"등락률 {flu:.1f}% 과열·고점추격 위험"}
+    if score < 4.0:
+        return {"action": WAIT, "confidence": 0.5, "reason": f"점수 {score:.1f} 낮음 — 추가확인 권장"}
+    return {"action": GO, "confidence": 0.7, "reason": f"점수 {score:.1f}·등락률 {flu:.1f}% 양호"}
+
+
+_QUICK_DECIDER_PROMPT = """\
+너는 한국주식 단타 트레이딩의 장중 의사결정 보조(quick-decider)다. 아래 매수 후보 신호에 대해
+10초 내 GO / WAIT / NO-GO 를 결정한다. 고점추격·과열(등락률 과대)·점수 미달은 보수적으로 본다.
+출력은 JSON 한 줄만: {{"action":"GO|WAIT|NO-GO","confidence":0~1,"reason":"한국어 한 문장"}}
+
+신호: 종목={symbol}({name}) 전략={strategy} 점수={score} 등락률={flu_rate}% 현재가={cur_price}
+"""
+
+
+def claude_cli_verdict(sig: dict, *, timeout: float = 25.0) -> dict | None:
+    """`claude -p` 헤드리스 호출 → verdict. 실패/타임아웃 → None(해당 종목 fail-open)."""
+    prompt = _QUICK_DECIDER_PROMPT.format(
+        symbol=sig.get("symbol", ""), name=sig.get("name", ""),
+        strategy=sig.get("strategy", ""), score=sig.get("score", ""),
+        flu_rate=sig.get("flu_rate", ""), cur_price=sig.get("cur_price", ""),
+    )
+    try:
+        proc = subprocess.run(
+            ["claude", "-p", prompt, "--output-format", "json"],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return _parse_verdict_text(proc.stdout)
+
+
+def _parse_verdict_text(text: str) -> dict | None:
+    """LLM 출력에서 verdict JSON 추출. claude --output-format json 의 result 필드 또는 본문 JSON."""
+    if not text:
+        return None
+    raw = text.strip()
+    # claude -p --output-format json → {"result": "<본문>", ...}
+    try:
+        outer = json.loads(raw)
+        if isinstance(outer, dict) and "result" in outer:
+            raw = str(outer["result"]).strip()
+    except (json.JSONDecodeError, ValueError):
+        pass
+    # 본문에서 첫 { ... } 블록 파싱
+    start, end = raw.find("{"), raw.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        obj = json.loads(raw[start:end + 1])
+    except (json.JSONDecodeError, ValueError):
+        return None
+    action = str(obj.get("action", "")).strip().upper().replace("NOGO", "NO-GO")
+    if action not in _ACTIONS:
+        return None
+    try:
+        conf = float(obj.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        conf = 0.0
+    return {"action": action, "confidence": conf, "reason": str(obj.get("reason", ""))}
+
+
+_BACKENDS = {"mock": mock_verdict, "claude-cli": claude_cli_verdict}
+
+
+# ── advisory.json 병합/기록 ───────────────────────────────────────────────────
+
+def merge_advisory(existing: dict | None, new: list[dict], now: datetime, keep_sec: int) -> dict:
+    """기존 advisory + 신규 verdict 병합. symbol 당 최신 1건, keep_sec 초과 stale 제거.
+
+    반환 스키마: {"updated_at": ISO, "verdicts": [{symbol,action,confidence,reason,ts,strategy}, ...]}
+    (소비자 load_advisory 가 마지막 항목 우선이므로 ts 오름차순 정렬 출력.)
+    """
+    by_symbol: dict[str, dict] = {}
+    for v in ((existing or {}).get("verdicts") or []):
+        if isinstance(v, dict) and v.get("symbol"):
+            by_symbol[str(v["symbol"])] = v
+    for v in new:
+        by_symbol[str(v["symbol"])] = v
+    cutoff = now.timestamp() - keep_sec
+    kept = []
+    for v in by_symbol.values():
+        ts = v.get("ts")
+        try:
+            ts_dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00")) if ts else None
+        except (ValueError, TypeError):
+            ts_dt = None
+        if ts_dt is not None and ts_dt.tzinfo is None:
+            ts_dt = ts_dt.replace(tzinfo=timezone.utc)
+        if ts_dt is None or ts_dt.timestamp() >= cutoff:
+            kept.append(v)
+    kept.sort(key=lambda v: str(v.get("ts", "")))
+    return {"updated_at": _iso(now), "verdicts": kept}
+
+
+def write_json_atomic(path: Path, data: dict) -> None:
+    """원자적 쓰기(temp → rename) — 데몬이 중간 상태를 읽지 않도록."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def append_decision_log(logs_dir: Path, record: dict, now: datetime) -> None:
+    """logs/decisions/<date>.jsonl append (감사). 디렉터리 자동 생성."""
+    d = logs_dir / "decisions"
+    d.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(record, ensure_ascii=False)
+    with (d / f"{now.astimezone().strftime('%Y-%m-%d')}.jsonl").open("a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
+def run_once(*, backend: str, data_dir: Path, logs_dir: Path, ttl_sec: int,
+             keep_sec: int, top: int, now: datetime | None = None,
+             verdict_fn=None) -> list[dict]:
+    """1회: refined_signals 읽기 → verdict 산출 → advisory.json/decisions 기록. 신규 verdict 반환."""
+    now = now or _now()
+    fn = verdict_fn or _BACKENDS[backend]
+    signals = read_refined_signals(data_dir / "refined_signals.json")
+    if top > 0:
+        signals = signals[:top]
+    new_verdicts: list[dict] = []
+    for sig in signals:
+        v = fn(sig)
+        if not v:                       # 백엔드 실패 → 해당 종목 verdict 없음(데몬 fail-open)
+            continue
+        rec = {
+            "symbol": sig["symbol"],
+            "action": v["action"],
+            "confidence": round(float(v.get("confidence", 0.0)), 3),
+            "reason": v.get("reason", ""),
+            "ts": _iso(now),
+            "strategy": sig.get("strategy"),
+        }
+        new_verdicts.append(rec)
+        append_decision_log(logs_dir, {**rec, "backend": backend,
+                                       "score": sig.get("score"), "flu_rate": sig.get("flu_rate")}, now)
+    adv_path = data_dir / "advisory.json"
+    try:
+        existing = json.loads(adv_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        existing = None
+    merged = merge_advisory(existing, new_verdicts, now, keep_sec)
+    write_json_atomic(adv_path, merged)
+    return new_verdicts
+
+
+def _maybe_telegram(verdicts: list[dict]) -> None:
+    """verdict 를 텔레그램으로 실시간 표시(Phase 1). 실패는 무시(표시 채널)."""
+    if not verdicts:
+        return
+    try:
+        import asyncio
+
+        from backend.core.notify.telegram import TelegramNotifier
+        notifier = TelegramNotifier.from_env()
+        if notifier is None:
+            return
+        lines = [f"[ADVISORY] {v['symbol']} {v['action']} ({v['confidence']:.0%}) — {v['reason']}"
+                 for v in verdicts]
+        asyncio.run(notifier.send("\n".join(lines)))
+    except Exception:
+        pass
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="에이전트 자문 writer (advisory.json 생산자)")
+    ap.add_argument("--backend", choices=list(_BACKENDS), default="claude-cli")
+    ap.add_argument("--interval", type=float, default=0.0, help="루프 주기(초). 0이면 1회.")
+    ap.add_argument("--once", action="store_true", help="1회만 실행(--interval 0 동치)")
+    ap.add_argument("--ttl", type=int, default=180, help="verdict 신선도(데몬과 일치 권장)")
+    ap.add_argument("--keep", type=int, default=900, help="advisory.json 보관 한도(초)")
+    ap.add_argument("--top", type=int, default=0, help="상위 N 신호만(0=전체)")
+    ap.add_argument("--telegram", action="store_true", help="verdict 텔레그램 실시간 표시")
+    ap.add_argument("--data-dir", default=str(_DATA_DIR))
+    ap.add_argument("--logs-dir", default=str(_LOGS_DIR))
+    args = ap.parse_args(argv)
+
+    data_dir, logs_dir = Path(args.data_dir), Path(args.logs_dir)
+    one_shot = args.once or args.interval <= 0
+
+    def _tick():
+        verdicts = run_once(backend=args.backend, data_dir=data_dir, logs_dir=logs_dir,
+                            ttl_sec=args.ttl, keep_sec=args.keep, top=args.top)
+        ts = datetime.now().strftime("%H:%M:%S")
+        print(f"[{ts}] advisory writer: {len(verdicts)}건 verdict (backend={args.backend})")
+        for v in verdicts:
+            print(f"   {v['symbol']} {v['action']} ({v['confidence']:.0%}) {v['reason']}")
+        if args.telegram:
+            _maybe_telegram(verdicts)
+
+    if one_shot:
+        _tick()
+        return 0
+    print(f"advisory writer 루프 시작 (interval={args.interval}s, backend={args.backend})")
+    while True:
+        try:
+            _tick()
+        except Exception as e:   # 루프 회복력 — 1회 실패가 프로세스를 죽이지 않게
+            print(f"[writer] tick 오류(무시): {e}")
+        time.sleep(args.interval)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
