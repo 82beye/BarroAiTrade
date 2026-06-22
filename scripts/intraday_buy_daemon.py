@@ -46,8 +46,9 @@ from backend.core.risk.agent_advisory import (
     AgentAdvisoryConfig, apply_buy_advisory, load_advisory,
 )
 from backend.core.risk.market_context import (
-    MarketContextConfig, PortfolioRiskConfig, PortfolioThemeConfig,
-    apply_market_context, apply_portfolio_risk, apply_theme_guard, load_market_advisory,
+    MarketContextConfig, PortfolioRiskConfig, PortfolioThemeConfig, SectorThemesConfig,
+    apply_market_context, apply_portfolio_risk, apply_sector_priority, apply_theme_guard,
+    load_market_advisory,
 )
 from backend.core.risk.theme_map import load_theme_map
 from backend.core.risk.daily_gate_input import compute_daily_gate_input
@@ -1180,7 +1181,8 @@ async def _scan_and_buy(
     #   섹션 부재/stale/미매핑 → fail-open. ★LLM은 주문 동기경로에 없음.
     _size_factors: dict = {}
     _global_factor = 1.0
-    if (cfg.market_context_enabled or cfg.portfolio_theme_enabled or cfg.portfolio_risk_enabled):
+    if (cfg.market_context_enabled or cfg.sector_themes_enabled
+            or cfg.portfolio_theme_enabled or cfg.portfolio_risk_enabled):
         _mc_adv = load_market_advisory(_DATA_DIR / "advisory.json")
         _theme_map = load_theme_map(_DATA_DIR / "theme_map.json")
         _now_mc = _now_kst()
@@ -1191,6 +1193,14 @@ async def _scan_and_buy(
                 regime_max_buy, signals, _mctx_cfg, _mc_adv.market_context, _now_mc)
             for _n in _mc_notes:
                 print(f"  [{_now_mc:%H:%M:%S}][MARKET] {_n}")
+        # ② 거래대금 집중 핫테마 우선순위 가점 — under-exposed 신호를 앞으로(soft 재정렬)
+        _sector_cfg = SectorThemesConfig.from_policy_config(cfg)
+        if _sector_cfg.enabled:
+            signals, _boosted = apply_sector_priority(
+                signals, _sector_cfg, _mc_adv.sector_themes, _mc_adv.portfolio_signals,
+                _theme_map, _now_mc)
+            for _sym, _b in _boosted[:3]:
+                print(f"  [{_now_mc:%H:%M:%S}][SECTOR] {_sym} 핫테마 우선 가점 {_b:.0%}")
         # ③ 포트폴리오 테마 쏠림 가드 — 과다 테마 차단(hard)/사이징 축소(soft)
         _theme_cfg = PortfolioThemeConfig.from_policy_config(cfg)
         if _theme_cfg.enabled:
