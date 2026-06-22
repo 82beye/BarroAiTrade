@@ -33,6 +33,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.core.risk.agent_advisory import GO, NOGO, WAIT  # noqa: E402
+from backend.core.risk.theme_map import (  # noqa: E402
+    hot_themes, load_theme_map, theme_exposure,
+)
 
 _ROOT = Path(__file__).resolve().parents[1]
 _DATA_DIR = _ROOT / "data"
@@ -189,6 +192,46 @@ def append_decision_log(logs_dir: Path, record: dict, now: datetime) -> None:
         f.write(line + "\n")
 
 
+_REGIME_RISK_ON = {"bull": True, "sideways": True, "bearish": False}
+
+
+def produce_market_sections(snapshot: dict, theme_map: dict, now: datetime) -> dict:
+    """결정적 시장-맥락 섹션 생산 (market_snapshot.json + theme_map → advisory 섹션).
+
+    LLM 없이 결정적으로 산출(국면 risk_on, 거래대금 집중 테마, 포트폴리오 테마 노출/집중).
+    LLM 오버레이(국면 내러티브·테마 진위)는 후속 — 본 함수는 결정적 1차 신호.
+    """
+    if not isinstance(snapshot, dict):
+        return {}
+    ts = _iso(now)
+    regime = str(snapshot.get("regime", "unknown")).lower()
+    leaders = snapshot.get("leaders") or []
+    positions = snapshot.get("positions") or []
+
+    exposure = theme_exposure(positions, theme_map)
+    concentration = max(exposure.values(), default=0.0)
+    return {
+        "market_context": {
+            "regime": regime,
+            "risk_on": _REGIME_RISK_ON.get(regime),
+            "confidence": 0.5,                       # 결정적 base(LLM 오버레이 전)
+            "strategy_gates": {},
+            "reason": f"regime={regime}(결정적)",
+            "ts": ts, "source": "snapshot",
+        },
+        "sector_themes": {
+            "hot": hot_themes(leaders, theme_map, top=10),
+            "ts": ts, "source": "snapshot",
+        },
+        "portfolio_signals": {
+            "theme_exposure": exposure,
+            "concentration_pct": round(concentration, 4),
+            "leverage_warn": False,                  # leverage 판정은 후속(balance 필요)
+            "ts": ts, "source": "snapshot",
+        },
+    }
+
+
 def run_once(*, backend: str, data_dir: Path, logs_dir: Path, ttl_sec: int,
              keep_sec: int, top: int, now: datetime | None = None,
              verdict_fn=None) -> list[dict]:
@@ -220,6 +263,16 @@ def run_once(*, backend: str, data_dir: Path, logs_dir: Path, ttl_sec: int,
     except (OSError, json.JSONDecodeError, ValueError):
         existing = None
     merged = merge_advisory(existing, new_verdicts, now, keep_sec)
+    # 시장-맥락 섹션 carry-forward(없으면 기존 유지) + market_snapshot 있으면 결정적 갱신.
+    for _k in ("market_context", "sector_themes", "portfolio_signals"):
+        if isinstance(existing, dict) and _k in existing:
+            merged[_k] = existing[_k]
+    try:
+        snap = json.loads((data_dir / "market_snapshot.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        snap = None
+    if snap:
+        merged.update(produce_market_sections(snap, load_theme_map(data_dir / "theme_map.json"), now))
     write_json_atomic(adv_path, merged)
     return new_verdicts
 

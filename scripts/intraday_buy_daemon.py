@@ -45,6 +45,11 @@ from backend.core.strategy.dante_filters import DistributionExitConfig
 from backend.core.risk.agent_advisory import (
     AgentAdvisoryConfig, apply_buy_advisory, load_advisory,
 )
+from backend.core.risk.market_context import (
+    MarketContextConfig, PortfolioRiskConfig, PortfolioThemeConfig,
+    apply_market_context, apply_portfolio_risk, apply_theme_guard, load_market_advisory,
+)
+from backend.core.risk.theme_map import load_theme_map
 from backend.core.risk.daily_gate_input import compute_daily_gate_input
 from backend.core.risk.live_order_gate import (
     GatePolicy, LiveOrderGate, DailyOrderLimitExceeded,
@@ -616,6 +621,33 @@ def _save_refined_signals(signals: list, regime) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _save_market_snapshot(leaders: list, balance, regime) -> None:
+    """결정적 시장 스냅샷 — 시장-맥락 add-on 생산자(writer)용. LLM 없음, 관측 데이터 덤프.
+
+    {ts, regime, leaders:[{symbol,trade_value}](당일 유니버스 거래대금),
+     positions:[{symbol,eval_value}](보유 평가금액)}. writer 가 theme_map 과 조인해
+     hot_themes·theme_exposure 를 산출. 실패는 무시(관측용 — 라이브 무영향).
+    """
+    import json
+    try:
+        data = {
+            "ts": _now_kst().isoformat(),
+            "regime": regime.value,
+            "leaders": [
+                {"symbol": c.symbol, "trade_value": float(getattr(c, "trade_value", 0) or 0)}
+                for c in (leaders or [])
+            ],
+            "positions": [
+                {"symbol": h.symbol, "eval_value": float(h.eval_amount)}
+                for h in (getattr(balance, "holdings", None) or [])
+            ],
+        }
+        (_DATA_DIR / "market_snapshot.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 # ── 고도화 #6 (2026-05-30): 진입 시 전략 analyze() 재검증 게이트 ──────────
 #   문제: 데몬은 일봉 sim 으로 전략을 선정하나 진입 시점에 그 전략의 진입조건을
 #   재검증하지 않아, gold(바닥매수)가 장중 고점에 진입(5/29 한온시스템 -6%).
@@ -1121,6 +1153,8 @@ async def _scan_and_buy(
 
     # 정제된 시그널을 파일에 저장 (대시보드 노출용) — advisory 필터 이전의 전체 탐지 신호.
     _save_refined_signals(signals, regime)
+    # 결정적 시장 스냅샷(관측) — writer 가 add-on 신호 생산에 사용. 라이브 무영향.
+    _save_market_snapshot(leaders, balance, regime)
 
     if not signals:
         return 0
@@ -1137,6 +1171,39 @@ async def _scan_and_buy(
         for _sym, _name, _action, _reason in _adv_skipped:
             _ts_a = _now_kst().strftime("%H:%M:%S")
             print(f"  [{_ts_a}][ADVISORY-{_action}] {_sym} {_name:<14} — {_reason}")
+        if not signals:
+            return 0
+
+    # ── 시장-맥락 add-on (config-gated, default-OFF) ──────────────────────────
+    #   advisory.json top-level 섹션(market_context/sector_themes/portfolio_signals)을 소비.
+    #   결정적 하드캡(테마 쏠림) + LLM 소프트(국면). 전부 off → 무변경(byte-identical).
+    #   섹션 부재/stale/미매핑 → fail-open. ★LLM은 주문 동기경로에 없음.
+    _size_factors: dict = {}
+    _global_factor = 1.0
+    if (cfg.market_context_enabled or cfg.portfolio_theme_enabled or cfg.portfolio_risk_enabled):
+        _mc_adv = load_market_advisory(_DATA_DIR / "advisory.json")
+        _theme_map = load_theme_map(_DATA_DIR / "theme_map.json")
+        _now_mc = _now_kst()
+        # ① 시장국면 — risk-off/bearish 시 max_buy 축소(soft), 전략게이트(hard)
+        _mctx_cfg = MarketContextConfig.from_policy_config(cfg)
+        if _mctx_cfg.enabled:
+            regime_max_buy, signals, _mc_notes = apply_market_context(
+                regime_max_buy, signals, _mctx_cfg, _mc_adv.market_context, _now_mc)
+            for _n in _mc_notes:
+                print(f"  [{_now_mc:%H:%M:%S}][MARKET] {_n}")
+        # ③ 포트폴리오 테마 쏠림 가드 — 과다 테마 차단(hard)/사이징 축소(soft)
+        _theme_cfg = PortfolioThemeConfig.from_policy_config(cfg)
+        if _theme_cfg.enabled:
+            signals, _theme_skipped, _tsf = apply_theme_guard(
+                signals, _theme_cfg, _mc_adv.portfolio_signals, _theme_map, _now_mc)
+            _size_factors.update(_tsf)
+            for _sym, _themes, _reason in _theme_skipped:
+                print(f"  [{_now_mc:%H:%M:%S}][THEME-CAP] {_sym} — {_reason}")
+        # ④ 포트폴리오 리스크 — 집중/leverage 전역 사이징 throttle
+        _risk_cfg = PortfolioRiskConfig.from_policy_config(cfg)
+        _global_factor, _risk_note = apply_portfolio_risk(_risk_cfg, _mc_adv.portfolio_signals, _now_mc)
+        if _risk_note:
+            print(f"  [{_now_mc:%H:%M:%S}][PORTFOLIO] {_risk_note}")
         if not signals:
             return 0
 
@@ -1190,7 +1257,9 @@ async def _scan_and_buy(
 
     executed = 0
     for r, strategy in buyable[:regime_max_buy]:
-        tranche1_qty = max(1, round(r.recommended_qty * 0.6))
+        # 시장-맥락 add-on 사이징 배수(테마 soft 축소 × 포트폴리오 throttle). 미설정 시 1.0 → 무변경.
+        _sf = _size_factors.get(r.symbol, 1.0) * _global_factor
+        tranche1_qty = max(1, round(r.recommended_qty * 0.6 * _sf))
         try:
             # Phase D2.6: strategy_id 전파 (order_audit.csv 신규 컬럼)
             result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty,
