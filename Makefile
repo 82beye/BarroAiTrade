@@ -2,7 +2,7 @@
 # Reference: docs/01-plan/MASTER-EXECUTION-PLAN-v1.md
 
 .PHONY: help legacy-scalping test-legacy test-config test \
-	advisory-setup advisory-writer advisory-writer-once test-advisory
+	advisory-setup advisory-writer advisory-writer-once advisory-shadow test-advisory
 
 help: ## 사용 가능한 타겟 출력
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -157,5 +157,8 @@ advisory-writer: ## 자문 writer 루프 (claude-cli, advisory.json 생산 + 텔
 advisory-writer-once: ## 자문 writer 1회 mock 스모크 (토큰 0, 라이브 무영향)
 	@$(PYTHON) scripts/agent_advisory_writer.py --once --backend mock
 
-test-advisory: ## 자문 게이트(소비자)+writer(생산자) 단위 테스트
-	@$(PYTHON) -m pytest backend/tests/risk/test_agent_advisory.py backend/tests/risk/test_agent_advisory_writer.py -v
+advisory-shadow: ## 자문 shadow 분석 (DATE=YYYY-MM-DD, 게이트 효과 반사실 측정, read-only)
+	@$(PYTHON) scripts/agent_advisory_shadow.py --date $(DATE) --save
+
+test-advisory: ## 자문 게이트(소비자)+writer(생산자)+shadow 단위 테스트
+	@$(PYTHON) -m pytest backend/tests/risk/test_agent_advisory.py backend/tests/risk/test_agent_advisory_writer.py backend/tests/risk/test_agent_advisory_shadow.py -v
