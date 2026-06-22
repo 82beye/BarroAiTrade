@@ -53,6 +53,20 @@ jq '. + {"agent_advisory_enabled": true, "agent_advisory_ttl_sec": 180}' data/po
 - 저신뢰 무시: `"agent_advisory_min_confidence": 0.6`.
 - **롤백(즉시)**: `agent_advisory_enabled` → `false`. 데몬 byte-identical 복귀.
 
+## 4b. 시장-맥락 add-on (regime · 테마 거래대금 집중 · 포트폴리오 쏠림/리스크)
+종목 verdict 외에 시장 전반 신호를 같은 advisory.json 으로 소비한다. 설계: [[2026-06-23-market-context-addons.design]].
+- **생산(자동)**: 데몬이 `data/market_snapshot.json`(regime·거래대금·보유)을 덤프 → writer 가 `data/theme_map.json` 과 조인해 advisory.json 의 `market_context`/`sector_themes`/`portfolio_signals` 섹션 생산. `git pull` 후 추가 설정 불요(생산은 결정적, 라이브 무영향).
+- **테마 매핑 유지보수**: `data/theme_map.json`(symbol→[테마]) 커버리지 = 쏠림 가드 정확도. 신규 주도주는 여기에 추가. 미매핑 종목은 가드 미적용(fail-open).
+- **활성(★HITL, off→soft→hard)**: `data/policy.json` 플래그(jq 로 키만):
+```bash
+# 포트폴리오 테마 쏠림 가드 — soft(사이징 축소) 먼저
+jq '. + {"portfolio_theme_enabled": true, "portfolio_theme_mode": "soft", "portfolio_max_theme_pct": 0.30}' data/policy.json > /tmp/p && mv /tmp/p data/policy.json
+# shadow 입증 후 hard(차단) 승격:  "portfolio_theme_mode": "hard"
+# 시장국면(risk-off → max_buy 축소):  "market_context_enabled": true
+# 포트폴리오 리스크 throttle:  "portfolio_risk_enabled": true
+```
+- **롤백(즉시)**: 해당 `*_enabled` → `false`. 데몬 byte-identical(사이징 ×1.0) 복귀.
+
 ## 5. 안전 불변식
 - LLM은 주문 동기 경로에 **없음** — 데몬은 미리 계산된 advisory.json만 읽고, 없음/stale/저신뢰/파싱실패 → **fail-open**(베이스라인 매매).
 - 게이트 OFF(기본) → 데몬 byte-identical. 활성/사이징/청산 확장은 전부 (d) HITL.

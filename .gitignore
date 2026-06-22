@@ -59,8 +59,10 @@ htmlcov/
 # IDE / Editor workspaces
 *.code-workspace
 
-# Runtime data (SQLite, OHLCV cache 등)
-data/
+# Runtime data (SQLite, OHLCV cache 등) — 내용만 무시(디렉터리 추적 가능해야 예외 적용됨)
+data/*
+# 예외: 테마 매핑 시드는 커밋(유지보수 대상 — 시장-맥락 add-on)
+!data/theme_map.json
 
 # Phase 1 daily pipeline 런타임 산출물 (analysis/*.py 는 추적 유지)
 analysis/imports/
