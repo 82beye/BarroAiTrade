@@ -87,3 +87,8 @@ backend/legacy_scalping/**/*.log
 
 # Next.js TS 빌드 캐시 (2026-05-18)
 frontend/tsconfig.tsbuildinfo
+
+# 세션 백업/임시 (시크릿 포함 가능 — 커밋 금지, 2026-06-22)
+.env.local.bak.*
+.env.*.bak.*
+.reports_premigration_backup_*/
