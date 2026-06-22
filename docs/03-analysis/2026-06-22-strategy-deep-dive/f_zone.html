@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>f_zone</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<h1 id="barroaitrade-f_zone-f">BarroAiTrade 매매전략 심층 리포트 — f_zone (F존)</h1>
+<blockquote>
+<p>생성: 2026-06-22 · 진실원천: 코드 인용(file:line) · origin/main 기준
+상태: 🟢 활성 (default ON) · 분류: 1분봉 단타 · 컨셉: 급등(기준봉) 후 눌림목에서 이평선 지지+반등 캔들 확인 후 매수하는 5단계 추세 추종 단타</p>
+</blockquote>
+<h2 id="1-tldr">1. 요약 (TL;DR)</h2>
+<ul>
+<li><strong>컨셉</strong>: "급등(기준봉) → 눌림목 조정 → 이평선 지지 → 반등 캔들 → 진입"의 5단계 패턴. 서희파더(thetrading2021 이재상) 특허 매매기법 기반 구현 (<code>f_zone.py:1-16</code>).</li>
+<li><strong>진입 핵심</strong>: 5단계를 순차 통과하고 0~10점 종합점수가 <strong>≥ 4.0</strong> 이어야 신호 발생. 임펄스·눌림·반등 셋 중 하나라도 미충족이면 즉시 None 반환 (<code>f_zone.py:599</code>, <code>294-309</code>).</li>
+<li><strong>청산 핵심</strong>: 라이브 ExitPlan = TP1 +3%(50%) / TP2 +5%(50%), SL -2% 고정, 14:50 강제청산, 본전(breakeven) +1.5% (<code>f_zone.py:342-370</code>). 2차 안전망(HoldingEvaluator)은 SL -4%·TP +5%·트레일링·시간강화로 더 너그러움 (<code>holding_evaluator.py:104-114</code>).</li>
+<li><strong>주요 파라미터</strong>: <code>impulse_min_gain_pct=0.03</code>, <code>impulse_max_gain_pct=1.0</code>(사실상 무제한), <code>impulse_volume_ratio=2.0</code>, <code>pullback_min_pct=-0.03</code>, <code>bounce_min_gain_pct=0.005</code>, <code>min_atr_pct=0.0</code>(default 비활성) (<code>f_zone.py:51-94</code>).</li>
+<li><strong>리스크</strong>: 비용 후 검증된 timeframe 은 <strong>일봉뿐</strong>(f_zone 일봉 +3.42%/거래). 운영 기본인 <strong>1분봉은 비용 후 -0.45%/거래로 명확 적자</strong>이며, OOS·랜덤 유니버스 미검증 (변동성 상위 유니버스 선택편향) (<code>docs/04-report/features/2026-05-29-grid-backtest.md:169,182-184,196</code>).</li>
+</ul>
+<h2 id="2">2. 전략 개요 (컨셉·기원·어떤 셋업을 노리는가)</h2>
+<p>F존은 <strong>급등(기준봉)이 한 번 나온 종목</strong>을 대상으로, 그 직후 거래량이 줄며 살짝 조정(눌림목)된 뒤 이동평균선에서 지지받고 다시 반등 캔들이 나올 때 진입하는 <strong>추세 추종형 눌림목 매수</strong> 전략이다. 모듈 docstring(<code>f_zone.py:1-16</code>)에 따르면 출처는 thetrading2021(서희파더 이재상) 특허 매매기법이며, 분할 익절(+3%, +5%)과 고정 손절(-2%)로 관리한다.</p>
+<p>F존과 SF존(슈퍼존)의 관계 (<code>f_zone.py:9-11</code>):
+- <strong>F존</strong> — 기준봉 + 눌림목 + 이평선 지지 확인
+- <strong>SF존</strong> — F존 조건 + 추가 강도(거래량 재증가, 강한 기준봉). 코드상 <strong>F존의 가장 강한 부분집합</strong>으로, <code>score≥7.0</code> AND <code>impulse_gain≥5%</code> AND <code>vol_ratio≥3x</code> 일 때만 SF존으로 격상된다 (<code>f_zone.py:601-607</code>). SFZoneStrategy 는 FZoneStrategy 를 내부 delegate 로 보유하고 <code>signal_type=="sf_zone"</code> 만 통과시킨다 (<code>sf_zone.py:36-50</code>).</p>
+<p>엔진 진입점은 <code>FZoneStrategy._analyze_v2(ctx)</code> (<code>f_zone.py:244</code>). <code>Strategy.analyze()</code> 가 AnalysisContext 로 dispatch 한다 (<code>base.py:42,52,62</code>). 분석은 OHLCV→pandas DataFrame(오래된→최신) 변환 후 단계별로 수행된다 (<code>f_zone.py:289-290</code>, <code>_to_dataframe</code> <code>621-636</code>).</p>
+<h2 id="3">3. 진입 로직 (조건·점수·게이트·필터)</h2>
+<p><code>_analyze_v2</code> 의 순서 (<code>f_zone.py:244-338</code>):</p>
+<h3 id="_1">사전 게이트</h3>
+<ol>
+<li><strong>캔들 수</strong>: <code>len(candles) &lt; min_candles(60)</code> 이면 None (<code>f_zone.py:257-259</code>).</li>
+<li><strong>변동성 필터 (F1)</strong>: <code>min_atr_pct &gt; 0</code> 일 때만 작동. ATR%(14봉) &lt; 임계면 진입 거부. default <code>0.0</code>=비활성 (<code>f_zone.py:262-269</code>). ATR% 는 <code>indicators.atr_pct</code> 단일 소스 (<code>f_zone.py:614-618</code>, <code>indicators.py:21-51</code>).</li>
+<li><strong>트랩 가드</strong>: <code>_trap_guard_config().any_enabled()</code> 일 때만. 과확장·윗꼬리·고갭 ATR화 차단. default 모든 임계 0=비활성(byte-identical) (<code>f_zone.py:271-277</code>, <code>trap_guard.py:47-53,83-84</code>).</li>
+<li><strong>진입 시간 cutoff</strong>: <code>entry_time_cutoff</code> 설정 시 마지막 candle 시각이 cutoff 이상이면 거부. default None (<code>f_zone.py:280-287</code>).</li>
+</ol>
+<h3 id="5">5단계 진입 조건</h3>
+<table>
+<thead>
+<tr>
+<th>단계</th>
+<th>메서드(file:line)</th>
+<th>조건</th>
+<th>미충족 시</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. 기준봉</td>
+<td><code>_detect_impulse</code> (<code>393-437</code>)</td>
+<td>최근 <code>impulse_lookback(5)</code>봉 중 <code>impulse_min_gain_pct(3%) ≤ (close-open)/open ≤ impulse_max_gain_pct(1.0)</code> AND <code>volume ≥ impulse_volume_ratio(2.0)×avg_volume</code>. 최대 gain 봉 선택</td>
+<td>None (<code>296-297</code>)</td>
+</tr>
+<tr>
+<td>2. 눌림목</td>
+<td><code>_detect_pullback</code> (<code>439-476</code>)</td>
+<td>기준봉 다음~현재 직전 구간 최저가의 하락률이 <code>pullback_min_pct(-0.03) ≤ pct ≤ pullback_max_pct(-0.005)</code> AND 구간 평균거래량/기준봉거래량 <code>≤ pullback_volume_ratio(0.7)</code></td>
+<td>None (<code>299-300</code>)</td>
+</tr>
+<tr>
+<td>3. 이평선 지지</td>
+<td><code>_check_ma_support</code> (<code>478-506</code>)</td>
+<td>현재봉 low 가 <code>ma_periods[5,20,60]</code> 중 하나의 <code>±ma_support_tolerance(1%)</code> 이내. <strong>선택적</strong>(미충족해도 진행, 점수만 손실)</td>
+<td>계속 진행</td>
+</tr>
+<tr>
+<td>4. 반등 캔들</td>
+<td><code>_detect_bounce</code> (<code>508-542</code>)</td>
+<td>현재(마지막) 봉 <code>(close-open)/open ≥ bounce_min_gain_pct(0.5%)</code> AND <code>current.volume / 눌림평균거래량 ≥ bounce_volume_ratio(1.2)</code></td>
+<td>None (<code>308-309</code>)</td>
+</tr>
+<tr>
+<td>5. 점수·분류</td>
+<td><code>_score_and_classify</code> (<code>544-610</code>)</td>
+<td>impulse·pullback·bounce 모두 True 전제, 합산 score(0~10) ≥ <strong>4.0</strong> → <code>is_f_zone</code></td>
+<td>None (<code>313-314</code>)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_score_and_classify-f_zonepy558-598">점수 산식 (<code>_score_and_classify</code>, <code>f_zone.py:558-598</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>요소</th>
+<th style="text-align: right;">만점</th>
+<th>산식(file:line)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>기준봉 gain</td>
+<td style="text-align: right;">2.0</td>
+<td><code>min(impulse_gain / sf_impulse_min_gain_pct(0.05), 1.0)×2.0</code> (<code>559</code>)</td>
+</tr>
+<tr>
+<td>기준봉 volume</td>
+<td style="text-align: right;">1.0</td>
+<td><code>min(impulse_vol_ratio / sf_volume_ratio(3.0), 1.0)×1.0</code> (<code>560</code>)</td>
+</tr>
+<tr>
+<td>눌림목</td>
+<td style="text-align: right;">2.0</td>
+<td><code>max(0, 1.0 - |pullback| / 0.05)×2.0</code> — 얕을수록 ↑ (<code>567-568</code>)</td>
+</tr>
+<tr>
+<td>이평선 지지</td>
+<td style="text-align: right;">2.0</td>
+<td><code>2.0 - touch_pct / ma_support_tolerance(0.01)</code> (미지지 시 0) (<code>573-576</code>)</td>
+</tr>
+<tr>
+<td>반등 gain</td>
+<td style="text-align: right;">1.5</td>
+<td><code>min(bounce_gain / 0.02, 1.0)×1.5</code> (<code>581</code>)</td>
+</tr>
+<tr>
+<td>반등 volume</td>
+<td style="text-align: right;">1.5</td>
+<td><code>min(bounce_vol_ratio / 2.0, 1.0)×1.5</code> (<code>582</code>)</td>
+</tr>
+<tr>
+<td>수박지표 가산</td>
+<td style="text-align: right;">+bonus</td>
+<td><code>use_watermelon_bonus=True</code> 시 최근 N봉 내 신호 발생 시 +1.0 (default OFF) (<code>589-596</code>)</td>
+</tr>
+<tr>
+<td><strong>총합</strong></td>
+<td style="text-align: right;"><strong>10.0</strong></td>
+<td><code>min(score, 10.0)</code> (<code>598</code>)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>F존 판정</strong>: <code>score ≥ 4.0</code> (<code>f_zone.py:599</code>).</li>
+<li><strong>SF존 격상</strong>: <code>is_f_zone</code> AND <code>impulse_gain ≥ 0.05</code> AND <code>impulse_vol_ratio ≥ 3.0</code> AND <code>score ≥ 7.0</code> (<code>f_zone.py:602-607</code>).</li>
+<li>신호의 <code>signal_type</code> 은 <code>"sf_zone"</code> 또는 <code>"f_zone"</code>, score 는 round(score, 2) (<code>f_zone.py:316,324</code>).</li>
+</ul>
+<blockquote>
+<p>⚠ 변수명 혼동 주의(<code>f_zone.py:65</code>): <code>pullback_min_pct</code>=눌림 <strong>최대</strong> 하락(-3%, 깊은 한계), <code>pullback_max_pct</code>=눌림 <strong>최소</strong> 하락(-0.5%, 얕은 시작점). 부등호 <code>pullback_max_pct ≥ pullback_pct ≥ pullback_min_pct</code> (<code>f_zone.py:463</code>).</p>
+</blockquote>
+<h2 id="4-sltp">4. 청산 로직 (SL/TP/부분익절/트레일링/본전/보유기간 + 특수 청산)</h2>
+<h3 id="41-exitplan-1-close-f_zonepy342-370">4.1 라이브 ExitPlan (1차 방어선, 분봉 close 기반) — <code>f_zone.py:342-370</code></h3>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>값</th>
+<th>인용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TP1</td>
+<td>avg×1.03 (+3%), 50% 청산</td>
+<td><code>346-350</code></td>
+</tr>
+<tr>
+<td>TP2</td>
+<td>avg×1.05 (+5%), 50% 청산</td>
+<td><code>351-356</code></td>
+</tr>
+<tr>
+<td>SL</td>
+<td>-2% 고정 (<code>resolve_sl_pct</code> 라운드피겨 보정 가능, default OFF)</td>
+<td><code>365-367</code></td>
+</tr>
+<tr>
+<td>time_exit</td>
+<td>14:50 (KRX STOCK), crypto 는 None</td>
+<td><code>360</code></td>
+</tr>
+<tr>
+<td>breakeven_trigger</td>
+<td>+1.5%</td>
+<td><code>369</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>SL 은 <code>resolve_sl_pct(STRATEGY_ID, avg, -0.02, symbol)</code> 경유 — RF_STOP_ENABLED env 가 OFF 면 base(-2%) 그대로 (<code>round_figure.py:201-202</code>). default OFF/DRY_RUN (<code>round_figure.py:39-46,145-150</code>).</li>
+</ul>
+<h3 id="42-2-holdingevaluator-pnl_rate-holding_evaluatorpy">4.2 적응형 청산 (2차 안전망, HoldingEvaluator, 브로커 pnl_rate 기반) — <code>holding_evaluator.py</code></h3>
+<p><code>STRATEGY_EXIT_PROFILES["f_zone"]</code> (<code>holding_evaluator.py:104-114</code>):</p>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>stop_loss_pct</td>
+<td><strong>-4.0%</strong></td>
+</tr>
+<tr>
+<td>take_profit_pct</td>
+<td>+5.0%</td>
+</tr>
+<tr>
+<td>partial_tp_pct / ratio</td>
+<td>+3.0% / 0.5 (50%)</td>
+</tr>
+<tr>
+<td>trailing_start_pct / offset</td>
+<td>+3.5% / 1.0%</td>
+</tr>
+<tr>
+<td>breakeven_trigger_pct</td>
+<td>+2.5%</td>
+</tr>
+<tr>
+<td>tightened_sl_pct</td>
+<td>-2.5% (보유 <code>hold_days_tighten</code>=5일 이상 시)</td>
+</tr>
+</tbody>
+</table>
+<p>평가 우선순위 (<code>evaluate_holding</code>, <code>holding_evaluator.py:263-461</code>): 보유기간 게이트(f_zone 은 min/max_hold_days 미정의 → 미적용, <code>104-114</code>에 키 없음) → distribution 청산(default OFF) → 단기고점 캔들(SHORT_TERM_HIGH, 1분봉·익절구간 도달 시) → 트레일링 → 브레이크이븐 → 분할익절 → 전량익절 → 시간기반 SL → SL → HOLD.</p>
+<blockquote>
+<p><strong>SL 격차 의도</strong> (<code>holding_evaluator.py:86-100</code>): intraday 단타(f/sf/gold)의 HoldingEvaluator SL(-4%)은 exit_plan() SL(-2%)보다 의도적으로 2%p 너그럽다. ExitEngine(1차) 누락 시(데몬 다운·분봉 fetch 실패·시그널 누락) 2차 fallback 매도 + broker pnl_rate 노이즈 흡수용. 상세: <code>docs/04-report/features/2026-05-28-sl-gap-decision.md</code>.</p>
+</blockquote>
+<h3 id="43">4.3 특수 청산</h3>
+<ul>
+<li><strong>SHORT_TERM_HIGH</strong> (<code>holding_evaluator.py:330-346</code>): 1분봉 시퀀스 + <code>rate ≥ partial_tp_pct</code> 도달 시 도지·윗꼬리·연속음봉 패턴 인식 → 전량 청산. 운영 1분봉 fetch 필수.</li>
+<li><strong>DISTRIBUTION</strong> (<code>holding_evaluator.py:317-324</code>): 세력 이탈(정배열 확장구간 거래량 ×3 장대음봉) → 전량 청산. default OFF (JD-R13, 2026-06-22).</li>
+<li><strong>백테스트 청산은 별도</strong>: IntradaySimulator 는 전략 exit_plan() 을 무시하고 <code>_scaled_exit_plan</code>(f_zone) / <code>_sfzone_atr_exit_plan</code>(sf_zone) 사용 (<code>docs/03-analysis/bar-46-47-f-sf-zone-deep-analysis.md</code> §3) — 라이브와 백테스트 청산이 다름.</li>
+</ul>
+<h2 id="5-fzoneparams-f_zonepy46-118">5. 파라미터 표 (FZoneParams, <code>f_zone.py:46-118</code>)</h2>
+<table>
+<thead>
+<tr>
+<th>필드</th>
+<th>기본값</th>
+<th>의미</th>
+<th>env/override</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>impulse_min_gain_pct</td>
+<td>0.03</td>
+<td>기준봉 최소 상승률 3%</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>impulse_max_gain_pct</td>
+<td>1.0</td>
+<td>기준봉 최대 상승률(무제한) — max 7% 적용 시 winning 시그널까지 죽임 확인(LESSON_FZONE_MAX_GAIN, 2026-05-14)</td>
+<td>params override(예 0.07)</td>
+</tr>
+<tr>
+<td>impulse_volume_ratio</td>
+<td>2.0</td>
+<td>기준봉 거래량 배율(평균 대비 200%)</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>impulse_lookback</td>
+<td>5</td>
+<td>기준봉 탐색 과거 봉 수</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>pullback_min_pct</td>
+<td>-0.03</td>
+<td>눌림 <strong>최대</strong> 하락(was -0.05, Phase D2.4 자본가중 +25%)</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>pullback_max_pct</td>
+<td>-0.005</td>
+<td>눌림 <strong>최소</strong> 하락 -0.5%</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>pullback_volume_ratio</td>
+<td>0.7</td>
+<td>눌림 거래량 감소비(기준봉 대비)</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>pullback_max_candles</td>
+<td>10</td>
+<td>눌림 최대 허용 봉 수</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>ma_periods</td>
+<td>[5,20,60]</td>
+<td>이평선 지지 후보</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>ma_support_tolerance</td>
+<td>0.01</td>
+<td>이평선 ±1% 접근=지지</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>bounce_min_gain_pct</td>
+<td>0.005</td>
+<td>반등 최소 상승 0.5%</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>bounce_volume_ratio</td>
+<td>1.2</td>
+<td>반등 거래량 증가비(눌림 평균 대비)</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>sf_impulse_min_gain_pct</td>
+<td>0.05</td>
+<td>SF존 기준봉 최소 상승 5%</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>sf_volume_ratio</td>
+<td>3.0</td>
+<td>SF존 거래량 배율 300%</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>min_candles</td>
+<td>60</td>
+<td>MA 계산용 최소 캔들</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>min_atr_pct</td>
+<td>0.0</td>
+<td>변동성 필터(0=비활성)</td>
+<td>진입점 명시 override(권장 0.035; 데몬 분봉 0.01)</td>
+</tr>
+<tr>
+<td>atr_n</td>
+<td>14</td>
+<td>ATR 봉 수</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>use_watermelon_bonus</td>
+<td>False</td>
+<td>수박지표 가산</td>
+<td>params override</td>
+</tr>
+<tr>
+<td>entry_time_cutoff</td>
+<td>None</td>
+<td>진입 시간 차단(예 14:00)</td>
+<td>SignalScanner/IntradaySimulator override</td>
+</tr>
+<tr>
+<td>trap_over_ext_k_atr 외 5종</td>
+<td>0.0 / "ma" / 20</td>
+<td>트랩 가드 임계(default 전부 OFF)</td>
+<td>env BARRO_TRAP_* (daemon <code>_apply_trap_env</code>)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>프리셋: <code>FZoneParams.for_intraday()</code>(1분봉, <code>f_zone.py:166-193</code>) — impulse_min 1.0%, lookback 15, ma[20,60,120], min_candles 120. <code>for_5min()</code>(<code>f_zone.py:132-164</code>).</li>
+<li><code>min_atr_pct</code> 는 timeframe 의존: 일봉 0.035 / 분봉 0.01 (<code>grid-backtest.md:19</code>; daemon <code>_REVAL_MIN_ATR=0.01</code> <code>intraday_buy_daemon.py:625</code>).</li>
+</ul>
+<h2 id="6">6. 활성·운영 상태</h2>
+<ul>
+<li><strong>default 활성</strong>: <code>_DEFAULT_ENABLED["f_zone"]=True</code> (<code>signal_scanner.py:41-44</code>). 함께 활성: sf_zone, gold_zone, swing_38(BAR-OPS-33).</li>
+<li><strong>dispatch 우선순위</strong>: intraday 는 SF &gt; F &gt; Gold &gt; Blue &gt; Crypto 순으로 첫 시그널 반환 (<code>signal_scanner.py:148,156-165</code>). 최종 정렬은 점수 1차(내림차순), <code>STRATEGY_PRIORITY</code> 2차 tiebreaker — <strong>f_zone=3</strong> (swing_38=1, gold_zone=2, f_zone=3, sf_zone=4) (<code>signal_scanner.py:59-62,137</code>).</li>
+<li><strong>토글</strong>: <code>SignalScanner(..., enabled_strategies={"f_zone": False})</code> (<code>signal_scanner.py:91,99-102</code>).</li>
+<li><strong>포지션 사이징</strong>: <code>even_position_size</code> 균등 8% (<code>f_zone.py:372-379</code>, <code>position_sizing.py:23</code>) — max_total 0.80 / 10슬롯. score 차등은 진입 게이트에서만 사용(5/22 비중 6배 편차 → 균등 전환).</li>
+<li><strong>데몬 배선</strong> (<code>scripts/intraday_buy_daemon.py</code>):</li>
+<li><code>DEFAULT_ZONE_STRATEGIES=["swing_38","f_zone","sf_zone","gold_zone"]</code> (<code>L85</code>), BUY_START 09:05 게이트 (<code>L60</code>).</li>
+<li><strong>gap-guard</strong>: <code>_GAP_GUARD_STRATEGIES</code> 기본 <code>{gold_zone, f_zone}</code> — 시초갭(flu_rate) ≥ <code>_ZONE_MAX_FLU</code>(15%) 시 진입 금지 (<code>L658-659,1005</code>, env <code>BARRO_GAP_GUARD_STRATEGIES</code>).</li>
+<li><strong>진입 cutoff</strong>: <code>_ZONE_ENTRY_CUTOFF</code>="14:30" (swing_38 면제) — 6/11 f_zone 14:33/14:38 현대무벡스 진입 이월 사례 봉합 (<code>L661-666</code>).</li>
+<li><strong>DCA(물타기)</strong>: f_zone 은 <code>_NO_DCA_STRATEGIES</code>(swing_38, supertrend)·<code>_MEANREV_STRATEGIES</code>(gold_zone)에 미포함 → DCA 대상 (<code>L627,634</code>).</li>
+<li><strong>재검증(reval)</strong>: <code>_build_reval_strategy("f_zone")</code> 는 <code>for_intraday()</code> + <code>min_atr_pct=0.01</code> + 트랩env 주입 (<code>L738-747</code>).</li>
+<li><strong>EOD 강제청산 면제 아님</strong>: f_zone 은 <code>_FORCE_CLOSE_EXEMPT_STRATEGIES</code>(swing_38)에 미포함 → carry-limit 트림 대상 (<code>L668-685</code>).</li>
+</ul>
+<h2 id="7">7. 비용·손익분기 관점</h2>
+<p>거래비용 (<code>trading_costs.py:29-33</code>): 편도 수수료 <code>COMMISSION_RATE=0.0035</code>(0.35%), 매도세 <code>TAX_RATE_SELL=0.0020</code>(0.20%), <strong>왕복 <code>ROUND_TRIP_COST_RATE = 0.0035×2 + 0.0020 = 0.0090</code>(0.90%)</strong>. env override <code>BARRO_COMMISSION_RATE</code>/<code>BARRO_TAX_RATE_SELL</code>.</p>
+<ul>
+<li>f_zone TP1(+3%)에서 50% 익절하면 그 절반은 왕복 0.90% 차감 후 순익 약 <strong>+2.1%</strong>, TP2(+5%)는 약 <strong>+4.1%</strong>. SL(-2%)은 비용 포함 약 <strong>-2.9%</strong>. 즉 TP/SL 폭은 왕복 0.90% 대비 충분히 크다(TP1 손익분기 0.90% 초과).</li>
+<li>그러나 <strong>1분봉 단타는 거래 빈도가 비용을 잠식한다</strong>: 비용 후 f_zone 1m -0.45%/거래, 5m -0.04%/거래(거의 손익분기), <strong>일봉만 +3.42%/거래로 견고</strong> (<code>grid-backtest.md:167-169</code>).</li>
+<li>⚠ <strong>caveat</strong>: 위 그리드 백테스트는 <strong>구(舊) 비용 가정</strong>(편도 0.015%×2 + 세 0.18% ≈ 왕복 0.21%, <code>grid-backtest.md:162</code>)으로 계산됐다. 현재 <code>ROUND_TRIP_COST_RATE</code>=0.90%(약 4배)를 반영하면 <strong>단타 적자는 더 심화</strong>된다. 1분봉 운영의 비용 후 손익은 코드 기준 현 비용으로 재검증 필요(미수행 — 미검증).</li>
+</ul>
+<h2 id="8-oos">8. 백테스트·OOS 근거 / 한계·리스크</h2>
+<p>근거: <code>docs/04-report/features/2026-05-29-grid-backtest.md</code> (51종목 실데이터, 3전략×3tf×3min_atr=27셀, 멀티에이전트 적대적 검증 confidence HIGH, 3분할 TP+트레일링+비용 반영).</p>
+<table>
+<thead>
+<tr>
+<th>전략</th>
+<th>tf</th>
+<th style="text-align: right;">min_atr</th>
+<th style="text-align: right;">gross%</th>
+<th style="text-align: right;">비용후(ct)%</th>
+<th style="text-align: right;">win%</th>
+<th style="text-align: right;">거래</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>f_zone</td>
+<td><strong>일봉</strong></td>
+<td style="text-align: right;">0.035</td>
+<td style="text-align: right;">+3.57</td>
+<td style="text-align: right;"><strong>+3.42</strong></td>
+<td style="text-align: right;">52.8</td>
+<td style="text-align: right;">72</td>
+</tr>
+<tr>
+<td>f_zone</td>
+<td>5m</td>
+<td style="text-align: right;">0.0</td>
+<td style="text-align: right;">+0.16</td>
+<td style="text-align: right;"><strong>-0.04</strong></td>
+<td style="text-align: right;">39.6</td>
+<td style="text-align: right;">313</td>
+</tr>
+<tr>
+<td>f_zone</td>
+<td>1m</td>
+<td style="text-align: right;">0.0</td>
+<td style="text-align: right;">-0.23</td>
+<td style="text-align: right;"><strong>-0.45</strong></td>
+<td style="text-align: right;">31.3</td>
+<td style="text-align: right;">482</td>
+</tr>
+</tbody>
+</table>
+<p>(<code>grid-backtest.md:167-169</code>)</p>
+<p><strong>최종 결론</strong> (<code>grid-backtest.md:181-185</code>):
+1. 🟢 비용 후 견고한 양수는 <strong>일봉(스윙)만</strong> — f +3.42% / sf +3.76%.
+2. 🟠 5분봉 엣지는 비용 후 거의 소멸(f 5m 적자 전환).
+3. 🔴 1분봉은 비용 후 전 전략 명확 적자.
+4. 구조적: 이 시스템의 backtest 엣지는 단타가 아니라 일봉에 있다 — <strong>단타 전용 모드(현 default)가 엣지 가장 약한 영역을 택한 셈</strong>.</p>
+<p><strong>한계·리스크</strong>:
+- <strong>운영 default 가 1분봉 단타</strong> (<code>signal_scanner.py:87</code>, daemon)인데 1분봉은 비용 후 적자. F존의 검증된 흑자는 일봉이며, 현재 일봉 트랙(swing_38)은 별개 전략.
+- <strong>OOS 미검증</strong>: 유니버스가 변동성 상위 선정 = 최대 낙관 편향(트레일링이 큰 추세 회수). in-sample·모의 API·단일 기간. out-of-sample + 랜덤 유니버스 검증 선행 필수 (<code>grid-backtest.md:193,196-197</code>).
+- <strong>변동성 필터 default OFF</strong>: 저변동·고가주(LG전자 ATR% 2.94%, win 0%, -627k)에서 SL 노이즈 발동 위험 — 운영은 진입점에서 명시 override 필요 (<code>f_zone.py:86-94</code>).
+- <strong>min_atr 단일상수 금지</strong>: 0.035 는 분봉서 신호 거의 전멸(f 1m+0.035 → 표본 1건 노이즈) (<code>grid-backtest.md:18,36,64</code>).
+- <strong>비용 재검증 부재</strong>: 현 왕복 0.90%(구 가정 대비 약 4배)로 그리드 백테스트 미재실행 (문서 부재 — 미검증).</p>
+<h2 id="9">9. 관련 파일·테스트</h2>
+<ul>
+<li><code>backend/core/strategy/f_zone.py</code> — FZoneParams + FZoneStrategy (636줄, 메인)</li>
+<li><code>backend/core/strategy/sf_zone.py</code> — SFZoneStrategy (delegate)</li>
+<li><code>backend/core/strategy/trap_guard.py</code> — 진입 트랩 가드(default OFF)</li>
+<li><code>backend/core/strategy/round_figure.py</code> — resolve_sl_pct(라운드피겨 SL 보정, default OFF)</li>
+<li><code>backend/core/strategy/position_sizing.py</code> — even_position_size(균등 8%)</li>
+<li><code>backend/core/strategy/indicators.py</code> — atr_pct(변동성 필터)</li>
+<li><code>backend/core/risk/holding_evaluator.py</code> — STRATEGY_EXIT_PROFILES["f_zone"] 적응형 청산</li>
+<li><code>backend/core/scanner/signal_scanner.py</code> — dispatch·_DEFAULT_ENABLED·STRATEGY_PRIORITY</li>
+<li><code>scripts/intraday_buy_daemon.py</code> — gap-guard/cutoff/DCA/reval/trap env 배선</li>
+<li>테스트: <code>backend/tests/strategy/test_f_zone.py</code>(v2·exit_plan·position_size·F1 변동성·entry_time_gate·Phase D2.4 pullback·baseline 회귀), <code>test_sf_zone.py</code>, <code>test_trap_guard.py</code></li>
+<li>분석/리포트: <code>docs/03-analysis/bar-46-47-f-sf-zone-deep-analysis.md</code>, <code>docs/04-report/bar-46-f-zone-v2.report.md</code>, <code>docs/04-report/features/2026-05-29-grid-backtest.md</code>, <code>docs/04-report/features/2026-05-28-daytrading-strategies-analysis.md</code>, <code>docs/04-report/features/2026-05-28-sl-gap-decision.md</code></li>
+</ul>
+<hr />
+<p><em>진실원천: 본 리포트의 모든 수치는 위 인용 코드(file:line) 기준. 미검증 항목은 명시.</em></p>
+</body>
+</html>

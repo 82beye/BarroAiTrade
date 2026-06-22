@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>closing_bet</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<h1 id="barroaitrade-closing_bet">BarroAiTrade 매매전략 심층 리포트 — closing_bet (종가베팅)</h1>
+<blockquote>
+<p>생성: 2026-06-22 · 진실원천: 코드 인용(file:line) · origin/main 기준
+상태: ⚪ 구현됨·비활성 (default OFF, 자동매수 BARRO_CB_AUTOEXEC opt-in) · 분류: 일봉 진입+오버나잇(D1~D3) · 컨셉: 장 막판 15:00~15:20 신고가 돌파 장대양봉 주도주를 종가에 잡아 익일 아침 슈팅(+4~5%)에 파는 오버나잇 1박 단타</p>
+</blockquote>
+<h2 id="1-tldr">1. 요약 (TL;DR)</h2>
+<ul>
+<li><strong>무엇</strong>: "더트레이딩 방법론"의 시그니처 기법. 당일 주도주를 장 막판 종가 근처에 매수해 익일 9~10시 +4~5% 슈팅에 매도하는 <strong>오버나잇 1박 단타</strong> (<code>closing_bet.py:4-5</code>).</li>
+<li><strong>활성 상태</strong>: <code>SignalScanner._DEFAULT_ENABLED["closing_bet"] = False</code> (<code>signal_scanner.py:54</code>) — 라이브 스캐너에서 <strong>비활성 스캐폴딩</strong>. 코드는 완비됐으나 자동 dispatch 안 됨.</li>
+<li><strong>자동매수 executor</strong>: <code>closing_bet_alert_daemon.py</code> 의 <code>BARRO_CB_AUTOEXEC</code>(default <code>"0"</code>=OFF, <code>alert_daemon:107-108</code>). opt-in 으로 켜야 BUY 자동 송출. SELL 은 여전히 신호 전용. 라이브 실거래는 <code>AUTOEXEC=1</code> + <code>--no-dry-run</code> 동시 충족 시에만 → ★HITL 게이트(<code>eod-auto-execution.design.md:99</code>).</li>
+<li><strong>검증 결과 양면성</strong>: 공식 OOS 관문 3 seed 전부 PASS(avg_ret +3.48~3.89%, <code>validation.report.md:27-29</code>)지만, 그 수익은 <strong>"익일 시초 진입" 가정에 의존</strong> — '종가 진입'으로 측정하면 <strong>net 브레이크이븐</strong>(<code>backtest.report.md:47</code>). 이격도(disparity_yellow) 게이트 ON 시 net @0.90 +0.405%로 개선되며 robustness 통과(<code>disparity-gate-robustness.json</code>).</li>
+<li><strong>핵심 리스크</strong>: 오버나잇 갭 + 왕복 비용 0.90%. +4.5% TP 마진의 약 20%를 비용이 잠식 → 비용/체결가가 종베 손익을 결정.</li>
+</ul>
+<h2 id="2">2. 전략 개요 (종가베팅 컨셉·진입 시간창)</h2>
+<p>종베는 <strong>EOD(End-Of-Day) 선정 + 오버나잇 캐리</strong> 구조다 (<code>closing_bet.py:11-17</code>):</p>
+<ul>
+<li><strong>진입 시간창</strong>: KST <strong>15:00~15:20</strong> (<code>ClosingBetParams.entry_window_start=dtime(15,0)</code>, <code>entry_window_end=dtime(15,20)</code>, <code>closing_bet.py:56-57</code>). 인트라데이 데몬 진입 cutoff 14:30 밖이라 자동진입은 별도 EOD dispatch 가 필요 (<code>eod-auto-execution.design.md:18</code>).</li>
+<li><strong>진입 대상</strong>: 당일 주도주 중 <strong>신고가 돌파 장대양봉</strong>.</li>
+<li><strong>보유</strong>: 오버나잇 1박 (D1), 최대 D3 (<code>max_hold_days=3</code>, <code>closing_bet.py:102</code>).</li>
+<li><strong>청산</strong>: 익일 아침 슈팅 익절(+4.5%, 대형주 +2%) / 0.618 이탈 SL / 익일 10:00 시간청산 (<code>closing_bet.py:96-103</code>).</li>
+</ul>
+<p>구현 범위는 <strong>Increment 1 = 일봉 컨텍스트 + ctx.timestamp 진입창 자기완결 스캐폴드</strong> (<code>closing_bet.py:12-13</code>). 분봉 자금유입·존(F/골드존) 진입가·거래대금 rank/시총 hard-cut 은 <strong>전부 default-OFF 옵션</strong>으로 두고, 라이브 활성(별도 HITL)에서 intraday/선정 컨텍스트를 주입해 켜는 구조 (<code>closing_bet.py:14-16</code>).</p>
+<h2 id="3">3. 진입 로직 (시간창·신고가·장대양봉·자금유입·이격도 게이트)</h2>
+<p>진입 판정은 <code>ClosingBetStrategy._analyze_v2()</code> (<code>closing_bet.py:140-261</code>). 게이트는 순서대로 평가되며, 어느 하나라도 실패하면 <code>None</code>(미진입):</p>
+<p><strong>① 캔들 수 / ② 진입 시간창 (핵심 차별점)</strong> — <code>closing_bet.py:143-149</code></p>
+<pre><code class="language-python">if len(candles) &lt; p.min_candles:          # min_candles=70 (closing_bet.py:87)
+    return None
+if p.require_eod_window and not self._in_entry_window(ctx.timestamp):
+    return None
+</code></pre>
+<p><code>_in_entry_window</code> 은 ctx.timestamp 를 KST 로 변환해 <code>[15:00, 15:20]</code> 안인지 검사 (<code>closing_bet.py:265-271</code>).</p>
+<p><strong>③ 신고가 돌파 (일봉)</strong> — <code>closing_bet.py:156-163</code></p>
+<pre><code class="language-python">prior = candles[-(p.new_high_lookback + 1):-1]   # new_high_lookback=60 (closing_bet.py:62)
+prior_high = max(c.high for c in prior)
+if today.high &lt; prior_high * (1.0 - p.new_high_tolerance):   # tolerance default 0.0 = 완전 돌파
+    return None
+</code></pre>
+<p><code>new_high_tolerance&gt;0</code>(default 0.0) 이면 '전고점 이격(near-high)' 모드로, 신고가 미돌파라도 전고점 근접 종목까지 허용 (<code>closing_bet.py:63-66</code>).</p>
+<p><strong>④ 기준봉 = 장대양봉</strong> — <code>closing_bet.py:174-182</code></p>
+<pre><code class="language-python">body = (today.close - today.open) / today.open
+if body &lt; p.base_min_gain_pct:            # 몸통 ≥ 5% (base_min_gain_pct=0.05, closing_bet.py:81)
+    return None
+upper_wick_ratio = (today.high - today.close) / body_abs
+if upper_wick_ratio &gt; p.base_upper_wick_max:   # 윗꼬리/몸통 상한 1.0 (closing_bet.py:82)
+    return None
+</code></pre>
+<p><strong>④-b 이격도 노란불 게이트 (옵션, default OFF)</strong> — <code>closing_bet.py:184-189</code></p>
+<pre><code class="language-python">if p.require_disparity_yellow and not disparity_yellow(
+        candles, threshold=p.disparity_yellow_threshold):   # 5일선 이격 ≥ +14.25%
+    return None
+</code></pre>
+<p><code>disparity_yellow()</code>(<code>closing_bet_filters.py:229-236</code>)는 <code>(종가-SMA5)/SMA5 ≥ 0.1425</code> 이면 True. 종베 net edge 의 핵심 동인 (<code>closing_bet.py:90-92</code>).</p>
+<p><strong>그 외 옵션 게이트 (전부 default OFF, 회귀 byte-identical)</strong>:
+- ③-b 기간조정 <code>consolidation_ok</code> (<code>closing_bet.py:165-172</code>, <code>consolidation_min_days=0</code>)
+- ④-c 상대 거래대금 급증 <code>rel_volume_surge</code> (<code>closing_bet.py:191-195</code>, <code>rel_volume_lookback=0</code>)
+- ⑤ 거래대금 rank/시총 hard-cut (<code>closing_bet.py:199-209</code>, <code>require_leader_meta=False</code>)
+- ⑤-b 외인/기관 양매수 (<code>closing_bet.py:211-217</code>, <code>require_dual_net_buy=False</code>)
+- ⑥ 존(골드존) 0.5~0.618 되돌림 (<code>closing_bet.py:219-223</code>, <code>require_zone=False</code>)
+- ⑦ 분봉 자금유입 BLOCK 판정 (<code>closing_bet.py:225-228</code>, <code>require_money_flow=False</code>)</p>
+<p><strong>자금유입 등급</strong> <code>_money_flow_grade</code> (<code>closing_bet.py:278-304</code>): 분봉에서 오전(09:00~11:30)/오후(13:00~15:20) 거래대금 Σ(close×volume)을 집계해 BOTH/PM_ONLY/BLOCK 판정. "오전 유입 후 오후 급감"(오후 &lt; 오전×0.3)은 BLOCK (<code>closing_bet.py:120,293</code>).</p>
+<p>진입 시 <code>EntrySignal</code> 발행 — <code>signal_type="closing_bet"</code>, <code>metadata</code>에 <code>overnight=True</code>, <code>stop_fib_price</code>(고점-범위×0.618), <code>max_hold_days</code> 포함 (<code>closing_bet.py:239-261</code>).</p>
+<h2 id="4-sl-5-tp45-27-trailing35-d1d3">4. 청산 로직 (SL-5 / TP+4.5 / 부분2.7 / trailing3.5 / D1~D3)</h2>
+<p>청산은 <strong>두 레이어</strong>로 구성:</p>
+<p><strong>(A) Strategy.exit_plan (1차 방어선, 분봉 close 기반)</strong> — <code>closing_bet.py:348-391</code>
+- TP1: avg × (1 + tp×0.6) × 50% 분할 (1차 저항) (<code>closing_bet.py:373-377</code>)
+- TP2: avg × (1 + tp) × 50% — <code>tp_shoot_pct=0.045</code>(+4.5%), 대형주 <code>tp_shoot_pct_largecap=0.02</code>(+2%) (<code>closing_bet.py:96-98</code>, <code>:361</code>, <code>:378-382</code>)
+- SL: <code>stop_loss_pct=-0.03</code>(-3%)와 0.618 이탈가(<code>stop_fib_price</code>) 중 <strong>더 보수적(가까운)</strong> 쪽 (<code>closing_bet.py:364-369</code>)
+- <code>time_exit=morning_exit_time</code>(익일 10:00) (<code>closing_bet.py:99</code>, <code>:387</code>)
+- <code>breakeven_trigger=0.02</code>(+2%), <code>min_hold_days=None</code>(익일 즉시 청산 허용), <code>max_hold_days=3</code> (<code>closing_bet.py:388-390</code>)</p>
+<p>⚠️ 오버나잇 의미론 주의: <code>time_exit</code> 은 <em>익일</em> 아침인데 ExitEngine 이 '당일 그 시각'으로 해석하면 진입일 즉시청산 버그 → 라이브 활성 시 overnight 플래그로 skip 필요. 현 increment 는 비활성이라 latent (<code>closing_bet.py:351-356</code>).</p>
+<p><strong>(B) STRATEGY_EXIT_PROFILES["closing_bet"] (2차 안전망, broker pnl_rate 기반)</strong> — <code>holding_evaluator.py:158-169</code></p>
+<pre><code class="language-python">&quot;closing_bet&quot;: {
+    &quot;stop_loss_pct&quot;: Decimal(&quot;-5.0&quot;),      # 0.618 이탈 + 익일 갭하락 흡수 (ExitPlan -3%보다 너그러운 fallback)
+    &quot;take_profit_pct&quot;: Decimal(&quot;4.5&quot;),
+    &quot;partial_tp_pct&quot;: Decimal(&quot;2.7&quot;), &quot;partial_tp_ratio&quot;: Decimal(&quot;0.5&quot;),
+    &quot;trailing_start_pct&quot;: Decimal(&quot;3.5&quot;), &quot;trailing_offset_pct&quot;: Decimal(&quot;1.0&quot;),
+    &quot;breakeven_trigger_pct&quot;: Decimal(&quot;2.0&quot;), &quot;tightened_sl_pct&quot;: Decimal(&quot;-3.0&quot;),
+    &quot;min_hold_days&quot;: 1, &quot;max_hold_days&quot;: 3,   # D1(익일 청산 허용)~D3(4일차 = 5일선 붕괴 청산)
+}
+</code></pre>
+<ul>
+<li><strong>min_hold 1 / max_hold 3</strong> = 익일 D1~D3. <code>evaluate_holding</code> 에서 max_hold 도달 시 손익 무관 강제 매도(<code>TIME_TIGHTENED_SL</code>), min_hold 미달 시 청산 평가 차단 (<code>holding_evaluator.py:296-311</code>).</li>
+<li>이 프로파일은 <code>strategy_id="closing_bet_v1"</code> 포지션이 생겨야 매칭 → 그 전엔 <strong>inert(라이브 무영향)</strong> (<code>holding_evaluator.py:154</code>). <code>resolve_policy("closing_bet_v1")</code> 가 버전 접미사 제거 후 매핑 (<code>holding_evaluator.py:173-195</code>).</li>
+<li>SL -5%(profile) vs -3%(exit_plan) 격차는 <strong>의도된 fallback 안전망</strong> — ExitEngine 누락(데몬 다운/분봉 fetch 실패) 시 broker pnl 기반 2차 청산 (<code>holding_evaluator.py:85-101</code>).</li>
+</ul>
+<p>라운드피겨(round_figure) 손절 보정: 두 레이어 모두 <code>resolve_sl_pct()</code> 경유 (<code>closing_bet.py:32,384</code>; <code>holding_evaluator.py:415</code>). 단 <code>RF_STOP_ENABLED</code> default 0 이라 base_pct 그대로 반환 — <strong>완전 무영향</strong>(<code>round_figure.py:201-202</code>).</p>
+<h2 id="5">5. 파라미터 표</h2>
+<h3 id="closingbetparams-closing_betpy47-129">ClosingBetParams (<code>closing_bet.py:47-129</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>기본값</th>
+<th>의미</th>
+<th>line</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>entry_window_start/end</td>
+<td>15:00 / 15:20</td>
+<td>진입 시간창(KST)</td>
+<td>56-57</td>
+</tr>
+<tr>
+<td>require_eod_window</td>
+<td>True</td>
+<td>시간창 밖 진입 거부</td>
+<td>58</td>
+</tr>
+<tr>
+<td>require_new_high</td>
+<td>True</td>
+<td>신고가 돌파 요구</td>
+<td>61</td>
+</tr>
+<tr>
+<td>new_high_lookback</td>
+<td>60</td>
+<td>직전 N봉 고점 비교</td>
+<td>62</td>
+</tr>
+<tr>
+<td>new_high_tolerance</td>
+<td>0.0</td>
+<td>전고점 이격 허용폭(0=완전돌파)</td>
+<td>63</td>
+</tr>
+<tr>
+<td>base_min_gain_pct</td>
+<td>0.05</td>
+<td>장대양봉 몸통 ≥5%</td>
+<td>81</td>
+</tr>
+<tr>
+<td>base_upper_wick_max</td>
+<td>1.0</td>
+<td>윗꼬리/몸통 상한</td>
+<td>82</td>
+</tr>
+<tr>
+<td>min_atr_pct</td>
+<td>0.0</td>
+<td>ATR 필터(0=비활성)</td>
+<td>85</td>
+</tr>
+<tr>
+<td>min_candles</td>
+<td>70</td>
+<td>최소 캔들</td>
+<td>87</td>
+</tr>
+<tr>
+<td>require_disparity_yellow</td>
+<td><strong>False</strong></td>
+<td>이격도 게이트(옵션)</td>
+<td>92</td>
+</tr>
+<tr>
+<td>disparity_yellow_threshold</td>
+<td>0.1425</td>
+<td>5일선 이격 +14.25%</td>
+<td>93</td>
+</tr>
+<tr>
+<td>tp_shoot_pct / _largecap</td>
+<td>0.045 / 0.02</td>
+<td>익일 슈팅 익절</td>
+<td>96-97</td>
+</tr>
+<tr>
+<td>largecap_market_cap</td>
+<td>5.0e12</td>
+<td>대형주 판정 시총(5조)</td>
+<td>98</td>
+</tr>
+<tr>
+<td>morning_exit_time</td>
+<td>10:00</td>
+<td>익일 시간청산</td>
+<td>99</td>
+</tr>
+<tr>
+<td>max_hold_days</td>
+<td>3</td>
+<td>D1~D3</td>
+<td>102</td>
+</tr>
+<tr>
+<td>stop_loss_pct</td>
+<td>-0.03</td>
+<td>보조 고정 SL</td>
+<td>103</td>
+</tr>
+<tr>
+<td>require_zone / gold_fib_low/high</td>
+<td>False / 0.5 / 0.618</td>
+<td>골드존 되돌림(옵션)</td>
+<td>109,111-112</td>
+</tr>
+<tr>
+<td>require_money_flow</td>
+<td>False</td>
+<td>분봉 자금유입 게이트(옵션)</td>
+<td>114</td>
+</tr>
+<tr>
+<td>flow_min_value / flow_death_ratio</td>
+<td>1.0e9 / 0.3</td>
+<td>유입 하한 10억 / 오후死 비율</td>
+<td>119-120</td>
+</tr>
+<tr>
+<td>require_leader_meta / max_trade_value_rank / min_trade_value</td>
+<td>False / 5 / 3.0e10</td>
+<td>선정 hard-cut(옵션)</td>
+<td>123-125</td>
+</tr>
+</tbody>
+</table>
+<h3 id="holding_evaluator-holding_evaluatorpy158-169">holding_evaluator 프로파일 (<code>holding_evaluator.py:158-169</code>)</h3>
+<p>SL -5.0 / TP +4.5 / partial 2.7@0.5 / trailing start 3.5 offset 1.0 / breakeven 2.0 / tightened -3.0 / min_hold 1 / max_hold 3.</p>
+<h3 id="closing_bet_filters-inert-closing_bet_filterspy6-8">closing_bet_filters 임계 (관측 전용 순수함수, 호출처 inert — <code>closing_bet_filters.py:6-8</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>함수</th>
+<th>임계</th>
+<th>line</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>body_new_high</td>
+<td>lookback 60(몸통 종가 기준 신고가)</td>
+<td>20-36</td>
+</tr>
+<tr>
+<td>overheat_warning</td>
+<td>5일 전 종가 ×1.6(+60%)</td>
+<td>39-58</td>
+</tr>
+<tr>
+<td>liquidity_ok</td>
+<td>1분봉 15억 AND 당일/전일 ×3</td>
+<td>61-85</td>
+</tr>
+<tr>
+<td>rel_volume_surge</td>
+<td>평균 ×2.0</td>
+<td>88-111</td>
+</tr>
+<tr>
+<td>consolidation_ok</td>
+<td>min_days 10, lookback 60</td>
+<td>114-153</td>
+</tr>
+<tr>
+<td>disparity_5ma / disparity_yellow</td>
+<td>(종가-SMA5)/SMA5 ≥ 0.1425</td>
+<td>212-236</td>
+</tr>
+<tr>
+<td>envelope_upper_break</td>
+<td>SMA20 × 1.20 돌파</td>
+<td>191-209</td>
+</tr>
+<tr>
+<td>triple_factor_buy</td>
+<td>엔벨로프∧이격노란불∧거래대금≥1000억</td>
+<td>239-270</td>
+</tr>
+</tbody>
+</table>
+<h3 id="round_figure-round_figurepy-sl">round_figure (<code>round_figure.py</code>) — 가격대별 라운드 지지/저항·SL 보정</h3>
+<p>env 토글 <code>RF_STOP_ENABLED</code>(default 0)·<code>RF_STOP_DRY_RUN</code>(default 1)·<code>RF_MAX_STOP_PCT_INTRADAY</code>(0.04)·<code>RF_BUFFER_PCT</code>(0.003) (<code>round_figure.py:40-46</code>). closing_bet 에서 <code>resolve_sl_pct(STRATEGY_ID, avg, sl_pct, ...)</code> 로 호출되나 default OFF 라 base SL 그대로 (<code>round_figure.py:201-202</code>).</p>
+<h2 id="6">6. 활성·운영 상태 ★</h2>
+<h3 id="61">6.1 스캐너 — 비활성 스캐폴딩</h3>
+<ul>
+<li><code>_DEFAULT_ENABLED["closing_bet"] = False</code> (<code>signal_scanner.py:54</code>) — <strong>라이브 동작 무영향</strong>.</li>
+<li><code>STRATEGY_PRIORITY["closing_bet"] = 8</code>(최하위 tiebreaker) (<code>signal_scanner.py:61</code>).</li>
+<li>인스턴스는 비활성이라도 생성됨(<code>self.closing_bet = ClosingBetStrategy(...)</code>, <code>signal_scanner.py:114</code>).</li>
+<li>dispatch 경로: <strong>일봉</strong>. <code>if self._enabled["swing_38"] or self._enabled.get("closing_bet", False)</code> 일 때만 일봉 fetch 후 <code>closing_bet.analyze()</code> 호출 (<code>signal_scanner.py:184-211</code>). 활성화 = <code>SignalScanner(..., enabled_strategies={"closing_bet": True})</code> (<code>signal_scanner.py:52-53</code>).</li>
+</ul>
+<h3 id="62-executor-barro_cb_autoexec-default-off-buy">6.2 ★자동매수 executor — BARRO_CB_AUTOEXEC (default-OFF, BUY 한정)</h3>
+<p>최근 커밋 <code>0a1f056</code> "feat(closing_bet): 종베 자동매수 executor (BARRO_CB_AUTOEXEC, default-OFF) — BUY 한정". <code>closing_bet_alert_daemon.py</code> 의 alert daemon 승격(설계 B안).</p>
+<p>발동 조건/경로:</p>
+<pre><code class="language-python">def _cb_autoexec() -&gt; bool:                       # alert_daemon:107-108
+    return os.environ.get(&quot;BARRO_CB_AUTOEXEC&quot;, &quot;0&quot;).strip().lower() in {&quot;1&quot;,&quot;true&quot;,&quot;yes&quot;,&quot;on&quot;}
+</code></pre>
+<p><code>scan_buy</code> 에서 신호 발생 시 <code>if _cb_autoexec() and not from_cache:</code> → <code>_cb_auto_buy()</code> (<code>alert_daemon:278-283</code>). 그 외(default)는 "※ 자동매수 안 함 — 직접 매수 판단" 알림만 (<code>alert_daemon:284-289</code>).</p>
+<p><code>_cb_auto_buy</code> 가드 (<code>alert_daemon:116-155</code>):
+- 이미 보유분 중복 매수 방지 (<code>:121-122</code>)
+- 동시 보유 <code>BARRO_CB_MAX_POS</code>(default 2) 한도 (<code>:110,123-124</code>)
+- 종목당 비중 <code>BARRO_CB_MAX_PCT</code>(default 0.10) — orderable_cash 기준 사이징 (<code>:111,132</code>)
+- 단일 트랜치, <code>LiveOrderGate.place_buy(strategy_id="closing_bet")</code> (<code>:142-147</code>)
+- <code>daily_max_orders</code> = <code>BARRO_CB_MAX_ORDERS</code>(default 10) (<code>:144</code>)
+- 실체결 시 즉시 <code>closing_bet_positions.json</code> 등록(TP 4.5 / SL 5.0) (<code>:112-113,155</code>)</p>
+<p><strong>SELL 은 자동화 범위 밖</strong> — <code>scan_sell</code> 은 TP/SL/MORNING/D3 신호 텔레그램 알림만, "※ 자동매도 안 함" (<code>alert_daemon:223-233</code>). 매도 신호 판정은 <code>sell_signals()</code>(TP/SL/익일10시 MORNING/D3 달력일) (<code>alert_daemon:171-185</code>).</p>
+<h3 id="63-eod-dispatch-dry-run">6.3 EOD dispatch 설계 / dry-run 통과기준</h3>
+<p>설계 <code>eod-auto-execution.design.md</code>: 인트라데이 데몬에 EOD 블록을 넣지 않고 <strong>alert daemon 에 executor 부착</strong>(B안, <code>:24-28</code>). ★결정적 리스크 = 인트라데이 데몬 <code>_eod_carry_limit</code>(15:10~15:19 오버나잇 축소)이 종베(의도적 오버나잇)를 청산 → <strong>종베 포지션 제외 필수</strong>(<code>:63-66</code>).</p>
+<p><strong>1차 dry-run 통과 기준 4개</strong>(이격도 게이트 ON 기준, <code>design.md:105-113</code>):
+| # | 기준 | 합격선 |
+|---|---|---|
+| 1 | 표본 | 1~2주 매수신호 ≥ 10건 |
+| 2 | net 수익 | 익일가 평균 net &gt; 0(왕복 0.90% 차감), 이상적 ≥ +0.4% |
+| 3 | 적중·whipsaw | 익일 슈팅(09~10시) 도달이 손실신호 대비 우위 |
+| 4 | 운영 무사고 | 알림·포지션 등록 정상(중복/누락 없음) |</p>
+<p>HITL 순서: ① dry-run(알림/페이퍼) → ② <code>AUTOEXEC=1 --dry-run</code>(주문 로직만, 미체결) → ③ sim-live 정합 → ④ 라이브 <code>--no-dry-run</code> ★HITL 소액 1종목 (<code>design.md:97</code>). 롤백 = <code>BARRO_CB_AUTOEXEC=0</code> 즉시 (<code>design.md:100</code>).</p>
+<h3 id="64">6.4 수동 페이퍼·알림 스크립트</h3>
+<ul>
+<li><code>closing_bet_paper_scan.py</code> — 페이퍼 스캐너(CSV <code>data/closing_bet_paper.csv</code> append, 주문 0). 파라미터: <code>require_eod_window=False, require_money_flow=True, min_atr_pct=0.035, require_disparity_yellow=_CB_DISPARITY, threshold=0.1425</code> (<code>paper_scan:47-50</code>).</li>
+<li><code>closing_bet_alert_daemon.py</code> — 텔레그램 알림 데몬. dry-run 파라미터 동일(<code>alert_daemon:72-74</code>).</li>
+<li>두 스크립트 모두 <code>BARRO_CB_DISPARITY_YELLOW</code>(default "0"=OFF) 토글로 이격도 게이트 제어 (<code>alert_daemon:69-71</code>, <code>paper_scan:46</code>).</li>
+</ul>
+<h2 id="7">7. 비용·손익분기 + 오버나잇 갭 리스크</h2>
+<ul>
+<li><strong>비용</strong>: 편도 0.35% / 매도세 0.20% / 왕복 <strong>0.90%</strong>. 종베는 익일 갭/슈팅을 노리는 오버나잇 보유 → <strong>갭 리스크가 핵심</strong>.</li>
+<li><strong>손익분기</strong>: 종베 full gross +0.895%/트립에 왕복 0.90% 차감 시 net <strong>-0.005% (브레이크이븐)</strong> (<code>backtest.report.md:43-49</code>). +4.5% TP 마진의 약 20%를 비용이 잠식 (<code>backtest.report.md:55</code>).</li>
+<li><strong>비용 시나리오</strong>: 우대 0.40% → net +0.495%, 모델 0.55% → +0.345%, 실측 0.90% → -0.005% (<code>backtest.report.md:43-48</code>).</li>
+<li><strong>오버나잇 갭</strong>: SL -5%(0.618 이탈 + 익일 갭하락 흡수)와 익일 10:00 시간청산(MORNING)이 2차망 (<code>design.md:77</code>). 설계는 6/10 -845K 사례를 구조적 갭 리스크로 명시, 동시 1~2종·비중 10% 상한 엄수 권고 (<code>design.md:118</code>).</li>
+<li><strong>이격도 게이트 효과</strong>: 게이트 ON 시 baseline net +0.008% → +0.52% (<code>disparity-gate-robustness.json</code> A_full). 임계 0.1425 에서 trips 3427→1586, 승률 54.2%→62.3%.</li>
+</ul>
+<h2 id="8-oosdry-run">8. 백테스트·OOS·dry-run 근거 / 한계·리스크</h2>
+<p><strong>일봉 백테스트 (2026-06-17, <code>backtest.report.md</code>)</strong>:
+- 종베 full: trips 3,531 · 승률 55.6% · gross +0.895% · PF 1.82 · 평균보유 0.17봉(대부분 익일 청산) (<code>:34</code>).
+- ablation: 신고가 필터가 엣지를 더하지 않음(full gross 0.895 &lt; 장대양봉-only 0.985) → 신고가 게이트 재검토 대상 (<code>:57</code>).</p>
+<p><strong>분봉 게이트 ablation (2026-06-18, <code>validation.report.md:46-54</code>)</strong>:
+- money_flow: 미세 개선(gross +0.02%, 트립 39%↓), 약한 양(+).
+- <strong>zone: 오히려 악화</strong>(net @0.90 -0.189%). 장대양봉 신고가 종가(고점 근처)와 골드존 0.5~0.618 되돌림은 <strong>같은 날 양립 불가</strong>(개념 충돌, 단위테스트로도 재현) → <strong>현 형태 zone 게이트 폐기/재설계</strong> (<code>:54</code>).</p>
+<p><strong>공식 OOS 관문 3/3 PASS (실측비용 0.0035 반영, <code>validation.report.md:23-40</code>)</strong>:
+- seed 42/7/123 → avg_ret +3.48 / +3.89 / +3.66%, holdout +3.9~4.7%, drop1 부호안정.
+- ⚠️ ★핵심 caveat: 이 수익은 <strong>"익일 시가 진입"</strong>(entry_on_next_open) 가정에 의존. '종가 진입'으로 재측정하면 <strong>브레이크이븐</strong>으로 회귀 (<code>:62-68</code>). 라이브 진입 체결가가 이 가정과 일치해야 OOS 수익 재현.</p>
+<p><strong>이격도 robustness (2026-06-21, <code>disparity-gate-robustness.json</code>)</strong>: 5 seed 전부 게이트 delta_net90 +0.50~0.55%p, 기간분할(early/late) 모두 +0.45~0.57%p, 임계 sweep 전 구간 net&gt;0 → <strong>verdict "ROBUST"</strong>.</p>
+<p><strong>삼박자(triple_factor) shadow (2026-06-21, <code>closing-bet-triple-shadow.json</code>)</strong>: 삼박자 통과 net @0.90 +0.286% vs baseline +0.107%(Δ+0.179%p), disp_pass 단독 +0.405%(승률 61.8%) → 엣지 기여 확인.</p>
+<p><strong>한계·리스크 종합</strong>:
+1. TP-우선 intrabar 낙관 — 백테스터가 D+1에서 TP(고가)를 SL(저가)보다 먼저 평가 → 승률/gross 상향 편향 (<code>backtest.report.md:23</code>).
+2. 종가 동시호가 체결가 불확실(단일가) → sim-live 괴리, 분할매수 미체결 시 평단 왜곡 (<code>design.md:117</code>).
+3. 차별화 게이트(intraday) 효과 일부만 검증 — zone 폐기, money_flow 약한 양(+).
+4. 2026-06-18 "수동관리 전용" 결정 → 자동매매 전환은 사용자 명시 승인 후 (<code>design.md:116</code>).</p>
+<h2 id="9">9. 관련 파일·테스트</h2>
+<p><strong>코드</strong>:
+- <code>/Users/beye/workspace/BarroAiTrade/backend/core/strategy/closing_bet.py</code> (메인 — Params + analyze + exit_plan, 407줄)
+- <code>/Users/beye/workspace/BarroAiTrade/backend/core/strategy/closing_bet_filters.py</code> (보조 필터, 관측 전용 inert, 270줄)
+- <code>/Users/beye/workspace/BarroAiTrade/backend/core/strategy/round_figure.py</code> (라운드피겨 SL 보정, default OFF)
+- <code>/Users/beye/workspace/BarroAiTrade/backend/core/risk/holding_evaluator.py:158-169</code> (STRATEGY_EXIT_PROFILES["closing_bet"])
+- <code>/Users/beye/workspace/BarroAiTrade/backend/core/scanner/signal_scanner.py:41-62,184-211</code> (default OFF 등록 + 일봉 dispatch)
+- <code>/Users/beye/workspace/BarroAiTrade/scripts/closing_bet_alert_daemon.py</code> (★자동매수 executor BARRO_CB_AUTOEXEC + 알림)
+- <code>/Users/beye/workspace/BarroAiTrade/scripts/closing_bet_paper_scan.py</code> (수동 페이퍼 스캐너)</p>
+<p><strong>설계/리포트</strong>:
+- <code>/Users/beye/workspace/BarroAiTrade/docs/02-design/features/2026-06-22-closing-bet-eod-auto-execution.design.md</code>
+- <code>/Users/beye/workspace/BarroAiTrade/docs/04-report/features/2026-06-22-closing-bet-dryrun-disparity.report.md</code>
+- <code>/Users/beye/workspace/BarroAiTrade/docs/04-report/features/2026-06-17-closing-bet-backtest.report.md</code>
+- <code>/Users/beye/workspace/BarroAiTrade/docs/04-report/features/2026-06-18-closing-bet-validation.report.md</code>
+- <code>/Users/beye/workspace/BarroAiTrade/docs/04-report/features/2026-06-21-disparity-gate-robustness.json</code>
+- <code>/Users/beye/workspace/BarroAiTrade/docs/04-report/features/2026-06-21-closing-bet-triple-shadow.json</code></p>
+<p><strong>테스트</strong>: <code>/Users/beye/workspace/BarroAiTrade/backend/tests/strategy/test_closing_bet.py</code> — 상속/캔들부족/진입창/신고가·장대양봉/이격도 게이트/신정재 필터/ExitPlan/inert 프로파일/스캐너 default OFF(<code>:254-257</code>)/money_flow/zone 단위 검증.</p>
+<hr />
+<p><em>진실원천 주석: 모든 수치는 origin/main 코드·문서의 file:line 인용. ClosingBetParams/holding_evaluator 프로파일/signal_scanner default OFF/alert_daemon BARRO_CB_AUTOEXEC 직접 확인. 백테스트·OOS·robustness·shadow 수치는 docs/04-report 산출물 인용. 라이브 자동매매는 현재 default OFF·opt-in·HITL 단계 — 본 리포트는 이를 과장 없이 명시한다.</em></p>
+</body>
+</html>

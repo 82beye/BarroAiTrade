@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>sf_zone</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<h1 id="barroaitrade-sf_zone-sf">BarroAiTrade 매매전략 심층 리포트 — sf_zone (SF존/슈퍼존)</h1>
+<blockquote>
+<p>생성: 2026-06-22 · 진실원천: 코드 인용(file:line) · origin/main 기준 (HEAD <code>013d54b</code>)
+상태: 🟢 활성 (default ON) · 분류: 1분봉 단타 · 컨셉: F존 강화 버전 — 같은 진입 엔진을 공유하되 <strong>SF 라벨이 붙는 더 강한 셋업(강한 기준봉 + 거래량 재증가 + 고점수)만</strong> 통과시키고, 청산을 더 타이트/공격적으로 운용한다.</p>
+</blockquote>
+<hr />
+<h2 id="1-tldr">1. 요약 (TL;DR)</h2>
+<ul>
+<li><strong>SF존은 독립 전략 클래스가 아니라 F존 엔진의 "필터 + 청산 오버라이드"다.</strong> <code>SFZoneStrategy</code> 는 내부에 <code>FZoneStrategy</code> 인스턴스(<code>self._inner</code>)를 보유하고(delegate, 옵션 A), F존 분석 결과 중 <strong><code>signal_type == "sf_zone"</code> 인 것만</strong> 통과시킨 뒤 <code>strategy_id</code> 만 <code>sf_zone_v1</code> 로 재라벨한다. (<code>backend/core/strategy/sf_zone.py:42,46-50</code>)</li>
+<li><strong>진입 게이트는 100% F존 코드와 동일.</strong> SF 여부는 F존 <code>_score_and_classify</code> 의 <code>is_sf_zone</code> 분기가 결정한다: <code>is_f_zone AND impulse_gain_pct ≥ 0.05 AND impulse_volume_ratio ≥ 3.0 AND score ≥ 7.0</code>. (<code>backend/core/strategy/f_zone.py:602-607</code>) → <strong>F존 대비 추가로 요구되는 것은 "강한 기준봉(+5%·300%) + 7점 이상"</strong> 이다.</li>
+<li><strong>청산(exit_plan)이 SF의 진짜 차별점.</strong> F존(TP 2단 +3%/+5%, SL −2%, breakeven +1.5%) 대비 SF는 <strong>TP 3단(+3%/+5%/+7%), SL −1.5%(더 타이트), breakeven +1.0%(더 빨리 본전 잠금)</strong>. (<code>sf_zone.py:56-84</code> vs <code>f_zone.py:346-370</code>)</li>
+<li><strong>운영 우선순위 1순위.</strong> dispatch 리스트에서 SF가 가장 먼저 평가되어 시그널이 나오면 그 자리에서 반환된다(<code>signal_scanner.py:156-182</code>). 단, 동점 정렬 tiebreaker(<code>STRATEGY_PRIORITY</code>)에서는 <code>sf_zone=4</code> 로 오히려 후순위 — dispatch 순서와 tiebreaker 우선순위가 <strong>불일치</strong>한다(§6 주의).</li>
+<li><strong>2차 안전망(HoldingEvaluator)은 sf 전용 프로파일 보유</strong> — <code>STRATEGY_EXIT_PROFILES["sf_zone"]</code> 존재(<code>holding_evaluator.py:115-124</code>), F존과 다른 값(TP 7%, partial 0.33, trailing offset 1.5%, breakeven 2.0%). SL은 −4%로 F존과 동일(의도된 1차/2차 격차).</li>
+</ul>
+<hr />
+<h2 id="2-f">2. 전략 개요 (F존과의 관계 — 무엇을 강화/추가하는가)</h2>
+<p>SF존(슈퍼존)은 F존(급등 기준봉 → 눌림목 → 이평선 지지 → 반등)의 상위 등급 셋업이다. 코드상 구현은 BAR-47에서 "F존 클래스 내부의 SF 분기를 별도 클래스로 분리"한 것으로, <strong>옵션 A(delegate)</strong> 를 채택했다. (<code>sf_zone.py:3-5</code>)</p>
+<p>핵심 구조 (<code>sf_zone.py:38-50</code>):</p>
+<pre><code>class SFZoneStrategy(Strategy):
+    STRATEGY_ID = &quot;sf_zone_v1&quot;
+    def __init__(self, params=None):
+        self._inner = FZoneStrategy(params=params)   # F존 엔진 그대로 재사용
+
+    def _analyze_v2(self, ctx):
+        signal = self._inner._analyze_v2(ctx)
+        if signal is None or signal.signal_type != &quot;sf_zone&quot;:
+            return None                              # SF 라벨만 통과
+        return signal.model_copy(update={&quot;strategy_id&quot;: self.STRATEGY_ID})
+</code></pre>
+<p>즉 <strong>진입 판정 로직(기준봉/눌림목/이평선/반등/점수)은 한 줄도 SF가 새로 쓰지 않는다.</strong> F존 엔진이 매긴 <code>signal_type</code> 이 <code>sf_zone</code> 인지 여부로 필터링할 뿐이다. SF가 F존에 대해 "추가/강화"하는 것은 정확히 두 곳이다:</p>
+<table>
+<thead>
+<tr>
+<th>구분</th>
+<th>F존(부모)</th>
+<th>SF존(자식)</th>
+<th>강화 방향</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>진입 게이트</td>
+<td><code>is_f_zone</code>(score ≥ 4.0)</td>
+<td><code>is_sf_zone</code> 추가 조건(아래 §3)</td>
+<td><strong>더 엄격</strong>(강한 기준봉+7점)</td>
+</tr>
+<tr>
+<td>청산 정책</td>
+<td>TP 2단/SL −2%/BE +1.5%</td>
+<td>TP 3단/SL −1.5%/BE +1.0%</td>
+<td><strong>더 공격적+타이트</strong></td>
+</tr>
+<tr>
+<td>position_size</td>
+<td>균등(<code>even_position_size</code>)</td>
+<td>균등(동일)</td>
+<td>차이 없음</td>
+</tr>
+</tbody>
+</table>
+<p>참고로 SF는 자체 <code>health_check</code> 도 가져, inner ready + <code>sf_impulse_min_gain_pct ≥ 0.05</code> 를 함께 검사한다(<code>sf_zone.py:91-100</code>).</p>
+<hr />
+<h2 id="3-f">3. 진입 로직 (F존 대비 차이 강조 · 조건·점수·게이트) ← 코드 인용</h2>
+<h3 id="31-f-byte-identical">3.1 공유 파이프라인 (F존과 byte-identical)</h3>
+<p>SF는 inner F존을 그대로 호출하므로, 다음 모든 게이트가 동일하게 적용된다 (<code>f_zone.py:244-338</code>):</p>
+<ol>
+<li><strong>데이터 충분성</strong>: <code>len(candles) &lt; p.min_candles</code> → None (<code>f_zone.py:257</code>)</li>
+<li><strong>변동성 필터(F1)</strong>: <code>p.min_atr_pct &gt; 0</code> 일 때 <code>atr_pct &lt; min_atr_pct</code> → 진입 거부 (<code>f_zone.py:262-269</code>). default 0.0(비활성). <strong>운영/시뮬 진입점에서 <code>FZoneParams(min_atr_pct=0.035)</code> 명시 override → inner 로 전파</strong>됨이 테스트로 확인됨(<code>test_sf_zone.py:149-152</code>).</li>
+<li><strong>트랩 가드</strong>: <code>trap_guard.py</code> 의 <code>evaluate_trap_guard</code> — 모든 임계 0(default)이면 no-op (<code>f_zone.py:271-277</code>, <code>trap_guard.py:83-84</code>). SF는 <code>FZoneParams</code> 상속이라 <strong>트랩 가드가 자동 적용</strong>된다(별도 코드 없음). 활성화 시 (a)과확장 (b)윗꼬리 (c)고갭 ATR화 룰이 작동.</li>
+<li><strong>진입 시간 게이트(Phase 8e)</strong>: <code>p.entry_time_cutoff</code> 도달 시 차단 (<code>f_zone.py:280-287</code>). default None.</li>
+<li><strong>기준봉 → 눌림목 → 이평선 지지 → 반등 → 점수/분류</strong> (<code>f_zone.py:293-316</code>).</li>
+</ol>
+<h3 id="32-sf-f-diff">3.2 SF 판정 — F존 대비 추가 게이트 (핵심 diff)</h3>
+<p>분류는 <code>_score_and_classify</code> 에서 일어난다 (<code>f_zone.py:598-607</code>):</p>
+<pre><code class="language-python">analysis.score = min(score, 10.0)
+analysis.is_f_zone = analysis.score &gt;= 4.0          # F존 기준선
+
+analysis.is_sf_zone = (                              # SF존 추가 게이트
+    analysis.is_f_zone
+    and analysis.impulse_gain_pct &gt;= p.sf_impulse_min_gain_pct   # ≥ 0.05 (5%)
+    and analysis.impulse_volume_ratio &gt;= p.sf_volume_ratio       # ≥ 3.0 (300%)
+    and analysis.score &gt;= 7.0                                    # 7점 이상
+)
+</code></pre>
+<p><strong>F존 → SF존 승격에 필요한 추가 조건 (코드 diff 수준):</strong></p>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>F존 통과선</th>
+<th>SF존 추가 요구</th>
+<th>출처</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>종합 점수</td>
+<td><code>score ≥ 4.0</code></td>
+<td><code>score ≥ 7.0</code></td>
+<td><code>f_zone.py:599,606</code></td>
+</tr>
+<tr>
+<td>기준봉 상승률</td>
+<td><code>impulse_min_gain_pct</code>(default 3%, intraday 1%) 이상</td>
+<td><code>≥ sf_impulse_min_gain_pct</code>(default <strong>5%</strong>, intraday <strong>2%</strong>)</td>
+<td><code>f_zone.py:51,80,604</code></td>
+</tr>
+<tr>
+<td>기준봉 거래량 배율</td>
+<td><code>impulse_volume_ratio</code>(default 2.0×) 이상</td>
+<td><code>≥ sf_volume_ratio</code>(<strong>3.0×</strong>)</td>
+<td><code>f_zone.py:56,81,605</code></td>
+</tr>
+</tbody>
+</table>
+<p>즉 SF는 "거래량이 평균 대비 3배 이상 터지면서 +5%(또는 intraday 2%) 이상 오른 강한 기준봉 + 종합 7점 이상"의 셋업이다. 점수 산식(0~10)은 §5에 정리. 기준봉 점수 항이 <code>sf_impulse_min_gain_pct</code>/<code>sf_volume_ratio</code> 로 정규화되어 있어(<code>f_zone.py:559-560</code>), <strong>SF 조건을 만족하는 기준봉은 자동으로 gain/vol 만점(3점)에 근접</strong> → 7점 게이트와 결이 맞는다.</p>
+<blockquote>
+<p>⚠ 미검증 주의: SF 분류는 전적으로 F존 점수 산식에 의존하므로, <code>_analyze_v2</code> 반환의 <code>score</code> 는 <code>is_sf_zone=True</code> 인 경우 항상 ≥ 7.0 이다. 따라서 운영 동점 tiebreaker(점수 1차 정렬) 관점에서 SF 시그널은 통상 F존/gold존보다 높은 점수로 정렬될 가능성이 큼(정량 분포는 백테스트 데이터 필요 — 본 리포트 범위 밖).</p>
+</blockquote>
+<h3 id="33">3.3 진입가 / 신호 생성</h3>
+<p><code>signal_type = "sf_zone" if is_sf_zone else "f_zone"</code>, <code>price = candles[-1].close</code>, <code>score = round(analysis.score, 2)</code> (<code>f_zone.py:316-338</code>). inner 가 <code>strategy_id="f_zone_v1"</code> 로 만든 시그널을 SF 래퍼가 <code>sf_zone_v1</code> 로 재라벨(<code>sf_zone.py:50</code>).</p>
+<hr />
+<h2 id="4-exit-profile-sf">4. 청산 로직 (exit profile — sf 전용/공유 여부 명시)</h2>
+<p>청산은 <strong>2계층 방어선</strong> 구조다 (<code>holding_evaluator.py:86-99</code> 주석).</p>
+<h3 id="41-1-sfzonestrategyexit_plan-close-exitengine">4.1 1차 방어선 — <code>SFZoneStrategy.exit_plan</code> (분봉 close 기반, ExitEngine)</h3>
+<p><code>sf_zone.py:52-84</code> — <strong>sf 전용 오버라이드</strong> (F존 <code>exit_plan</code> 을 상속하지 않고 재정의):</p>
+<table>
+<thead>
+<tr>
+<th>요소</th>
+<th>SF존 (<code>sf_zone.py</code>)</th>
+<th>F존 (<code>f_zone.py:342-370</code>)</th>
+<th>차이</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TP1</td>
+<td>+3%, 33% (<code>:57-61</code>)</td>
+<td>+3%, 50% (<code>:347-351</code>)</td>
+<td>분할 비율 ↓</td>
+</tr>
+<tr>
+<td>TP2</td>
+<td>+5%, 33% (<code>:62-66</code>)</td>
+<td>+5%, 50% (<code>:352-356</code>)</td>
+<td>분할 비율 ↓</td>
+</tr>
+<tr>
+<td><strong>TP3</strong></td>
+<td><strong>+7%, 34% (<code>:67-71</code>)</strong></td>
+<td>없음</td>
+<td><strong>SF 신규 — 상단 추가 익절</strong></td>
+</tr>
+<tr>
+<td>Stop Loss</td>
+<td><strong>fixed −1.5% (<code>:79-81</code>)</strong></td>
+<td>fixed −2.0% (<code>:365-367</code>)</td>
+<td><strong>SF 0.5%p 더 타이트</strong></td>
+</tr>
+<tr>
+<td>time_exit</td>
+<td>STOCK=14:50, crypto=None (<code>:74</code>)</td>
+<td>동일 (<code>:360</code>)</td>
+<td>동일</td>
+</tr>
+<tr>
+<td>breakeven_trigger</td>
+<td><strong>+1.0% (<code>:83</code>)</strong></td>
+<td>+1.5% (<code>:369</code>)</td>
+<td><strong>SF 더 빨리 본전 잠금</strong></td>
+</tr>
+</tbody>
+</table>
+<p>SL은 둘 다 <code>resolve_sl_pct(...)</code> 로 라운드피겨 보정을 거치며(default OFF면 base 그대로), SF base는 <code>-0.015</code>, F존 base는 <code>-0.02</code> (<code>round_figure.py:187-220</code>). 테스트가 SF TP 3단·합계 1.00·SL −0.015·BE 0.01 을 고정(<code>test_sf_zone.py:53-69</code>).</p>
+<blockquote>
+<p>해석: SF는 더 강한 셋업이라 (a) 상단 +7%까지 익절 사다리를 늘리고, (b) 셋업 신뢰도가 높은 만큼 손절을 −1.5%로 조여 손실을 빨리 끊으며, (c) +1.0%만 가도 본전을 잠가 "강한 진입이 어긋날 때"의 손실을 최소화하는 공격적·보수적 혼합 정책이다.</p>
+</blockquote>
+<h3 id="42-2-holdingevaluator-strategy_exit_profilessf_zone-pnl_rate">4.2 2차 안전망 — <code>HoldingEvaluator</code> <code>STRATEGY_EXIT_PROFILES["sf_zone"]</code> (브로커 pnl_rate 기반)</h3>
+<p><strong>sf 전용 프로파일 존재</strong> (<code>holding_evaluator.py:115-124</code>):</p>
+<pre><code class="language-python">&quot;sf_zone&quot;: {
+    &quot;stop_loss_pct&quot;: Decimal(&quot;-4.0&quot;),        # F존과 동일 (의도된 1차/2차 격차)
+    &quot;take_profit_pct&quot;: Decimal(&quot;7.0&quot;),       # F존 5.0 → SF 7.0 (exit_plan TP3 +7% 정렬)
+    &quot;partial_tp_pct&quot;: Decimal(&quot;3.0&quot;),
+    &quot;partial_tp_ratio&quot;: Decimal(&quot;0.33&quot;),     # F존 0.5 → SF 0.33 (3분할 정렬)
+    &quot;trailing_start_pct&quot;: Decimal(&quot;3.0&quot;),    # F존 3.5 → SF 3.0
+    &quot;trailing_offset_pct&quot;: Decimal(&quot;1.5&quot;),   # F존 1.0 → SF 1.5
+    &quot;breakeven_trigger_pct&quot;: Decimal(&quot;2.0&quot;), # F존 2.5 → SF 2.0
+    &quot;tightened_sl_pct&quot;: Decimal(&quot;-2.5&quot;),     # F존과 동일
+}
+</code></pre>
+<p><code>resolve_policy()</code> 는 <code>strategy_id</code> 에서 <code>_v1</code> 을 제거해 키 매칭하므로 <code>sf_zone_v1</code> → <code>sf_zone</code> 프로파일이 적용된다(<code>holding_evaluator.py:176-177</code>). 평가 우선순위: max/min_hold(sf는 미정의→intraday default) → distribution(default-OFF) → 단기고점 → 트레일링 → 브레이크이븐 → 분할익절 → 전량TP → 시간SL → SL (<code>holding_evaluator.py:296-444</code>).</p>
+<blockquote>
+<p>SL 격차 의도(<code>holding_evaluator.py:86-103</code>): intraday 단타(f/sf/gold)의 2차 SL(−4%)은 1차 exit_plan SL(SF −1.5%)보다 의도적으로 2.5%p 너그럽다. ExitEngine 누락(데몬 다운/분봉 fetch 실패) 시 HoldingEvaluator가 fallback 매도하고, 브로커 pnl_rate 노이즈를 흡수하는 폭을 둔 것. <strong>즉 sf의 실효 SL은 정상 운영 시 −1.5%, 비상 시 −4%.</strong></p>
+</blockquote>
+<hr />
+<h2 id="5-f-sf">5. 파라미터 표 (F존 상속분 + SF 오버라이드분 구분)</h2>
+<h3 id="51-fzoneparams-sf-dataclass">5.1 진입 파라미터 — 전부 <code>FZoneParams</code> 상속 (SF 고유 dataclass 없음)</h3>
+<p>SF는 <code>params</code> 를 받아 그대로 inner F존에 넘긴다(<code>sf_zone.py:42</code>). 따라서 진입 파라미터는 100% <code>FZoneParams</code>(<code>f_zone.py:46-118</code>). default 값:</p>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>default</th>
+<th>for_intraday() (1분봉 운영값)</th>
+<th>SF 판정 사용처</th>
+<th>출처</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>impulse_min_gain_pct</code></td>
+<td>0.03</td>
+<td>0.010</td>
+<td>F존 기준봉 하한</td>
+<td><code>f_zone.py:51,179</code></td>
+</tr>
+<tr>
+<td><code>impulse_max_gain_pct</code></td>
+<td>1.0(무제한)</td>
+<td>1.0</td>
+<td>과열 차단(LESSON: max 7% 적용 시 win 시그널까지 죽음)</td>
+<td><code>f_zone.py:52-55</code></td>
+</tr>
+<tr>
+<td><code>impulse_volume_ratio</code></td>
+<td>2.0</td>
+<td>2.0</td>
+<td>F존 기준봉 거래량</td>
+<td><code>f_zone.py:56</code></td>
+</tr>
+<tr>
+<td><code>impulse_lookback</code></td>
+<td>5</td>
+<td>15</td>
+<td>기준봉 탐색 봉 수</td>
+<td><code>f_zone.py:57,181</code></td>
+</tr>
+<tr>
+<td><code>pullback_min_pct</code></td>
+<td>-0.03</td>
+<td>-0.03</td>
+<td>눌림 최대 하락(Phase D2.4: −0.05→−0.03)</td>
+<td><code>f_zone.py:66,182</code></td>
+</tr>
+<tr>
+<td><code>pullback_max_pct</code></td>
+<td>-0.005</td>
+<td>-0.003</td>
+<td>눌림 최소 하락</td>
+<td><code>f_zone.py:67,183</code></td>
+</tr>
+<tr>
+<td><code>pullback_volume_ratio</code></td>
+<td>0.7</td>
+<td>0.85</td>
+<td>눌림 거래량 감소</td>
+<td><code>f_zone.py:68,184</code></td>
+</tr>
+<tr>
+<td><code>pullback_max_candles</code></td>
+<td>10</td>
+<td>30</td>
+<td>눌림 허용 봉</td>
+<td><code>f_zone.py:69,185</code></td>
+</tr>
+<tr>
+<td><code>ma_periods</code></td>
+<td>[5,20,60]</td>
+<td>[20,60,120]</td>
+<td>이평선 지지</td>
+<td><code>f_zone.py:72,186</code></td>
+</tr>
+<tr>
+<td><code>ma_support_tolerance</code></td>
+<td>0.01</td>
+<td>0.005</td>
+<td>지지 근접 허용</td>
+<td><code>f_zone.py:73,187</code></td>
+</tr>
+<tr>
+<td><code>bounce_min_gain_pct</code></td>
+<td>0.005</td>
+<td>0.003</td>
+<td>반등 최소 상승</td>
+<td><code>f_zone.py:76,188</code></td>
+</tr>
+<tr>
+<td><code>bounce_volume_ratio</code></td>
+<td>1.2</td>
+<td>1.1</td>
+<td>반등 거래량 증가</td>
+<td><code>f_zone.py:77,189</code></td>
+</tr>
+<tr>
+<td><strong><code>sf_impulse_min_gain_pct</code></strong></td>
+<td><strong>0.05</strong></td>
+<td><strong>0.020</strong></td>
+<td><strong>SF 기준봉 하한(핵심)</strong></td>
+<td><code>f_zone.py:80,190</code></td>
+</tr>
+<tr>
+<td><strong><code>sf_volume_ratio</code></strong></td>
+<td><strong>3.0</strong></td>
+<td><strong>3.0</strong></td>
+<td><strong>SF 거래량 배율(핵심)</strong></td>
+<td><code>f_zone.py:81,191</code></td>
+</tr>
+<tr>
+<td><code>min_candles</code></td>
+<td>60</td>
+<td>120</td>
+<td>데이터 최소</td>
+<td><code>f_zone.py:84,192</code></td>
+</tr>
+<tr>
+<td><code>min_atr_pct</code></td>
+<td>0.0(OFF)</td>
+<td>(운영 0.035 override)</td>
+<td>변동성 필터</td>
+<td><code>f_zone.py:94</code>, <code>test_sf_zone.py:151</code></td>
+</tr>
+<tr>
+<td><code>atr_n</code></td>
+<td>14</td>
+<td>14</td>
+<td>ATR 기간</td>
+<td><code>f_zone.py:95</code>, <code>test_sf_zone.py:159-162</code></td>
+</tr>
+<tr>
+<td><code>use_watermelon_bonus</code></td>
+<td>False</td>
+<td>—</td>
+<td>점수 가산(OFF)</td>
+<td><code>f_zone.py:100</code></td>
+</tr>
+<tr>
+<td><code>entry_time_cutoff</code></td>
+<td>None</td>
+<td>(운영 14:00 override)</td>
+<td>장후반 진입 차단</td>
+<td><code>f_zone.py:108</code></td>
+</tr>
+<tr>
+<td><code>trap_*</code>(6개)</td>
+<td>0/비활성</td>
+<td>—</td>
+<td>트랩 가드(default-OFF)</td>
+<td><code>f_zone.py:113-118</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>운영에서 1분봉을 쓸 경우 SF 기준봉 하한이 <strong>5% → 2%</strong>, 거래량은 <strong>3.0× 유지</strong>, 점수는 여전히 ≥ 7.0 로 SF 승격이 결정된다(<code>FZoneParams.for_intraday</code>, <code>f_zone.py:178-193</code>).</p>
+</blockquote>
+<h3 id="52-010-f-sf">5.2 점수 산식 (0~10) — F존 공유, SF 게이트가 참조</h3>
+<p><code>_score_and_classify</code> (<code>f_zone.py:544-610</code>):
+- 기준봉: <code>min(gain/sf_impulse_min_gain_pct,1)×2 + min(vol_ratio/sf_volume_ratio,1)×1</code> (최대 3점)
+- 눌림목: <code>max(0, 1 − depth/0.05)×2</code> (최대 2점, 얕을수록 ↑)
+- 이평선 지지: <code>2 − touch_pct/tolerance</code> (최대 2점)
+- 반등: <code>min(gain/0.02,1)×1.5 + min(vol_ratio/2,1)×1.5</code> (최대 3점)
+- (옵션) 수박지표 +bonus(default OFF)
+→ F존 ≥ 4.0, SF존 ≥ 7.0.</p>
+<h3 id="53-4">5.3 청산 파라미터 (오버라이드 — §4 표 재정리)</h3>
+<table>
+<thead>
+<tr>
+<th>계층</th>
+<th>TP</th>
+<th>SL</th>
+<th>BE</th>
+<th>출처</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1차 exit_plan (sf 전용)</td>
+<td>+3/+5/+7% (33/33/34%)</td>
+<td>−1.5%</td>
+<td>+1.0%</td>
+<td><code>sf_zone.py:56-84</code></td>
+</tr>
+<tr>
+<td>2차 HoldingEvaluator (sf 전용)</td>
+<td>7.0% / partial 3.0%·0.33</td>
+<td>−4.0% (강화 −2.5%)</td>
+<td>2.0%</td>
+<td><code>holding_evaluator.py:115-124</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="54-position_size">5.4 position_size</h3>
+<p><code>even_position_size</code> — score 무관 균등(default ratio 0.08 = 자본의 8%, 10슬롯) (<code>sf_zone.py:86-89</code>, <code>position_sizing.py:24,40-52</code>). F존과 동일(BAR-OPS-09 Phase 9, score 차등 제거). 테스트: 고/중/저 score 모두 동일 수량(<code>test_sf_zone.py:87-103</code>).</p>
+<hr />
+<h2 id="6">6. 활성·운영 상태</h2>
+<ul>
+<li><strong>default 활성</strong>: <code>_DEFAULT_ENABLED["sf_zone"] = True</code> (<code>signal_scanner.py:42-44</code>). 활성 단타 3종(sf/f/gold).</li>
+<li><strong>dispatch 1순위</strong>: <code>_analyze_symbol</code> 의 intraday_dispatch 리스트에 <strong>SF가 가장 먼저 append</strong> 되고, 루프에서 첫 시그널을 즉시 반환 → 같은 종목에서 SF·F 둘 다 성립해도 <strong>SF가 선점</strong>(<code>signal_scanner.py:155-182</code>).</li>
+<li><strong>⚠ tiebreaker 우선순위는 후순위</strong>: <code>STRATEGY_PRIORITY = {swing_38:1, gold_zone:2, f_zone:3, sf_zone:4, ...}</code> (<code>signal_scanner.py:59-62</code>). 정렬 키 <code>(-score, priority)</code> (<code>:137</code>). 즉 <strong>dispatch 단계에서는 SF가 종목 내 최우선</strong>이지만, 여러 종목 시그널을 점수 동률로 줄세울 때는 sf_zone이 f_zone/gold_zone보다 뒤다. dispatch 선점 덕에 한 종목에서 SF·F 동시 발생은 애초에 일어나지 않으므로(SF가 먼저 return), 이 tiebreaker는 <strong>서로 다른 종목 간 동점 경합</strong>에만 영향. 운영 의도(SF 최우선)와 tiebreaker 숫자가 어긋나 보이므로 점검 권장.</li>
+<li><strong>인스턴스 생성</strong>: <code>self.sf_zone = SFZoneStrategy(f_zone_params)</code> — F존과 동일 params 객체를 공유(<code>signal_scanner.py:106-107</code>).</li>
+<li><strong>health_check</strong>: <code>ready = inner_ready AND sf_impulse_min_gain_pct ≥ 0.05</code> (<code>sf_zone.py:91-100</code>, <code>test_sf_zone.py:114-120</code>).</li>
+</ul>
+<hr />
+<h2 id="7">7. 비용·손익분기 관점</h2>
+<p>거래비용 단일 진실원천 (<code>trading_costs.py:29-37</code>):
+- 편도 수수료 <code>COMMISSION_RATE = 0.0035</code> (0.35%/leg)
+- 매도 거래세 <code>TAX_RATE_SELL = 0.0020</code> (0.20%)
+- 왕복 <code>ROUND_TRIP_COST_RATE = 0.0035×2 + 0.0020 = 0.0090</code> (<strong>0.90%</strong>)</p>
+<p>SF TP 사다리(gross)를 net으로 환산하면(분할 비율 33/33/34, 왕복 0.90% 가정):</p>
+<table>
+<thead>
+<tr>
+<th>티어</th>
+<th>gross</th>
+<th>net(−0.90%)</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TP1 +3%</td>
+<td>+3.0%</td>
+<td><strong>+2.1%</strong></td>
+<td>손익분기(0.90%) 충분히 상회</td>
+</tr>
+<tr>
+<td>TP2 +5%</td>
+<td>+5.0%</td>
+<td><strong>+4.1%</strong></td>
+<td></td>
+</tr>
+<tr>
+<td>TP3 +7%</td>
+<td>+7.0%</td>
+<td><strong>+6.1%</strong></td>
+<td>SF 신규 상단</td>
+</tr>
+<tr>
+<td>BE +1.0% (본전 잠금)</td>
+<td>+1.0%</td>
+<td><strong>+0.1%</strong></td>
+<td>gross +1.0%는 net 거의 본전 — 비용 차감 시 실질 이익 미미</td>
+</tr>
+<tr>
+<td>SL −1.5%</td>
+<td>−1.5%</td>
+<td><strong>−2.4%</strong></td>
+<td>비용 포함 실손</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>주의: HoldingEvaluator는 default가 gross 임계 비교다. <code>net_aware_tp</code>(default-OFF, <code>holding_evaluator.py:214-216,286-288</code>)를 켜야 TP/분할익절 임계에 왕복비용이 가산된다. 켜지 않으면 <strong>breakeven_trigger(SF +1.0%/2차 +2.0%)는 비용 미반영</strong> → +1.0% 본전 잠금이 실제로는 net 손익분기에 미달할 수 있음(정량 영향은 미검증). TP3(+7%)는 net +6.1%로 비용 영향이 작아 SF의 상단 사다리는 비용 측면에서 견고.</p>
+</blockquote>
+<hr />
+<h2 id="8-oos">8. 백테스트·OOS 근거 / 한계·리스크</h2>
+<ul>
+<li><strong>변동성 필터 운영 근거</strong>: sf_zone 변동성 필터(inner ATR 게이트) — "누적 41 runs / 5 발동 (100% win), 발동 종목 모두 flu% ≥ 10.2%" (<code>test_sf_zone.py:139-147</code>). 단 표본이 작아 일반화 한계 명시.</li>
+<li><strong>min_atr_pct 권장값 0.035</strong>: 운영 8종목 백테스트 +186k 검증(F1), LG전자(ATR% 2.94%, win 0%, −627k) 같은 저변동·고가 종목 제외 목적 (<code>f_zone.py:86-94</code>). default는 합성데이터 회귀 보존 위해 0.0.</li>
+<li><strong>SF 전용 OOS 수치 없음(한계)</strong>: 코드/테스트에서 <strong>SF존 단독 승률·손익비·MDD 백테스트 수치는 발견되지 않음.</strong> SF는 F존 셋업의 상위 부분집합이라 별도 시뮬 트랙이 분리돼 있지 않은 것으로 보임(미검증 — 별도 백테스트 산출물 확인 필요).</li>
+<li><strong>baseline 회귀 테스트 skip 상태</strong>: <code>test_c7_baseline_unchanged</code> 가 <code>@pytest.mark.skip</code>(main <code>ec9feab</code> 의 SyntheticDataLoader f_zone trades=0 회귀, 본 PR 외 잔재) (<code>test_sf_zone.py:126-136</code>). → SF 분리가 F존 baseline을 깨지 않는다는 검증이 현재 비활성.</li>
+<li><strong>리스크 1 — 진입 다양성 저하</strong>: SF는 거래량 3배·+5%·7점이라 신호 빈도가 낮을 수 있음(F존보다 희소). 시그널 부족 시 슬롯 미충원 가능.</li>
+<li><strong>리스크 2 — 타이트 SL(−1.5%)의 노이즈 손절</strong>: 1분봉에서 −1.5%는 변동성 큰 종목에서 쉽게 닿음 → min_atr_pct 필터와 결합되지 않으면(default OFF) whipsaw 손절 위험.</li>
+<li><strong>리스크 3 — dispatch vs tiebreaker 우선순위 불일치</strong>(§6): 운영 의도와 코드 정렬값 괴리. 다종목 동점 시 SF가 의도와 달리 후순위로 밀릴 수 있음.</li>
+<li><strong>리스크 4 — net 미반영 BE</strong>: §7대로 net_aware_tp OFF 시 BE +1.0%/+2.0%가 실비용 미반영.</li>
+</ul>
+<hr />
+<h2 id="9">9. 관련 파일·테스트</h2>
+<table>
+<thead>
+<tr>
+<th>파일</th>
+<th>역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>backend/core/strategy/sf_zone.py</code></td>
+<td>SF 래퍼(delegate) + 전용 exit_plan/health_check</td>
+</tr>
+<tr>
+<td><code>backend/core/strategy/f_zone.py</code></td>
+<td>부모 엔진 — 진입·점수·SF 판정(<code>is_sf_zone</code>) 전부 여기</td>
+</tr>
+<tr>
+<td><code>backend/core/strategy/trap_guard.py</code></td>
+<td>진입 가드(상속 적용, default-OFF)</td>
+</tr>
+<tr>
+<td><code>backend/core/strategy/position_sizing.py</code></td>
+<td><code>even_position_size</code> (균등 진입)</td>
+</tr>
+<tr>
+<td><code>backend/core/strategy/round_figure.py</code></td>
+<td><code>resolve_sl_pct</code> (SL 라운드피겨 보정)</td>
+</tr>
+<tr>
+<td><code>backend/core/risk/holding_evaluator.py</code></td>
+<td>2차 안전망 — <code>STRATEGY_EXIT_PROFILES["sf_zone"]</code></td>
+</tr>
+<tr>
+<td><code>backend/core/scanner/signal_scanner.py</code></td>
+<td>dispatch(1순위) + <code>_DEFAULT_ENABLED</code>/<code>STRATEGY_PRIORITY</code></td>
+</tr>
+<tr>
+<td><code>backend/core/trading_costs.py</code></td>
+<td>거래비용 단일 진실원천(왕복 0.90%)</td>
+</tr>
+<tr>
+<td><code>backend/tests/strategy/test_sf_zone.py</code></td>
+<td>C1~C7 + 변동성 필터 테스트(상속/필터/exit/size/health)</td>
+</tr>
+</tbody>
+</table>
+<p>기타 sf_zone 참조 테스트: <code>test_signal_decision_audit.py</code>, <code>test_entry_revalidation.py</code>, <code>test_force_close_exempt.py</code>, <code>test_intraday_buy_daemon_strategies.py</code>, <code>scanner/test_signal_scanner_phase_c.py</code>, <code>backtester/test_intraday_simulator.py</code>, <code>backtester/test_portfolio_simulator.py</code>.</p>
+<hr />
+<p><em>진실원천 주석: 모든 수치·동작은 origin/main(HEAD <code>013d54b</code>, 2026-06-22) 코드 직접 인용. file:line 표기는 인용 시점 라인. SF존 단독 OOS 백테스트 수치, dispatch/tiebreaker 우선순위 불일치의 운영 영향, net 미반영 BE의 실손익 영향은 "미검증"으로 명시 — 별도 백테스트/운영 데이터 확인 필요.</em></p>
+</body>
+</html>

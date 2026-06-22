@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>gold_zone</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<h1 id="barroaitrade-gold_zone">BarroAiTrade 매매전략 심층 리포트 — gold_zone (골드존)</h1>
+<blockquote>
+<p>생성: 2026-06-22 · 진실원천: 코드 인용(file:line) · origin/main 기준
+상태: 🟢 활성 (default ON) · 분류: 1분봉 단타(되돌림) · 컨셉: BB 하단 + Fib 되돌림존 + RSI 과매도 회복이 겹치는 "골드존"에서 보수적으로 바닥을 매수하는 mean-revert 전략</p>
+</blockquote>
+<h2 id="1-tldr">1. 요약 (TL;DR)</h2>
+<ul>
+<li><strong>무엇</strong>: BB(20,2σ) 하단 근접 + Fib 0.236~0.786 되돌림존 + RSI(14) 과매도(≤35) 후 회복(≥38) — 3개 조건의 가중 점수가 임계 이상이면 진입하는 되돌림(mean-revert) 매수 전략. 진입점은 <code>GoldZoneStrategy._analyze_v2</code> (<code>gold_zone.py:104</code>).</li>
+<li><strong>활성 여부</strong>: <code>_DEFAULT_ENABLED["gold_zone"] = True</code> (<code>signal_scanner.py:44</code>), dispatch 우선순위 <code>SF &gt; F &gt; Gold</code> (<code>signal_scanner.py:160-161</code>), 슬롯 경합 tiebreaker <code>STRATEGY_PRIORITY["gold_zone"]=2</code> (<code>signal_scanner.py:60</code>).</li>
+<li><strong>진입 게이트(다층)</strong>: min_candles 60 → ATR% 필터(옵션) → trap_guard(옵션) → 진입시간 cutoff(옵션) → 조건 2/3 충족 → 가중점수 ≥ <code>min_score=5.0</code> (<code>gold_zone.py:60, 106-144</code>).</li>
+<li><strong>청산 이원화</strong>: ExitEngine 1차 방어선 SL −1.5%/TP +2%·+4% (<code>gold_zone.py:251-275</code>), HoldingEvaluator 2차 안전망 SL −4.0%/TP +4.0%/부분익절 2.0%@0.5/트레일링 3.0→1.0/본전 2.5/시간강화 −3.0 (<code>holding_evaluator.py:125-134</code>).</li>
+<li><strong>★특수 운영</strong>: gold_zone 은 <code>_MEANREV_STRATEGIES={"gold_zone"}</code> (<code>intraday_buy_daemon.py:627</code>)로 분류돼 <strong>DCA(물타기) gate</strong> 와 <strong>gap-guard</strong> 대상 — 6번 섹션 상세.</li>
+</ul>
+<h2 id="2">2. 전략 개요</h2>
+<ul>
+<li><strong>포지셔닝</strong>: 데몬 default zone 전략 4종(<code>swing_38</code>, <code>f_zone</code>, <code>sf_zone</code>, <code>gold_zone</code>) 중 유일한 "되돌림(바닥매수)" 계열. f_zone/sf_zone 가 눌림·추세 계열인 반면, gold_zone 은 하락 후 과매도 반등을 노린다.</li>
+<li><strong>모듈 헤더 정의</strong> (<code>gold_zone.py:1-10</code>): "보수적 되돌림 매수. 진입 3 조건 — BB 하단 1% 이내 / Fib 0.382~0.618 zone / RSI 30 이하 후 40 돌파 회복." (단, 실제 default 파라미터는 헤더 설명보다 완화됨 — Fib 0.236~0.786, RSI 35→38. 헤더는 초기 설계값, 코드 default 가 진실원천.)</li>
+<li><strong>진입점 구조</strong>: <code>Strategy.analyze()</code> (base.py) 가 <code>_analyze_v2(ctx)</code> 로 위임 (<code>base.py:52,62</code>). 운영/시뮬/재검증 모두 <code>analyze()</code> 단일 경로.</li>
+<li><strong>STRATEGY_ID</strong> = <code>"gold_zone_v1"</code> (<code>gold_zone.py:99</code>). HoldingEvaluator 의 <code>resolve_policy</code> 가 <code>_v1</code> 접미사를 제거해 <code>gold_zone</code> 키로 프로파일 매칭 (<code>holding_evaluator.py:175-177</code>).</li>
+</ul>
+<h2 id="3">3. 진입 로직 (조건·점수·게이트)</h2>
+<p>진입은 <code>_analyze_v2</code> (<code>gold_zone.py:104-164</code>)에서 <strong>순차 게이트 → 조건 점수화 → 임계 컷</strong>으로 처리된다.</p>
+<h3 id="3-1">3-1. 사전 게이트 (순서대로, 코드 인용)</h3>
+<ol>
+<li><strong>캔들 수</strong>: <code>len(ctx.candles) &lt; p.min_candles(60)</code> → None (<code>gold_zone.py:106</code>).</li>
+<li><strong>변동성 필터 (옵션)</strong>: <code>min_atr_pct &gt; 0</code> 일 때만 <code>atr_pct &lt; min_atr_pct</code> → None (<code>gold_zone.py:110-113</code>). default <code>min_atr_pct=0.0</code> (비활성, <code>gold_zone.py:66</code>). 시뮬/재검증에서 명시 override(0.035 / 0.01) — 5번·6번 참조.</li>
+<li><strong>trap_guard (옵션)</strong>: <code>_trap_cfg.any_enabled()</code> 일 때만 과확장·윗꼬리·고갭 차단 (<code>gold_zone.py:116-120</code>). 모든 임계 default 0 → no-op (<code>gold_zone.py:77-82</code>).</li>
+<li><strong>진입 시간 cutoff (옵션)</strong>: <code>entry_time_cutoff is not None</code> 이고 마지막 candle <code>time() &gt;= cutoff</code> → None (<code>gold_zone.py:123-126</code>). default None (비활성, <code>gold_zone.py:73</code>).</li>
+</ol>
+<h3 id="3-2-3-01">3-2. 3개 조건 점수 (각 [0,1])</h3>
+<pre><code class="language-python">bb_score  = self._bb_score(df)    # gold_zone.py:130, 168-184
+fib_score = self._fib_score(df)   # gold_zone.py:131, 186-201
+rsi_score = self._rsi_score(df)   # gold_zone.py:132, 203-229
+</code></pre>
+<ul>
+<li><strong>BB 하단 점수</strong> (<code>_bb_score</code>, <code>gold_zone.py:168-184</code>): SMA(20)±2σ 하단(<code>lower</code>) 기준. <code>close &lt;= lower</code> 면 1.0; <code>bb_proximity_pct(0.03=3%)</code> 이내면 <code>1 - distance/0.03</code>, 초과면 0.0. (헤더의 "1% 이내" 설명과 달리 default 는 <strong>3%</strong>, <code>gold_zone.py:48</code>.)</li>
+<li><strong>Fib 점수</strong> (<code>_fib_score</code>, <code>gold_zone.py:186-201</code>): 최근 <code>fib_lookback(30)</code>봉 고·저 기준 retrace 비율. <code>fib_min(0.236)~fib_max(0.786)</code> 밖이면 0.0, 안이면 중심(0.5)에 가까울수록 1.0 (<code>gold_zone.py:45-46</code>).</li>
+<li><strong>RSI 점수</strong> (<code>_rsi_score</code>, <code>gold_zone.py:203-229</code>): EWM RSI(14). 최근 10봉 최저 RSI 가 <code>rsi_oversold(35)</code> 이하로 내려갔고(과매도 경험) <strong>현재 RSI ≥ <code>rsi_recovery(38)</code></strong> (회복)일 때만 점수, <code>min(1, (rsi_now-35)/(38-35))</code>. 둘 중 하나라도 불만족이면 0.0 (<code>gold_zone.py:224-227</code>).</li>
+</ul>
+<h3 id="3-3">3-3. 조건 수 게이트 + 가중 점수 컷</h3>
+<pre><code class="language-python">conditions_met = (bb_score&gt;0)+(fib_score&gt;0)+(rsi_score&gt;0)
+if conditions_met &lt; p.min_conditions(2): return None   # gold_zone.py:135-137
+raw   = bb_score*0.4 + fib_score*0.3 + rsi_score*0.3    # gold_zone.py:139
+score = raw * 10.0                                       # 0~10 정규화, gold_zone.py:141
+if score &lt; p.min_score(5.0): return None                # gold_zone.py:143-144
+</code></pre>
+<ul>
+<li><strong>2/3 조건 충족</strong> 필요 (<code>min_conditions=2</code>, <code>gold_zone.py:50</code>). 코드 주석상 <code>min_conditions=3</code> 강화는 PnL 악화로 무효 확인 → 2 유지 (<code>gold_zone.py:56</code>).</li>
+<li><strong>가중치</strong>: BB 0.4 / Fib 0.3 / RSI 0.3 — BB 하단 근접에 최대 가중.</li>
+<li><strong>임계</strong>: <code>min_score=5.0</code> (<code>gold_zone.py:60</code>). 이력: hardcoded 2.5 → 4.0(B4 시뮬, <code>gold_zone.py:51-56</code>) → <strong>5.0</strong>(BAR-OPS-33, 4~6월 sweep: 6월 약세 해소·기대값 +4.32·MDD −3.0·승률 57%, <code>gold_zone.py:57-59</code>).</li>
+<li><strong>시그널 생성</strong> (<code>gold_zone.py:146-164</code>): <code>signal_type="gold_zone"</code>, <code>strategy_id="gold_zone_v1"</code>, metadata 에 bb/fib/rsi 개별 점수 기록.</li>
+</ul>
+<h2 id="4-sl4tp4205">4. 청산 로직 (SL−4/TP+4/부분익절2@0.5/트레일링/본전/특수)</h2>
+<p>청산은 <strong>2계층</strong>으로 의도적으로 분리돼 있다 (<code>holding_evaluator.py:86-103</code>, SL 격차 의도).</p>
+<h3 id="4-1-exitengine-1-goldzonestrategyexit_plan-gold_zonepy251-275">4-1. ExitEngine 1차 방어선 — <code>GoldZoneStrategy.exit_plan</code> (<code>gold_zone.py:251-275</code>)</h3>
+<p>분봉 close 기준, 더 엄격:
+- <strong>TP1</strong> = avg ×1.02 (+2%), 50% 매도 (<code>gold_zone.py:259-263</code>)
+- <strong>TP2</strong> = avg ×1.04 (+4%), 50% 매도 (<code>gold_zone.py:264-268</code>)
+- <strong>SL</strong> = <code>fixed_pct = resolve_sl_pct(..., Decimal("-0.015"))</code> → <strong>−1.5%</strong> (라운드피겨 보정 OFF 시 그대로, <code>gold_zone.py:270-272</code>, <code>round_figure.py:201-202</code>)
+- <strong>time_exit</strong> = 14:50 (STOCK 한정, <code>gold_zone.py:273</code>)
+- <strong>breakeven_trigger</strong> = +1.0% (<code>gold_zone.py:274</code>)</p>
+<h3 id="4-2-holdingevaluator-2-strategy_exit_profilesgold_zone-holding_evaluatorpy125-134">4-2. HoldingEvaluator 2차 안전망 — <code>STRATEGY_EXIT_PROFILES["gold_zone"]</code> (<code>holding_evaluator.py:125-134</code>)</h3>
+<p>브로커 <code>pnl_rate</code> 기준, 더 너그러운 fallback (코드로 재확인한 6개 값):</p>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>값</th>
+<th>file:line</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>stop_loss_pct</td>
+<td><strong>−4.0</strong></td>
+<td>holding_evaluator.py:126</td>
+</tr>
+<tr>
+<td>take_profit_pct</td>
+<td><strong>+4.0</strong></td>
+<td>holding_evaluator.py:127</td>
+</tr>
+<tr>
+<td>partial_tp_pct</td>
+<td><strong>2.0</strong></td>
+<td>holding_evaluator.py:128</td>
+</tr>
+<tr>
+<td>partial_tp_ratio</td>
+<td><strong>0.5</strong></td>
+<td>holding_evaluator.py:129</td>
+</tr>
+<tr>
+<td>trailing_start_pct</td>
+<td><strong>3.0</strong></td>
+<td>holding_evaluator.py:130</td>
+</tr>
+<tr>
+<td>trailing_offset_pct</td>
+<td><strong>1.0</strong></td>
+<td>holding_evaluator.py:131</td>
+</tr>
+<tr>
+<td>breakeven_trigger_pct</td>
+<td><strong>2.5</strong></td>
+<td>holding_evaluator.py:132</td>
+</tr>
+<tr>
+<td>tightened_sl_pct</td>
+<td><strong>−3.0</strong></td>
+<td>holding_evaluator.py:133</td>
+</tr>
+</tbody>
+</table>
+<p>평가 우선순위 (<code>evaluate_holding</code>, <code>holding_evaluator.py:296-461</code>): ① max/min_hold_days 게이트(gold_zone 미정의 → skip) → ② distribution(default-OFF) → ③ 단기고점 캔들(SHORT_TERM_HIGH, 1분봉 있고 rate≥partial_tp 시) → ④ 트레일링(peak≥3.0 &amp; rate &lt; peak−1.0) → ⑤ 본전(peak≥2.5 &amp; rate≤0) → ⑥ 부분익절(rate≥2.0 &amp; &lt;4.0, 50%) → ⑦ 전량 TP(rate≥4.0) → ⑧ 시간강화 SL(보유 ≥hold_days_tighten=5일 → −3.0) → ⑨ SL(rate ≤ −4.0).</p>
+<p><strong>SL 격차 의도</strong> (<code>holding_evaluator.py:86-103</code>): ExitEngine −1.5% 와 HoldingEvaluator −4.0% 의 2.5%p 격차는 운영 robustness 안전망(데몬 다운·분봉 fetch 실패·시그널 누락 시 fallback + broker pnl 노이즈 흡수). 재검토 트리거: HoldingEvaluator STOP_LOSS 발동 &gt;20% 또는 broker noise false trigger.</p>
+<h2 id="5">5. 파라미터 표</h2>
+<p><code>GoldZoneParams</code> (<code>gold_zone.py:36-93</code>) default — <strong>코드 확인값</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>default</th>
+<th>의미</th>
+<th>file:line</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bb_period</td>
+<td>20</td>
+<td>BB 이동평균 기간</td>
+<td>gold_zone.py:40</td>
+</tr>
+<tr>
+<td>bb_std</td>
+<td>2.0</td>
+<td>BB 표준편차 배수</td>
+<td>gold_zone.py:41</td>
+</tr>
+<tr>
+<td>bb_proximity_pct</td>
+<td>0.03 (3%)</td>
+<td>BB 하단 근접 허용폭</td>
+<td>gold_zone.py:48</td>
+</tr>
+<tr>
+<td>fib_lookback</td>
+<td>30</td>
+<td>Fib 고·저 산정 봉수</td>
+<td>gold_zone.py:42</td>
+</tr>
+<tr>
+<td>fib_min / fib_max</td>
+<td>0.236 / 0.786</td>
+<td>되돌림존 경계</td>
+<td>gold_zone.py:43-44</td>
+</tr>
+<tr>
+<td>rsi_period</td>
+<td>14</td>
+<td>RSI 기간</td>
+<td>gold_zone.py:44(line 45)</td>
+</tr>
+<tr>
+<td>rsi_oversold</td>
+<td>35.0</td>
+<td>과매도 경험 임계</td>
+<td>gold_zone.py:46</td>
+</tr>
+<tr>
+<td>rsi_recovery</td>
+<td>38.0</td>
+<td>회복 확인 임계</td>
+<td>gold_zone.py:47</td>
+</tr>
+<tr>
+<td>min_candles</td>
+<td>60</td>
+<td>최소 캔들 수</td>
+<td>gold_zone.py:49</td>
+</tr>
+<tr>
+<td>min_conditions</td>
+<td>2</td>
+<td>최소 충족 조건(2/3)</td>
+<td>gold_zone.py:50</td>
+</tr>
+<tr>
+<td><strong>min_score</strong></td>
+<td><strong>5.0</strong></td>
+<td>가중점수 진입 임계 (BAR-OPS-33)</td>
+<td>gold_zone.py:60</td>
+</tr>
+<tr>
+<td>min_atr_pct</td>
+<td>0.0 (비활성)</td>
+<td>ATR% 변동성 필터</td>
+<td>gold_zone.py:66</td>
+</tr>
+<tr>
+<td>atr_n</td>
+<td>14</td>
+<td>ATR 기간</td>
+<td>gold_zone.py:67</td>
+</tr>
+<tr>
+<td>entry_time_cutoff</td>
+<td>None (비활성)</td>
+<td>장후반 진입 차단</td>
+<td>gold_zone.py:73</td>
+</tr>
+<tr>
+<td>trap_* (6개)</td>
+<td>0 / "ma" / 20 (비활성)</td>
+<td>트랩가드 임계</td>
+<td>gold_zone.py:77-82</td>
+</tr>
+</tbody>
+</table>
+<p><strong>진입점별 override</strong> (default 와 다름):
+- IntradaySimulator <code>gold_zone</code> 분기: <code>min_atr_pct=0.035</code>, <code>entry_time_cutoff=dtime(14,0)</code> (<code>intraday_simulator.py:218-227</code>). LG계열 저변동 차단 + 15:01 같은 장후반 진입 차단.
+- 데몬 진입 재검증: <code>GoldZoneParams(min_atr_pct=0.01)</code> (분봉 적정 — 0.035 는 분봉서 신호 전멸, <code>intraday_buy_daemon.py:748-751</code>, 주석 <code>intraday_buy_daemon.py:619-625</code>).</p>
+<h2 id="6-mean-revert-dca-gate-gap-guard">6. 활성·운영 상태 (★mean-revert DCA gate, gap-guard 특수처리 상세)</h2>
+<h3 id="6-1">6-1. 활성 상태</h3>
+<ul>
+<li><code>_DEFAULT_ENABLED["gold_zone"]=True</code> (<code>signal_scanner.py:44</code>) — 1분봉 intraday 단타 default 활성. 주석상 이전엔 SignalScanner 미등록이었고 D2.1 에서 신규 등록.</li>
+<li>dispatch 우선순위: intraday 리스트에서 <code>sf_zone → f_zone → gold_zone</code> 순, 첫 시그널 반환 (<code>signal_scanner.py:156-161,175-182</code>).</li>
+<li>슬롯/자본 경합 tiebreaker: 점수 1차 내림차순, <code>STRATEGY_PRIORITY</code> 2차 오름차순. <code>gold_zone=2</code> (swing_38=1 다음 2순위, <code>signal_scanner.py:59-62,137</code>).</li>
+<li>데몬 default zone 전략 포함: <code>DEFAULT_ZONE_STRATEGIES=["swing_38","f_zone","sf_zone","gold_zone"]</code> (<code>intraday_buy_daemon.py:85</code>).</li>
+</ul>
+<h3 id="6-2-mean-revert-dca-gate">6-2. ★ mean-revert 분류 → DCA(물타기) gate</h3>
+<p>gold_zone 은 <strong>유일하게</strong> <code>_MEANREV_STRATEGIES = {"gold_zone"}</code> 로 분류됨 (<code>intraday_buy_daemon.py:627</code>). 근거 주석(<code>intraday_buy_daemon.py:626</code>): "되돌림(바닥매수) 전략 — 고점근접 무조건 차단 + DCA(물타기) 비활성 대상."</p>
+<ul>
+<li><strong>DCA gate</strong> (<code>intraday_buy_daemon.py:457-460</code>): 보유 종목 DCA(분할 추매) 루프에서, <code>args.dca_strategy_gate</code> 플래그가 켜져 있고 포지션 전략이 <code>_MEANREV_STRATEGIES</code> 에 속하면 <strong>물타기 비활성</strong> (<code>[DCA-SKIP] ... 되돌림전략 — DCA(물타기) 비활성</code>).</li>
+<li>근거(코드 주석 <code>intraday_buy_daemon.py:454-456</code>): "되돌림(바닥) 전략 gold 는 하락 중 DCA(물타기) 비활성 — 약전략의 추세하락 평단 물타기가 손실을 키움(5/29 한온시스템 gold 고점매수→DCA→ −6%)."</li>
+<li>
+<p><strong>상태</strong>: <code>--dca-strategy-gate</code> 플래그 기본 off → 기본 동작 불변(주석 <code>intraday_buy_daemon.py:456</code>). 즉 게이트 인프라는 코드에 있으나 default 미적용. (참고로 일반 DCA 자체는 pending tranche 가 있을 때만 발동되며, <code>_NO_DCA_STRATEGIES={"swing_38","supertrend"}</code> 와 달리 gold_zone 은 <em>무조건</em> 차단이 아니라 플래그-조건부 차단이다.)</p>
+</li>
+<li>
+<p><strong>진입 재검증과의 결합</strong> (<code>_MEANREV_STRATEGIES</code> 의 또 다른 의도): 주석 <code>⑦/⑧</code> (<code>intraday_buy_daemon.py:626</code>)상 "고점근접 무조건 차단" 대상. 데몬은 일봉 sim 으로 전략을 선정하나, 진입 직전 분봉 컨텍스트로 <code>analyze()</code> 재호출(<code>_revalidate_entry</code>, <code>intraday_buy_daemon.py:755-777</code>)해 gold(바닥매수)가 장중 고점에 진입하는 것을 차단. (5/29 한온시스템 −6% 회귀 방지, 주석 <code>intraday_buy_daemon.py:616-621</code>.) 재검증 전략 빌드 시 gold_zone 은 <code>min_atr_pct=0.01</code> 분봉 임계로 생성(<code>intraday_buy_daemon.py:748-751</code>).</p>
+</li>
+</ul>
+<h3 id="6-3-gap-guard">6-3. ★ gap-guard 특수처리</h3>
+<p>gold_zone 은 <code>_GAP_GUARD_STRATEGIES</code> 의 기본 멤버다:</p>
+<pre><code class="language-python">_GAP_GUARD_STRATEGIES = _parse_strategy_set(
+    &quot;BARRO_GAP_GUARD_STRATEGIES&quot;, _MEANREV_STRATEGIES | {&quot;f_zone&quot;})   # intraday_buy_daemon.py:658-659
+</code></pre>
+<ul>
+<li>기본값 = <code>{"gold_zone", "f_zone"}</code> (mean-revert ∪ f_zone). env <code>BARRO_GAP_GUARD_STRATEGIES</code> 로 sf_zone 등 편입 가능(코드배포 없이, 주석 <code>intraday_buy_daemon.py:653-657</code>).</li>
+<li><strong>시초갭 상한 가드</strong> (<code>_ZONE_MAX_FLU</code>, <code>intraday_buy_daemon.py:642</code>): "되돌림(gold)·눌림(f) 전략 시초갭 상한 — 갭상승 폭등주에는 바닥/눌림 신호가 고점에서 발화한다." 전일종가 대비 등락률(flu_rate)이 임계(env <code>BARRO_ZONE_MAX_FLU</code>, default 15.0) 이상이면 해당 전략 진입 금지.</li>
+<li>근거 패턴(주석 <code>intraday_buy_daemon.py:636-641</code>): 6/10 gold 추격 3종 전패 −461K (SK오션플랜트 시가갭 +22.8% 등 — 5/29·6/8 에 이은 세 번째 'gold 고점매수'). 6/11 실증: 임계 15% 바로 아래(13.1~13.5%) 진입 3건 전패 −353K → 임계 조정은 일일감사 갭분포 누적측정(BAR-OPS-39) 후 데이터 기반.</li>
+<li><strong>trap_guard 후처리</strong> (<code>_DAEMON_TRAP</code>, <code>intraday_buy_daemon.py:731-735</code>): 일봉 선정 단계에서 과확장·윗꼬리·시초갭(전 전략 대상, gold_zone 포함). 모든 env 0(default) → <code>any_enabled()=False</code> → 무동작. 실제 차단 활성은 HITL(env 설정 자체가 인간 승인 게이트, 주석 <code>intraday_buy_daemon.py:699-704</code>).</li>
+</ul>
+<h3 id="6-4-gold_zone">6-4. 그 외 공통 운영 게이트 (gold_zone 도 적용)</h3>
+<ul>
+<li><strong>진입 컷오프</strong>: <code>_ZONE_ENTRY_CUTOFF=14:30</code> (<code>intraday_buy_daemon.py:665</code>), <code>_CUTOFF_EXEMPT_STRATEGIES={"swing_38"}</code> 만 면제 → gold_zone 은 14:30 이후 진입 차단.</li>
+<li><strong>EOD 강제청산 면제 아님</strong>: <code>_FORCE_CLOSE_EXEMPT_STRATEGIES={"swing_38"}</code> (<code>intraday_buy_daemon.py:672</code>) — gold_zone 은 EOD carry-limit 트림 대상(swing 처럼 이월 보존 안 됨).</li>
+<li><strong>포지션 사이징</strong>: <code>even_position_size</code> 균등 진입 (score 차등 BAR-176 무력화, <code>gold_zone.py:277-280</code>).</li>
+</ul>
+<h2 id="7">7. 비용·손익분기 관점</h2>
+<p>거래 비용 단일 진실원천 <code>backend/core/trading_costs.py</code> (브로커 실측 기반):</p>
+<ul>
+<li><strong>편도 수수료</strong> <code>COMMISSION_RATE = 0.0035</code> = <strong>0.35%/leg</strong> (<code>trading_costs.py:29</code>, fill_audit 298행 실측 1,768,040 / 505,588,092 = 0.3497%).</li>
+<li><strong>매도 거래세</strong> <code>TAX_RATE_SELL = 0.0020</code> = <strong>0.20%</strong> (<code>trading_costs.py:31</code>, 실측 41,687 / 20,858,020 = 0.1999%).</li>
+<li><strong>왕복 총비용</strong> <code>ROUND_TRIP_COST_RATE = 0.0035×2 + 0.0020 = 0.0090</code> = <strong>0.90%</strong> (<code>trading_costs.py:33</code>).</li>
+</ul>
+<p><strong>손익분기 해석 (gold_zone 청산값 대입)</strong>:
+- ExitEngine TP1 +2% 도달 시: gross +2% − 왕복 0.90% ≈ <strong>순 +1.1%</strong>. 부분익절 50% 만 청산이므로 잔여분은 추가 변동 노출.
+- HoldingEvaluator 부분익절 +2.0% 도 동일하게 net 약 +1.1%.
+- SL −4.0%(2차망) 발동 시: 순손실 ≈ −4.9% (gross −4% − 비용 0.9%). 1차망 −1.5% 면 순 ≈ −2.4%.
+- gold_zone 의 TP +2%/+4% 는 왕복 0.90% 대비 여유가 크지 않다 — 특히 부분익절 2%는 비용 차감 후 +1.1%로, 진입 정밀도(고점 진입 방지)가 수익성에 직결. 6번의 gap-guard·재검증이 "고점 진입 → 미달 청산" 손실을 막는 것이 손익분기 관점의 핵심.</p>
+<p><strong>⚠ 미검증/discrepancy</strong>: <code>trading_costs.py:32</code> 코드 주석은 왕복 손익분기를 "≈0.55%" 로 표기하나 실제 계산값은 0.90% 다(주석이 종전 0.00175 시절 잔재로 보임). 본 리포트는 코드 상수 계산값(0.90%)을 진실원천으로 채택.</p>
+<h2 id="8-oos">8. 백테스트·OOS 근거 / 한계·리스크</h2>
+<h3 id="8-1">8-1. 코드 주석에 박제된 시뮬 근거 (재현은 미실행 — 주석 인용)</h3>
+<ul>
+<li><strong>min_score 튜닝</strong> (<code>gold_zone.py:51-59</code>): B4 시뮬(791종목·6셀) — score≥2.5 자본가중 +0.148% → score≥4.0 +0.231%(+56%, sweet spot) → score≥5.5 +0.229%(4.0 과 동일). BAR-OPS-33 4~6월 sweep(거래대금150, in 4~5월/out 6월): score≥4.0 out −7.5(약세) vs score≥5.0 기대값 +4.32·MDD −3.0·승률 57%·out +10.6 ★ → <strong>5.0 채택</strong>.</li>
+<li><strong>min_conditions=3 무효</strong>: 모든 PnL 악화로 default 2 유지 (<code>gold_zone.py:56</code>).</li>
+<li><strong>변동성 필터 0.035</strong>: LG계열 가짜 시그널 패턴 — 5/21 LG전자 −626k(43 trades, win 41%), 5/14 LG씨엔에스 −190k, 5/15 −150k (<code>gold_zone.py:62-66</code>).</li>
+<li><strong>진입시간 cutoff 14:00</strong>: 5/22 379800 KODEX 미국S&amp;P500 15:01(장 마감 19분 전, w=0.5 약신호) 차단 (<code>gold_zone.py:69-72</code>).</li>
+<li><strong>gold 고점매수 손실 사례</strong>(되돌림 전략의 구조적 약점): 5/29 한온시스템 gold 고점매수→DCA→−6% (<code>intraday_buy_daemon.py:455</code>), 6/10 gold 추격 3종 전패 −461K (<code>intraday_buy_daemon.py:637</code>), 6/11 갭 13.1~13.5% 진입 3건 전패 −353K (<code>intraday_buy_daemon.py:640-641</code>).</li>
+</ul>
+<h3 id="8-2-backendtestsstrategytest_gold_zonepy">8-2. 테스트 (<code>backend/tests/strategy/test_gold_zone.py</code>)</h3>
+<p>C1~C7 + 변동성필터/진입시간/PhaseD2.3 그룹:
+- 상속·STRATEGY_ID·min_candles None (C1~C2, <code>test_gold_zone.py:62-69</code>)
+- 합성 oversold→회복 시그널 확률성 (C3, <code>test_gold_zone.py:71-86</code>)
+- ExitPlan(TP +2/+4, SL −0.015, time_exit 14:50, breakeven 0.01) (C4, <code>test_gold_zone.py:92-104</code>) — crypto 는 time_exit None
+- position_size 균등(11주) (C5, <code>test_gold_zone.py:122-143</code>)
+- health_check (C6, <code>test_gold_zone.py:149-155</code>)
+- 변동성필터 default 0.0 / override 0.035 거부 / atr_n=14 (<code>test_gold_zone.py:175-225</code>)
+- entry_time_cutoff default None / 14:00 차단 / 시뮬 빌드 14:00 적용 (<code>test_gold_zone.py:228-270</code>)
+- <strong>default min_score=5.0</strong> 명시 검증 (<code>test_gold_zone.py:276-282</code>), min_conditions=2 유지 (<code>test_gold_zone.py:284-288</code>)
+- C7 baseline 회귀: <code>@pytest.mark.skip</code> 상태(main 잔재 회귀 — f_zone trades=0, <code>test_gold_zone.py:161</code>).</p>
+<h3 id="8-3">8-3. 한계·리스크 (코드 기반)</h3>
+<ol>
+<li><strong>헤더 ↔ default 불일치</strong>: 모듈 docstring 은 "BB 1% / Fib 0.382~0.618 / RSI 30→40" 이나 default 는 "3% / 0.236~0.786 / 35→38" — 설계 의도보다 진입조건이 완화됨. 운영 진실원천은 코드 default.</li>
+<li><strong>고점 진입 구조적 약점</strong>: 되돌림 전략 특성상 갭상승·폭등주에서 바닥 신호가 고점에서 발화 → DCA gate·gap-guard·진입 재검증이 모두 이 한 가지 리스크를 막기 위한 다중 방어선. 이 방어선들이 <strong>default off / 플래그·env 조건부</strong>라는 점이 운영 리스크(가드 미활성 시 노출).</li>
+<li><strong>OOS 자체 미검증</strong>: 본 리포트는 시뮬/백테스트를 재실행하지 않았다 — 8-1 수치는 코드 주석 인용이며 재현 검증은 별도 필요(미검증 명시).</li>
+<li><strong>min_atr 일봉/분봉 분리</strong>: 일봉 선정 0.035 vs 분봉 재검증 0.01 — 동일 전략이 단계마다 다른 변동성 임계를 써 신호 일관성 검증이 까다로움(<code>intraday_buy_daemon.py:625</code>).</li>
+<li><strong>DCA gate 기본 off</strong>: 5/29 한온시스템 교훈에도 <code>--dca-strategy-gate</code> 가 default off 라, 명시 활성화 전까지 gold_zone 물타기가 여전히 가능(pending tranche 존재 시).</li>
+</ol>
+<h2 id="9">9. 관련 파일·테스트</h2>
+<ul>
+<li>메인 전략: <code>backend/core/strategy/gold_zone.py</code> (294줄)</li>
+<li>베이스: <code>backend/core/strategy/base.py</code> (<code>analyze</code>→<code>_analyze_v2</code> 위임, line 42-62)</li>
+<li>지표: <code>backend/core/strategy/indicators.py</code> (<code>atr_pct</code> line 21-51; RSI/HTF 헬퍼)</li>
+<li>라운드피겨 SL: <code>backend/core/strategy/round_figure.py</code> (<code>resolve_sl_pct</code> line 187-220)</li>
+<li>트랩가드: <code>backend/core/strategy/trap_guard.py</code></li>
+<li>청산 평가: <code>backend/core/risk/holding_evaluator.py</code> (<code>STRATEGY_EXIT_PROFILES["gold_zone"]</code> line 125-134; <code>evaluate_holding</code> line 263-461)</li>
+<li>스캐너: <code>backend/core/scanner/signal_scanner.py</code> (<code>_DEFAULT_ENABLED</code> line 41-55; <code>STRATEGY_PRIORITY</code> line 59-62; dispatch line 156-182)</li>
+<li>운영 데몬: <code>scripts/intraday_buy_daemon.py</code> (<code>_MEANREV_STRATEGIES</code> line 627; DCA gate line 457-460; <code>_GAP_GUARD_STRATEGIES</code> line 658-659; <code>_ZONE_MAX_FLU</code> line 642; 진입 재검증 line 738-777)</li>
+<li>시뮬 빌드: <code>backend/core/backtester/intraday_simulator.py</code> (gold_zone 분기 line 218-227)</li>
+<li>비용: <code>backend/core/trading_costs.py</code> (line 29-37)</li>
+<li>테스트: <code>backend/tests/strategy/test_gold_zone.py</code> (C1~PhaseD2.3, 306줄)</li>
+<li>연관 테스트: <code>test_holding_evaluator.py</code>, <code>test_entry_revalidation.py</code>, <code>test_intraday_buy_daemon_strategies.py</code>, <code>test_force_close_exempt.py</code>, <code>test_signal_scanner_phase_c.py</code>, <code>test_intraday_only_strategies.py</code></li>
+</ul>
+<hr />
+<p><em>진실원천 주석</em>: 본 리포트의 모든 수치·동작은 origin/main(013d54b) 코드 직접 인용(file:line)으로 확인. min_score=5.0·청산 프로파일 6값·비용 상수(0.35/0.20/0.90%)·DCA/gap-guard 특수처리는 코드 재확인 완료. 8-1 시뮬 수치는 코드 주석 인용(재실행 미수행, OOS 재현 미검증). 모듈 docstring(BB 1%/Fib 0.382~0.618/RSI 30→40)과 default 파라미터(3%/0.236~0.786/35→38)는 불일치 — default 가 운영 진실원천. <code>trading_costs.py:32</code> 의 "≈0.55%" 주석은 stale(실제 0.90%) 로 판단.</p>
+</body>
+</html>

@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>limit_up_chase</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<h1 id="barroaitrade-limit_up_chase">BarroAiTrade 매매전략 심층 리포트 — limit_up_chase (상한가 추격)</h1>
+<blockquote>
+<p>생성: 2026-06-22 · 진실원천: 코드 인용(file:line) · origin/main 기준
+상태: 🟡 별도경로(opt-in, default OFF·dry_run ON) — SignalScanner 미등록·전용 루프 배선 존재이나 환경변수 미설정 시 비가동 · 분류: 인트라데이~오버나잇(상한가 추격) · 컨셉: 등락률 +20~27% 모멘텀 밴드 + 호가 매수벽으로 상한가 직전 진입 → RUNNER(캡상승 수익극대화)로 청산</p>
+</blockquote>
+<h2 id="1-tldr">1. 요약 (TL;DR)</h2>
+<ul>
+<li><strong>상따(상한가 따라잡기)</strong> = <code>SupertrendAutoTrader</code> 를 상속한 <strong>별도 트레이더</strong>(<code>backend/core/limit_up_chase_trader.py:58</code>). 진입만 상따 전용으로 교체하고, 청산은 부모의 RUNNER(캡상승) 헬퍼를 100% 재사용한다(<code>limit_up_chase_trader.py:2-4</code>).</li>
+<li><strong>진입 2-게이트</strong>: ① 등락률 밴드 <code>entry_flu_min(20)~entry_flu_max(27)</code>% (<code>limit_up_chase_trader.py:271-278</code>) → ② ka10004 호가 매수벽(매수1호가 잔량금액 ≥ 1억원 AND top-3 매수/매도 비율 ≥ 3배) (<code>limit_up_chase_trader.py:280-320</code>). 데몬 글로벌 급등가드와 <strong>독립 경로</strong>.</li>
+<li><strong>청산</strong>: 당일 RUNNER(상한가 홀딩→수익잠금 floor→고점되돌림) + 오버나잇 모드 시 익일 시가갭 부분익절. <code>daily</code> 모드면 <code>eod_close_time(15:15)</code> 강제청산 (<code>limit_up_chase_trader.py:175-233</code>, <code>257-269</code>).</li>
+<li><strong>실사용 판정 = 🟡 별도경로(미가동 기본값)</strong>: <code>scripts/run_telegram_bot.py:811-824</code> 에 전용 루프가 배선돼 있으나 <code>LIMIT_UP_CHASE_ENABLED</code> truthy 일 때만 구성되고(<code>run_telegram_bot.py:684</code>), default OFF·<code>LIMIT_UP_CHASE_DRYRUN</code> default ON(<code>run_telegram_bot.py:688</code>). <code>.env.example</code> 에 해당 키 자체가 없어(SUPERTREND 항목만 존재, <code>.env.example:136</code>) 배포 템플릿상 <strong>비활성</strong>이다. 실 가동 여부는 운영 셸의 환경변수에 달려 코드만으로는 "현재 ON" 단정 불가 — <strong>미검증(운영 env 의존)</strong>.</li>
+<li><strong>비용</strong>: 왕복 0.90% (편도 0.35%×2 + 매도세 0.20%, <code>backend/core/trading_costs.py:29-33</code>). 상한가 갭·유동성 리스크가 큰 전략이라 손익분기 위 마진 확보가 RUNNER 의 핵심 과제.</li>
+</ul>
+<h2 id="2">2. 전략 개요 (상한가 추격 컨셉·리스크 특성)</h2>
+<p>상한가(전일종가 +29~30%)에 근접한 <strong>강모멘텀 종목을 상한가 직전 구간(+20~27%)에서 매수</strong>하고, 상한가 락(매도벽 소진) 시 홀딩하여 익일 점상한가 갭까지 노리는 "캡상승 수익극대화" 전략이다. 설계 의도가 헤더 docstring 에 명시됨(<code>limit_up_chase_trader.py:1-15</code>):</p>
+<ul>
+<li>진입은 모멘텀 밴드 + 호가 매수벽, 청산은 당일 RUNNER + 오버나잇 갭 부분익절.</li>
+<li>포지션은 <code>strategy="limit_up_chase"</code> 로 태깅돼 supertrend/zone 포지션과 <strong>상호 배타</strong>(더블셀 방지) — <code>_STRATEGY_ID = "limit_up_chase"</code> (<code>limit_up_chase_trader.py:35</code>).</li>
+<li><strong>보수 안전장치</strong>: 마스터 토글 default OFF, dry_run 우선, 동시 1~2종·소액·일일한도.</li>
+</ul>
+<p>리스크 특성(코드 주석 근거):
+- <strong>백테스트 불가</strong>: "호가 L2 이력이 없어 백테스트 불가 → 라이브 dry_run 검증 위주(ob_scalp.py 한계와 동일)" (<code>limit_up_chase_trader.py:15</code>). 즉 진입 게이트(호가 매수벽)는 사후 검증이 구조적으로 안 된다.
+- <strong>상한가 갭 리스크</strong>: 상한가 미달 시 익일 갭하락 노출. 오버나잇 모드는 이 갭을 부분익절로 일부만 회수.</p>
+<h2 id="3">3. 진입 로직 (조건·게이트) — 코드 인용</h2>
+<p><code>run_cycle()</code> 은 <strong>청산을 먼저 수행한 뒤 진입</strong>한다(<code>limit_up_chase_trader.py:68-81</code>). 진입 게이트 순서:</p>
+<ol>
+<li><strong>세션 가드</strong>: <code>market_hours_only</code> 이고 비정규장이면 사이클 스킵 (<code>limit_up_chase_trader.py:72-76</code>).</li>
+<li><strong>진입 시간창</strong>: <code>_entry_window_open()</code> — 부모 <code>_entry_time_open()</code>(start <code>09:05</code> default) AND <code>entry_end_time(14:00)</code> 이전 (<code>limit_up_chase_trader.py:84</code>, <code>240-255</code>). 장막판 추격(익일갭 리스크) 차단.</li>
+<li><strong>슬롯 계산</strong>: <code>max_positions - 보유 상따수</code>. 0 이하면 스킵 (<code>limit_up_chase_trader.py:87-92</code>).</li>
+<li><strong>유니버스 루프</strong> (<code>limit_up_chase_trader.py:94-125</code>): <code>_universe_provider()</code> → <code>universe_max</code> 컷. 종목별로:</li>
+<li>이미 보유/재진입 차단(<code>_reentry_blocked</code>)/레버리지·인버스/ETF·ETN 제외 (<code>:99-106</code>).</li>
+<li><strong>(B) 모멘텀 밴드</strong>: <code>_momentum_band_pass(cand)</code> — <code>entry_flu_min ≤ flu_rate ≤ entry_flu_max</code> (<code>:108</code>, <code>271-278</code>). 등락률은 picker 랭킹 메타에서 읽어 <strong>추가 TR 호출 없이</strong> 검사(429 절감).</li>
+<li>캔들 fetch → 현재가 <code>&lt; min_price</code> 차단 (<code>:111-115</code>).</li>
+<li><strong>(C) 호가 매수벽</strong>: <code>_passes_orderbook_wall(symbol, bars)</code> — 모멘텀 통과 후보만 호가 1회 fetch (<code>:117-118</code>).</li>
+<li><strong>리스크 게이트</strong>: <code>evaluate_risk_gate(...)</code> 로 <code>max_per_position_ratio</code>/<code>max_total_position_ratio</code>/<code>max_concurrent_positions</code> 적용 (<code>limit_up_chase_trader.py:130-137</code>).</li>
+<li><strong>주문</strong>: <code>gate.recommendations</code> 순회 → <code>_cap_qty</code> → <code>place_buy(strategy_id="limit_up_chase")</code> → <code>create_from_order(..., single_tranche=True)</code> (sync-loss 방지) (<code>limit_up_chase_trader.py:140-168</code>).</li>
+</ol>
+<h3 id="3-1-_momentum_band_pass-limit_up_chase_traderpy271-278">3-1. 모멘텀 밴드 (<code>_momentum_band_pass</code>, <code>limit_up_chase_trader.py:271-278</code>)</h3>
+<pre><code class="language-python">flu = float(getattr(cand, &quot;flu_rate&quot;, 0) or 0)
+return self.config.entry_flu_min &lt;= flu &lt;= self.config.entry_flu_max
+</code></pre>
+<ul>
+<li>상한 27%로 <strong>이미 +30% 락 추격을 차단</strong>(<code>:44</code>). 하한 20%로 상한가 근접 모멘텀만 (<code>:43</code>).</li>
+</ul>
+<h3 id="3-2-_passes_orderbook_wall-limit_up_chase_traderpy280-320">3-2. 호가 매수벽 (<code>_passes_orderbook_wall</code>, <code>limit_up_chase_trader.py:280-320</code>)</h3>
+<p>AND 2조건 (호가 미가용/실패 시 <strong>보수적 False</strong>, <code>:292-298</code>):
+- <strong>① 매수1호가 잔량금액</strong> <code>= 매수1가 × 매수1잔량 ≥ wall_min_top_value(1억원)</code> — 거래대금 기준(고가주 대응) (<code>:304-309</code>).
+- <strong>② top-N 매수/매도 잔량 비율</strong> <code>bq/aq ≥ wall_bid_ask_ratio(3.0)</code>, <code>wall_levels(3)</code> 단계. <strong>매도 잔량 전무 시 통과</strong>(상한가 락 임박) (<code>:310-320</code>).
+- ⚠️ <strong>회귀 주석</strong>: 옛 '상한가 근접' 게이트(<code>wall_near_pct</code>)는 밴드 진입(+20~27%)이 상한가가격(+29~30%)에 닿을 수 없어 <strong>모든 밴드 종목을 영구 탈락 → 상따 진입 0건</strong>을 유발해 제거됨(원익IPS 2026-06-12 사례, <code>:286-290</code>). 따라서 <code>wall_near_pct</code>/<code>wall_min_top_qty</code> 는 <strong>deprecated·미사용</strong>(<code>:46-48</code>).</p>
+<h2 id="4">4. 청산 로직</h2>
+<p><code>_run_exit_cycle()</code> 는 <strong>limit_up_chase 태그 포지션만</strong> 평가(<code>limit_up_chase_trader.py:175-178</code>). 종목별 우선순위(<code>:189-212</code>):</p>
+<ol>
+<li><strong>오버나잇 갭 부분익절</strong>: <code>_maybe_gap_partial(...)</code> 성사 시 이번 사이클 청산평가 스킵 (<code>:190</code>, <code>323-377</code>).</li>
+<li><strong>EOD 강제청산</strong>: <code>daily</code> 모드에서 <code>eod_close_time(15:15)</code> 이후면 <code>exit_now=True, "EOD청산(당일모드)"</code> — 상한가 락이라도 당일 정리 (<code>:193-194</code>, <code>257-269</code>). <code>overnight</code> 모드는 항상 False(<code>:259</code>).</li>
+<li><strong>트레일/하드손절</strong>: <code>_trail_hit</code>(부모) / <code>_hard_stop_hit</code>(<code>hard_stop_pct -4%</code>) (<code>:196-197</code>).</li>
+<li><strong>RUNNER</strong>: <code>_runner_triggered</code>(TP도달 | 상한가 | 시초갭) → <code>_runner_should_exit</code>(<code>supertrend_auto_trader.py:926-951</code>):</li>
+<li>상한가권이면 <strong>"상한가 홀딩"</strong>(되돌림 무시) (<code>supertrend_auto_trader.py:937-938</code>).</li>
+<li>진입가×(1+<code>runner_profit_lock_pct 2%</code>) floor 이탈 시 "러너 수익잠금" (<code>:940-942</code>).</li>
+<li>최고점 −<code>runner_giveback_pct 3%</code> 이탈 시 "추세이탈(고점되돌림)" (<code>:944-950</code>).</li>
+<li><strong>고정 익절 보완</strong>: runner 미트리거 + <code>take_profit_trail_only</code> 아닐 때만 <code>take_profit_pct(5%)</code> (<code>limit_up_chase_trader.py:204-207</code>).</li>
+</ol>
+<p>청산 실행: 전량 <code>place_sell(strategy_id="limit_up_chase")</code> → 포지션 remove → 진입가 대비 종가 하락 시 <code>_loss_locked</code> 등록 (재진입 차단) (<code>:215-231</code>).</p>
+<h3 id="4-1-_maybe_gap_partial-limit_up_chase_traderpy323-377">4-1. 익일 시가갭 부분익절 (<code>_maybe_gap_partial</code>, <code>limit_up_chase_trader.py:323-377</code>)</h3>
+<ul>
+<li>조건(전부): <code>runner_enabled</code> + <code>runner_gap_partial_ratio&gt;0</code>, 부분익절 미완료, 개장 후 <code>runner_gap_partial_window_bars(6봉=30분)</code> 이내, <strong>오버나잇 보유</strong>(진입일 &lt; 오늘, <code>:340-345</code>), 시가갭 ≥ <code>runner_gap_partial_min_pct(3%)</code>, 현재가 &gt; 진입가.</li>
+<li>동작: <code>held × ratio(0.5)</code> 매도 → 잔량 갱신 → <code>partial_tp_done=True</code> 마킹(멱등) (<code>:359-368</code>). place_sell 의 <code>strategy_id</code> 만 <code>limit_up_chase</code> 로 귀속(부모 로직과 동일, <code>:326-327</code>).</li>
+</ul>
+<h2 id="5">5. 파라미터 표</h2>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>dataclass default</th>
+<th>run_telegram_bot env default</th>
+<th>env 키</th>
+<th>인용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>entry_flu_min</td>
+<td>20.0</td>
+<td>20</td>
+<td>LIMIT_UP_ENTRY_FLU_MIN</td>
+<td>trader:43 / bot:726</td>
+</tr>
+<tr>
+<td>entry_flu_max</td>
+<td>27.0</td>
+<td>27</td>
+<td>LIMIT_UP_ENTRY_FLU_MAX</td>
+<td>trader:44 / bot:727</td>
+</tr>
+<tr>
+<td>wall_min_top_value</td>
+<td>100,000,000원</td>
+<td>100000000</td>
+<td>LIMIT_UP_WALL_MIN_TOP_VALUE</td>
+<td>trader:48 / bot:730</td>
+</tr>
+<tr>
+<td>wall_bid_ask_ratio</td>
+<td>3.0</td>
+<td>3.0</td>
+<td>LIMIT_UP_WALL_BID_ASK_RATIO</td>
+<td>trader:49 / bot:731</td>
+</tr>
+<tr>
+<td>wall_levels</td>
+<td>3</td>
+<td>(env 없음)</td>
+<td>—</td>
+<td>trader:50</td>
+</tr>
+<tr>
+<td>wall_near_pct / wall_min_top_qty</td>
+<td>1.0 / 50,000</td>
+<td>1.0 / 50000</td>
+<td>(deprecated·미사용)</td>
+<td>trader:46-47</td>
+</tr>
+<tr>
+<td>entry_start_time</td>
+<td>09:30(부모)</td>
+<td>09:05</td>
+<td>LIMIT_UP_ENTRY_START</td>
+<td>parent:75 / bot:723</td>
+</tr>
+<tr>
+<td>entry_end_time</td>
+<td>14:00</td>
+<td>14:00</td>
+<td>LIMIT_UP_ENTRY_END</td>
+<td>trader:52 / bot:724</td>
+</tr>
+<tr>
+<td>overnight_mode</td>
+<td>daily</td>
+<td>daily</td>
+<td>LIMIT_UP_OVERNIGHT_MODE</td>
+<td>trader:54 / bot:742</td>
+</tr>
+<tr>
+<td>eod_close_time</td>
+<td>15:15</td>
+<td>15:15</td>
+<td>LIMIT_UP_EOD_CLOSE</td>
+<td>trader:55 / bot:743</td>
+</tr>
+<tr>
+<td>max_positions</td>
+<td>10(부모)</td>
+<td>1</td>
+<td>LIMIT_UP_MAX_POS</td>
+<td>parent:54 / bot:715</td>
+</tr>
+<tr>
+<td>min_price</td>
+<td>1000(부모)</td>
+<td>2000</td>
+<td>LIMIT_UP_MIN_PRICE</td>
+<td>parent:61 / bot:716</td>
+</tr>
+<tr>
+<td>max_per_position_ratio</td>
+<td>—</td>
+<td>0.03</td>
+<td>LIMIT_UP_MAX_PER_POS_RATIO</td>
+<td>bot:717</td>
+</tr>
+<tr>
+<td>max_order_qty / value</td>
+<td>—</td>
+<td>5000 / 5,000,000</td>
+<td>LIMIT_UP_MAX_ORDER_QTY/VALUE</td>
+<td>bot:718-719</td>
+</tr>
+<tr>
+<td>interval_sec</td>
+<td>—</td>
+<td>90</td>
+<td>LIMIT_UP_INTERVAL_SEC</td>
+<td>bot:714</td>
+</tr>
+<tr>
+<td>hard_stop_pct</td>
+<td>—</td>
+<td>-4.0</td>
+<td>LIMIT_UP_HARD_STOP</td>
+<td>bot:733</td>
+</tr>
+<tr>
+<td>trail_atr_mult</td>
+<td>—</td>
+<td>2.0</td>
+<td>LIMIT_UP_TRAIL_ATR</td>
+<td>bot:734</td>
+</tr>
+<tr>
+<td>take_profit_pct</td>
+<td>—</td>
+<td>5.0</td>
+<td>LIMIT_UP_TAKE_PROFIT</td>
+<td>bot:735</td>
+</tr>
+<tr>
+<td>runner_limit_up_pct</td>
+<td>29.0(부모)</td>
+<td>29</td>
+<td>LIMIT_UP_RUNNER_LIMIT_UP</td>
+<td>parent:190 / bot:738</td>
+</tr>
+<tr>
+<td>runner_profit_lock_pct</td>
+<td>2.0(부모)</td>
+<td>2</td>
+<td>LIMIT_UP_RUNNER_LOCK</td>
+<td>parent:197 / bot:739</td>
+</tr>
+<tr>
+<td>runner_giveback_pct</td>
+<td>3.0(부모)</td>
+<td>3</td>
+<td>LIMIT_UP_RUNNER_GIVEBACK</td>
+<td>parent:194 / bot:740</td>
+</tr>
+<tr>
+<td>runner_gap_partial_ratio</td>
+<td>0.0(부모)</td>
+<td>0.5</td>
+<td>LIMIT_UP_GAP_PARTIAL</td>
+<td>parent:201 / bot:744</td>
+</tr>
+<tr>
+<td>runner_gap_partial_min_pct</td>
+<td>3.0(부모)</td>
+<td>3</td>
+<td>LIMIT_UP_GAP_PARTIAL_MIN</td>
+<td>parent:202 / bot:745</td>
+</tr>
+<tr>
+<td>runner_gap_partial_window_bars</td>
+<td>6(부모)</td>
+<td>6</td>
+<td>LIMIT_UP_GAP_PARTIAL_WINDOW</td>
+<td>parent:203 / bot:746</td>
+</tr>
+<tr>
+<td>daily_loss_limit_pct</td>
+<td>—</td>
+<td>-2.0</td>
+<td>LIMIT_UP_DAILY_LOSS_LIMIT</td>
+<td>bot:696</td>
+</tr>
+<tr>
+<td>daily_max_orders</td>
+<td>—</td>
+<td>6</td>
+<td>LIMIT_UP_MAX_ORDERS</td>
+<td>bot:697</td>
+</tr>
+<tr>
+<td>유니버스 picker min_flu_rate</td>
+<td>—</td>
+<td>15</td>
+<td>LIMIT_UP_MIN_FLU</td>
+<td>bot:705</td>
+</tr>
+<tr>
+<td>universe top_n</td>
+<td>—</td>
+<td>15</td>
+<td>LIMIT_UP_UNIVERSE_TOP</td>
+<td>bot:709</td>
+</tr>
+</tbody>
+</table>
+<p>비고: 트레이더 <code>__init__</code> 이 <code>runner_enabled = True</code> 를 <strong>강제 ON</strong>(<code>limit_up_chase_trader.py:64-65</code>) — 청산은 항상 RUNNER 기반.</p>
+<h2 id="6-signalscanner">6. 활성·운영 상태 (★SignalScanner 미등록 — 별도 트레이더 경로)</h2>
+<ul>
+<li><strong>SignalScanner 미등록(확정)</strong>: <code>_DEFAULT_ENABLED</code> 에는 <code>sf_zone/f_zone/gold_zone/swing_38=True</code>, <code>blue_line/crypto_breakout/closing_bet=False</code> 만 있고 <code>limit_up_chase</code> 키가 <strong>없다</strong> (<code>backend/core/scanner/signal_scanner.py:41-55</code>). 즉 단타 스캐너 파이프라인으로는 절대 진입하지 않는다.</li>
+<li><strong>전용 루프 배선(존재)</strong>: <code>run_telegram_bot.main()</code> 이 <code>_build_limit_up_chase_trader(notifier)</code> 를 호출하고, None 이 아니면 <code>asyncio.create_task(lu_trader.run_forever(), name="limit_up_chase")</code> 로 supertrend 루프와 <strong>병렬</strong> 가동(<code>run_telegram_bot.py:812-824</code>).</li>
+<li><strong>가동 게이트(default OFF)</strong>: <code>_build_limit_up_chase_trader</code> 첫 줄이 <code>if not _env_truthy("LIMIT_UP_CHASE_ENABLED"): return None</code> (<code>run_telegram_bot.py:684</code>). 또 <code>dry_run = LIMIT_UP_CHASE_DRYRUN 미설정 시 truthy</code>(즉 <strong>기본 dry_run</strong>, <code>:688</code>).</li>
+<li><strong>배포 템플릿상 비활성</strong>: <code>.env.example</code> 에 <code>LIMIT_UP_*</code> 활성 키가 <strong>하나도 없다</strong>(grep 결과 SUPERTREND 주석 1줄만, <code>.env.example:136</code>). 코드 grep 상 <code>LIMIT_UP_CHASE_ENABLED</code> 는 <code>run_telegram_bot.py</code> 3곳에서만 참조되고 설정 파일엔 부재.</li>
+<li><strong>강제청산 격리</strong>: <code>scripts/evaluate_holdings.py</code> 의 <code>--exclude-strategy</code> default = <code>"supertrend,limit_up_chase"</code> (<code>:346-347</code>) → 다른 평가/강제청산 경로가 상따 포지션을 건드리지 않고 <strong>자기 루프만이 관리</strong>. 테스트도 이 default 를 명시 검증(<code>test_limit_up_chase_trader.py:354-368</code>).</li>
+</ul>
+<p>→ <strong>판정: 🟡 별도경로</strong>. 배선은 완비됐으나 환경변수 미설정 시 객체 자체가 생성되지 않으므로(<code>return None</code>), <strong>운영 셸에서 <code>LIMIT_UP_CHASE_ENABLED</code> 가 truthy 인지 코드만으로는 확인 불가 = 미검증</strong>. 배포 템플릿(.env.example) 기준으로는 OFF 이며, 켜더라도 default dry_run 이라 실주문은 별도 <code>LIMIT_UP_CHASE_DRYRUN=0</code> 가 필요하다.</p>
+<h2 id="7">7. 비용·손익분기 + 상한가 갭/유동성 리스크</h2>
+<ul>
+<li><strong>왕복 비용 0.90%</strong>: <code>ROUND_TRIP_COST_RATE = COMMISSION_RATE*2 + TAX_RATE_SELL = 0.0035×2 + 0.0020 = 0.0090</code> (<code>backend/core/trading_costs.py:29-33</code>). 편도 0.35%·매도세 0.20% (<code>COMMISSION_PCT/TAX_PCT_ON_SELL</code>, <code>:36-37</code>).</li>
+<li>⚠️ <strong>주석 불일치(코드가 진실)</strong>: <code>trading_costs.py:32</code> 주석은 "트립 손익분기 기준선(≈0.55%)" 이라 적혀 있으나, 실제 계산값은 <strong>0.90%</strong>. 0.55% 는 옛 가정 잔재로 보이며 손익분기는 0.90% 로 봐야 한다(미검증 주석 vs 코드 — 코드 채택).</li>
+<li><strong>손익분기</strong>: 상따는 진입가 대비 최소 +0.90% 초과 상승해야 비용 차감 후 흑자. 실 슬리피지(상한가 직전 빠른 호가 변동)는 별도 — 코드상 명시 모델 없음(미검증).</li>
+<li><strong>상한가 갭 리스크</strong>: 진입 밴드(+20~27%)가 상한가 미달 시 익일 시가갭하락에 노출. 완화책 = <code>entry_end_time(14:00)</code> 장막판 차단(<code>:52</code>), <code>daily</code> 모드 EOD 강제청산(<code>:257-269</code>), <code>overnight</code> 모드 익일갭 부분익절(0.5 비율, <code>:323-377</code>).</li>
+<li><strong>유동성 리스크</strong>: 진입 게이트가 호가 매수벽(잔량금액 1억·매수/매도 3배)으로 매수세 우위를 요구하나, <strong>매도 잔량 전무 = 통과</strong>(<code>:314-315</code>) 설계라 상한가 락 직전 진입은 청산 유동성이 사라진 구간에서 매수하는 셈 — 락이 풀릴 때 급반락 위험. 호가 L2 백테스트 부재로 이 진입의 사전 검증이 불가(<code>:15</code>).</li>
+</ul>
+<h2 id="8">8. 백테스트·근거 / 한계·리스크</h2>
+<ul>
+<li><strong>백테스트 없음(구조적)</strong>: "호가 L2 이력이 없어 백테스트 불가 → 라이브 dry_run 검증 위주" (<code>limit_up_chase_trader.py:15</code>). 따라서 승률·기대값 같은 정량 근거가 <strong>부재</strong>(미검증).</li>
+<li><strong>검증 = 단위 테스트</strong>(<code>backend/tests/test_limit_up_chase_trader.py</code>): 네트워크 없이 가짜 협력자 주입으로 결정적 검증. 호가벽 6케이스, 모멘텀 밴드 in/out, 진입 통합(태깅), wall/momentum 거부, 상한가 판정 상속, 오버나잇 상한가 홀딩(미청산), 하드손절 청산, <strong>전략 격리(supertrend 포지션 미건드림)</strong>, 익일갭 부분익절 멱등, 시간 게이트, EOD 모드, evaluate_holdings exclude default — 총 ~18 테스트.</li>
+<li><strong>운영 이력(코드 주석 근거)</strong>: 2026-06-12 '상한가 근접' 게이트가 진입 0건 버그를 일으켜 제거(<code>limit_up_chase_trader.py:286-290</code>, commit <code>82b0fe5</code>). 06-11 호가 잔량 임계를 거래대금(원) 기준으로 전환(commit <code>a427428</code>). 06-10 최초 도입(<code>f61dcec</code>).</li>
+<li><strong>핵심 한계</strong>: ① 진입 게이트(호가) 사후검증 불가, ② 비용 주석(0.55%)과 실값(0.90%) 불일치, ③ 실가동 여부 운영 env 의존(코드 미확정), ④ 상한가 락 풀림 시 급반락 — RUNNER 의 수익잠금 floor(2%)·고점되돌림(3%)이 유일한 방어.</li>
+</ul>
+<h2 id="9">9. 관련 파일·테스트</h2>
+<ul>
+<li>메인: <code>backend/core/limit_up_chase_trader.py</code> (LimitUpChaseTrader / LimitUpChaseConfig)</li>
+<li>부모(청산 RUNNER 헬퍼): <code>backend/core/supertrend_auto_trader.py:895-951</code> (<code>_is_limit_up</code>, <code>_runner_triggered</code>, <code>_runner_should_exit</code>, <code>_maybe_gap_partial</code>)</li>
+<li>배선: <code>scripts/run_telegram_bot.py:678-757</code>(_build_limit_up_chase_trader), <code>:811-824</code>(루프 가동)</li>
+<li>비용: <code>backend/core/trading_costs.py:26-37</code></li>
+<li>격리: <code>scripts/evaluate_holdings.py:346-347</code> (exclude default)</li>
+<li>스캐너 미등록 근거: <code>backend/core/scanner/signal_scanner.py:41-55</code></li>
+<li>테스트: <code>backend/tests/test_limit_up_chase_trader.py</code></li>
+</ul>
+<hr />
+<p><em>진실원천 주석: 본 리포트의 모든 수치·동작은 origin/main(HEAD <code>013d54b</code>) 코드 인용(file:line) 기반이다. "현재 라이브 ON" 여부는 운영 셸의 <code>LIMIT_UP_CHASE_ENABLED</code>/<code>LIMIT_UP_CHASE_DRYRUN</code> 환경변수에 의존하며 코드만으로 단정 불가 → 미검증. <code>trading_costs.py:32</code> 의 "≈0.55%" 주석은 실 계산값 0.90%와 불일치하며 코드값을 채택했다.</em></p>
+</body>
+</html>

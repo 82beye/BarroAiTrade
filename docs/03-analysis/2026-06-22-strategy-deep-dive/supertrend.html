@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>supertrend</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<h1 id="barroaitrade-supertrend">BarroAiTrade 매매전략 심층 리포트 — supertrend (슈퍼트렌드)</h1>
+<blockquote>
+<p>생성: 2026-06-22 · 진실원천: 코드 인용(file:line) · origin/main 기준
+상태: 🟡 opt-in (--supertrend, standalone 경로) · 분류: 추세추종(ATR supertrend) · 컨셉: TradingView Pine "Supertrend"의 5분봉 결정적 이식 — ATR 밴드 추세전환을 진입(BUY 전환)·청산(SELL 전환)의 대칭 이벤트로 매매</p>
+</blockquote>
+<h2 id="1-tldr">1. 요약 (TL;DR)</h2>
+<ul>
+<li><strong>무엇</strong>: TradingView Pine Script "Supertrend"를 결정적으로 이식한 5분봉 추세추종 전략. <code>src=hl2</code>, <code>ATR(10) RMA(Wilder)</code>, <code>multiplier 3.0</code> 기본값(Pine 원본 충실 이식, <code>supertrend.py:1-18</code>, <code>:211-213</code>).</li>
+<li><strong>진입</strong>: 추세 전환(trend −1→+1) <strong>BUY 시그널</strong> + 현재 상승추세(trend==1) + 최근 <code>entry_lookback(=2)</code>봉 내 전환 (<code>supertrend.py:311-318</code>). 횡보 휩쏘 방어로 ADX·FLIP·(opt-in) HTF RSI 게이트.</li>
+<li><strong>청산</strong>: 다른 단타 전략과 <strong>근본적으로 다른 메커니즘</strong>. 가격 TP/SL(ExitEngine)이나 브로커 PnL(HoldingEvaluator)이 아니라, <strong>전용 <code>SupertrendExitWatcher</code></strong> 가 SELL 전환(trend +1→−1) 이벤트를 보고 청산 시그널을 낸다(<code>supertrend_exit_watcher.py</code>). standalone 트레이더에서는 추가로 ATR 트레일·하드손절·익절·러너·이월갭스탑이 가격기반 OR로 동작(<code>supertrend_auto_trader.py:325-347</code>).</li>
+<li><strong>아키텍처</strong>: SignalScanner의 <code>_DEFAULT_ENABLED</code>에 <strong>없다</strong>(<code>signal_scanner.py:41-55</code>). <code>SupertrendScanner</code>(진입) + <code>SupertrendExitWatcher</code>(청산) + <code>SupertrendAutoTrader</code>(자동매매)의 별도 경로로만 동작하며, intraday 데몬에서 <code>--supertrend</code> opt-in 플래그로만 가동된다(<code>intraday_buy_daemon.py:1709-1713</code>).</li>
+<li><strong>상태</strong>: 코드 주석 기준 <strong>약전략(weak strategy)</strong>. out-of-sample 기대값이 여전히 음수라고 명시(<code>supertrend_auto_trader.py:81-82</code>). 이 때문에 SignalScanner <code>STRATEGY_PRIORITY</code>에서 supertrend=5(거의 최하위)로 비중을 억제(<code>signal_scanner.py:59-62</code>) + DCA(물타기) 제외(<code>intraday_buy_daemon.py:634</code>).</li>
+</ul>
+<h2 id="2-supertrend">2. 전략 개요 (supertrend 지표·추세추종 컨셉)</h2>
+<p><code>compute_supertrend</code>(<code>supertrend.py:143-205</code>)가 핵심 순수함수다. Pine 원본 충실 이식:</p>
+<ul>
+<li><code>src = hl2 = (high+low)/2</code> (<code>_src_series</code>, <code>:86-92</code>).</li>
+<li><code>ATR(period)</code> 는 <code>_rma</code>(Wilder RMA, seed=첫 period개 SMA)로 평활(<code>:51-67</code>, <code>:166</code>). 초기 nan 구간은 0.0으로 안정화(<code>:168</code>).</li>
+<li>상승밴드 <code>up = src − mult·atr</code>, 직전 종가 <code>close[i−1] &gt; up1</code> 이면 <code>up = max(up, up1)</code>로 lock-up(<code>:175</code>, <code>:185</code>).</li>
+<li>하락밴드 <code>dn = src + mult·atr</code>, <code>close[i−1] &lt; dn1</code> 이면 <code>dn = min(dn, dn1)</code>로 lock-down(<code>:176</code>, <code>:186</code>).</li>
+<li>추세 전환: <code>prev==-1 and close[i] &gt; dn1 → trend=+1</code>(BUY), <code>prev==1 and close[i] &lt; up1 → trend=-1</code>(SELL) (<code>:188-194</code>).</li>
+<li><code>buy_signals[i]</code> = trend −1→+1 전환 봉, <code>sell_signals[i]</code> = trend +1→−1 전환 봉(<code>:198-202</code>). <code>supertrend</code> 라인 = trend==1이면 up밴드, 아니면 dn밴드(<code>:204</code>).</li>
+</ul>
+<p>보조 지표 <code>compute_adx</code>(Wilder ADX(14), <code>:95-140</code>)는 추세 강도(횡보 vs 추세) 측정용이며 진입 게이트에서 사용된다.</p>
+<p>종목 유니버스(스캔 대상)는 <strong>본 전략이 정하지 않는다</strong> — 별도 모듈(최근 7일 거래대금 선별)이 담당하고, 전략은 주어진 종목의 5분봉에 신호만 산출하는 signal-only 설계(<code>supertrend.py:14-15</code>, <code>supertrend_scanner.py:3-9</code>).</p>
+<h2 id="3-atrwhipsaw">3. 진입 로직 (밴드 전환·ATR·게이트·whipsaw 방어)  ← 코드 인용</h2>
+<p><code>SupertrendStrategy._analyze_v2</code>(<code>supertrend.py:288-408</code>):</p>
+<ol>
+<li><strong>최소 봉수</strong>: <code>len(candles) &lt; min_candles(=30)</code> 이면 None(<code>:291-292</code>).</li>
+<li><strong>변동성 필터(운영 override)</strong>: <code>min_atr_pct &gt; 0</code> 면 <code>atr_pct(candles, n=atr_n=14) &lt; min_atr_pct</code> 진입 거부(<code>:295-298</code>). 기본 0(비활성, <code>:228</code>).</li>
+<li><strong>진입 시간 게이트(운영 override)</strong>: <code>entry_time_cutoff</code> 이후 봉이면 거부(<code>:302-304</code>). 기본 None.</li>
+<li><strong>현재 상승추세 확인</strong>: <code>res.trend[-1] != 1</code> 이면 None — BUY 직후 추세 유지 안전판(<code>:311</code>).</li>
+<li><strong>진입 트리거(이벤트성)</strong>: <code>entry_lookback(=2)</code> 봉 내 BUY 시그널이 있어야 진입(<code>:315-318</code>). None이면 추세 지속 중 매봉 진입(스크리너 모드). "상승추세 동안 매 사이클 매수"가 아니라 "BUY 전환 이벤트 1회"로 청산과 대칭(<code>:216-219</code>).</li>
+</ol>
+<p><strong>횡보 휩쏘(whipsaw) 방어</strong> — 슈퍼트렌드는 횡보 박스권에서 BUY/SELL이 반복돼 비용만 소모하므로(주석: "차트 27~28일 구간", <code>:232-233</code>) 세 게이트가 있다(모두 기본 0=비활성, 기존 회귀 보존):</p>
+<ul>
+<li><strong>(1) ADX 게이트</strong> (<code>:322-328</code>): <code>min_adx &gt; 0</code> 면 <code>compute_adx(...)[-1] &lt; min_adx</code> 봉 거부. 통상 20~25 권장(<code>:235-237</code>).</li>
+<li><strong>(2) 전환 강도(밴드 이탈폭) 게이트</strong> (<code>:339-355</code>): BUY 전환 봉 종가가 "방금 돌파한 저항(전환 직전 봉 dn밴드)"을 <code>min_flip_atr_mult·ATR</code> 이상 넘어야 통과. 주석에 2026-06-01 정정 내역 명시 — 종전 <code>close − supertrend(현재 up밴드)</code> 측정은 BUY 전환 직후 up밴드가 ~3·ATR로 거의 무조건 통과해 게이트가 무력화됐던 버그를 <code>close − dn₁(직전 저항)</code> 기준으로 교정(<code>:333-338</code>, <code>:345-346</code>).</li>
+<li><strong>(3) 멀티 타임프레임 RSI 확인 게이트</strong> (<code>:359-369</code>): <code>rsi_enabled</code> 면 상위 TF(기본 10분=<code>rsi_timeframe_mult 2</code>) RSI 골든크로스(<code>signal_cross</code> 모드)가 5분봉 BUY를 '확인(AND)'해야 진입. RSI 단독 진입 없음(<code>:244-261</code>). 기본 OFF.</li>
+</ul>
+<p><strong>점수 산정</strong>(<code>:376-380</code>): <code>6.0 + min(dist_pct/0.02,1)·2.0 + min(atr_pct/0.02,1)·2.0</code> → 추세선 대비 종가 여유 + 변동성 가산으로 6~10점. EntrySignal <code>signal_type="supertrend"</code>, <code>strategy_id="supertrend_v1"</code>(<code>:283</code>, <code>:392</code>, <code>:398</code>).</p>
+<h2 id="4-supertrend_exit_watcher">4. 청산 로직 (★전용 supertrend_exit_watcher — 다른 전략과 다른 청산 메커니즘)</h2>
+<h3 id="4-1-exit_on_signal-supertrendpy410-480">4-1. 전략 단위 — <code>exit_on_signal</code> (<code>supertrend.py:410-480</code>)</h3>
+<p>진입(buySignal)의 정확한 거울상. Pine <code>sellSignal = trend == -1 and trend[1] == 1</code> 봉에서만 청산(<code>:416-420</code>).</p>
+<ul>
+<li>롱(현물) 포지션만 대상(<code>:432</code>).</li>
+<li><code>exit_lookback(=2)</code> 봉 내 SELL 시그널이 있어야 청산(<code>:439-441</code>). "하락추세 동안 매 사이클 청산"이 아니라 "SELL 전환 이벤트 1회"가 트리거(테스트 <code>test_supertrend_exit_watcher.py:84-92</code>가 stale SELL 미청산 검증).</li>
+<li><code>rsi_exit_enabled</code> 면 SELL을 RSI 데드크로스가 '확인(AND)'해야 청산(<code>:447-457</code>). 기본 OFF.</li>
+<li>ExitSignal <code>exit_type="reverse_signal"</code>(<code>:466</code>, <code>:471-480</code>).</li>
+</ul>
+<h3 id="4-2-supertrendexitwatcher-supertrend_exit_watcherpy">4-2. 전용 워처 — <code>SupertrendExitWatcher</code> (<code>supertrend_exit_watcher.py</code>)</h3>
+<p>★ <strong>다른 단타 4종(sf/f/gold/swing_38)과 가장 다른 점</strong>. 일반 전략은 가격 TP/SL(ExitEngine)·브로커 PnL(HoldingEvaluator)로 청산되지만, supertrend는 <strong>지표 기반 청산 트리거</strong>를 별도 모듈로 분리했다(<code>:1-15</code>).</p>
+<ul>
+<li>입력: 현재 보유 Position 리스트. <code>strategy_id</code>가 <code>supertrend</code> prefix인 포지션만 대상, 다른 전략엔 개입 안 함(<code>:32</code>, <code>:63-66</code>, <code>:73</code>).</li>
+<li>각 대상 종목 5분봉 재조회 → <code>strategy.exit_on_signal()</code> 호출(<code>:91-105</code>).</li>
+<li>signal-only — 실제 매도 주문은 상위 실행 레이어가 담당(<code>:14</code>).</li>
+<li>검증: <code>test_watcher_ignores_other_strategy_positions</code>는 f_zone/swing_38 포지션이면 <code>get_ohlcv</code> 호출조차 안 함을 확인(<code>test_supertrend_exit_watcher.py:160-169</code>).</li>
+</ul>
+<p><strong>중요(혼동 금지)</strong>: <code>holding_evaluator.py</code>는 supertrend를 <strong>전혀 참조하지 않는다</strong>(grep 결과 0건). <code>STRATEGY_EXIT_PROFILES</code>(<code>holding_evaluator.py:104</code>)에 supertrend 키가 없다. supertrend 청산은 위 전용 경로가 책임진다.</p>
+<h3 id="4-3-standalone-supertrend_auto_traderpy309-393">4-3. standalone 자동매매 청산 (<code>supertrend_auto_trader.py:309-393</code>)</h3>
+<p><code>SupertrendAutoTrader.run_cycle</code>은 청산을 먼저 평가한다(<code>:282-283</code>). SELL 전환 외에 <strong>가격기반 리스크 청산이 OR로 우선</strong> 작동(진입 불변·청산개선 효과, 2026-06-08 손익귀속 분석 근거 <code>:110-118</code>):</p>
+<ul>
+<li><strong>ATR 트레일(샹들리에)</strong> <code>_trail_hit</code>: 진입 후 고점종가 − <code>trail_atr_mult(=3.0)</code>×ATR 이탈 시(<code>:328</code>, <code>:698-726</code>).</li>
+<li><strong>하드손절</strong> <code>_hard_stop_hit</code>: <code>hard_stop_pct(음수)</code> 이하 손실 시(<code>:330</code>, <code>:789-798</code>). 데몬 기본 −6.0%(<code>intraday_buy_daemon.py:1300</code>).</li>
+<li><strong>이월갭스탑</strong> <code>_carry_gap_stop_hit</code>: 이월(오버나잇) 포지션이 전일종가 대비 <code>carry_gap_stop_pct(=-3.0)</code> 이하 시(<code>:332</code>, <code>:603-630</code>).</li>
+<li><strong>러너 모드</strong>(opt-in): 상한가/시초갭/TP도달 시 고정 익절 대신 최고점 추적 청산(<code>:336-341</code>, <code>:905-951</code>).</li>
+<li><strong>고정 익절</strong> <code>_take_profit_hit</code>: <code>take_profit_pct(=5.0)</code> 도달 시(<code>:343</code>, <code>:728-737</code>).</li>
+<li>위 가격기반이 잡지 않으면 <strong>ST SELL 전환</strong>(기준·필수, <code>:350-351</code>).</li>
+</ul>
+<h2 id="5-atr-period-multiplier">5. 파라미터 표 (ATR period, multiplier 등)</h2>
+<p>전략 파라미터 <code>SupertrendParams</code>(<code>supertrend.py:209-277</code>):</p>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>기본값</th>
+<th>의미</th>
+<th>인용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>atr_period</code></td>
+<td>10</td>
+<td>Pine ATR Period</td>
+<td><code>:211</code></td>
+</tr>
+<tr>
+<td><code>multiplier</code></td>
+<td>3.0</td>
+<td>Pine Multiplier</td>
+<td><code>:212</code></td>
+</tr>
+<tr>
+<td><code>source</code></td>
+<td>"hl2"</td>
+<td>밴드 중심선</td>
+<td><code>:213</code></td>
+</tr>
+<tr>
+<td><code>min_candles</code></td>
+<td>30</td>
+<td>ATR 안정화 최소 봉수</td>
+<td><code>:214</code></td>
+</tr>
+<tr>
+<td><code>entry_lookback</code></td>
+<td>2</td>
+<td>BUY 전환 확인창(봉)</td>
+<td><code>:220</code></td>
+</tr>
+<tr>
+<td><code>exit_lookback</code></td>
+<td>2</td>
+<td>SELL 전환 확인창(봉)</td>
+<td><code>:225</code></td>
+</tr>
+<tr>
+<td><code>min_atr_pct</code></td>
+<td>0.0 (비활성)</td>
+<td>변동성 필터</td>
+<td><code>:228</code></td>
+</tr>
+<tr>
+<td><code>atr_n</code></td>
+<td>14</td>
+<td>atr_pct 산정 기간</td>
+<td><code>:229</code></td>
+</tr>
+<tr>
+<td><code>min_adx</code></td>
+<td>0.0 (비활성)</td>
+<td>ADX 횡보 게이트</td>
+<td><code>:237</code></td>
+</tr>
+<tr>
+<td><code>adx_period</code></td>
+<td>14</td>
+<td>ADX 기간</td>
+<td><code>:238</code></td>
+</tr>
+<tr>
+<td><code>min_flip_atr_mult</code></td>
+<td>0.0 (비활성)</td>
+<td>전환 이탈폭 게이트</td>
+<td><code>:242</code></td>
+</tr>
+<tr>
+<td><code>rsi_enabled</code></td>
+<td>False</td>
+<td>HTF RSI 확인 마스터</td>
+<td><code>:253</code></td>
+</tr>
+<tr>
+<td><code>rsi_timeframe_mult</code></td>
+<td>2 (=10분)</td>
+<td>상위 TF 배수</td>
+<td><code>:254</code></td>
+</tr>
+<tr>
+<td><code>rsi_period</code> / <code>rsi_signal_period</code></td>
+<td>14 / 9</td>
+<td>RSI·시그널선</td>
+<td><code>:255-256</code></td>
+</tr>
+<tr>
+<td><code>rsi_mode</code></td>
+<td>"signal_cross"</td>
+<td>교합 모드</td>
+<td><code>:257</code></td>
+</tr>
+<tr>
+<td><code>trail_atr_mult</code></td>
+<td>0.0 (전략 default 비활성)</td>
+<td>ATR 트레일</td>
+<td><code>:267</code></td>
+</tr>
+<tr>
+<td><code>sl_min_pct</code> / <code>sl_max_pct</code></td>
+<td>−0.01 / −0.08</td>
+<td>exit_plan SL clamp</td>
+<td><code>:273-274</code></td>
+</tr>
+<tr>
+<td><code>time_exit</code></td>
+<td>None</td>
+<td>장마감 강제청산(비활성)</td>
+<td><code>:277</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>standalone 운영 기본값</strong>(<code>SupertrendAutoConfig</code>, <code>supertrend_auto_trader.py:47-216</code>)은 전략 default와 다르게 휩쏘 게이트가 <strong>ON</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>운영 파라미터</th>
+<th>기본값</th>
+<th>인용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>max_positions</code></td>
+<td>10</td>
+<td><code>:54</code></td>
+</tr>
+<tr>
+<td><code>min_price</code></td>
+<td>1000원 (저가주 제외)</td>
+<td><code>:61</code></td>
+</tr>
+<tr>
+<td><code>market_hours_only</code></td>
+<td>True (정규장만)</td>
+<td><code>:69</code></td>
+</tr>
+<tr>
+<td><code>entry_start_time</code></td>
+<td>"09:30" (장초반 진입 차단)</td>
+<td><code>:75</code></td>
+</tr>
+<tr>
+<td><code>min_adx</code></td>
+<td><strong>30.0</strong> (BAR-OPS-33)</td>
+<td><code>:83</code></td>
+</tr>
+<tr>
+<td><code>min_flip_atr_mult</code></td>
+<td><strong>1.5</strong></td>
+<td><code>:85</code></td>
+</tr>
+<tr>
+<td><code>trail_atr_mult</code></td>
+<td><strong>3.0</strong></td>
+<td><code>:118</code></td>
+</tr>
+<tr>
+<td><code>take_profit_pct</code></td>
+<td><strong>5.0</strong></td>
+<td><code>:122</code></td>
+</tr>
+<tr>
+<td><code>max_intraday_range_pos</code></td>
+<td>0.90</td>
+<td><code>:130</code></td>
+</tr>
+<tr>
+<td><code>single_tranche</code></td>
+<td>True (sync-loss 방지)</td>
+<td><code>:166</code></td>
+</tr>
+<tr>
+<td><code>entry_cutoff_time</code></td>
+<td>"14:30"</td>
+<td><code>:211</code></td>
+</tr>
+<tr>
+<td><code>carry_gap_stop_pct</code></td>
+<td>−3.0</td>
+<td><code>:215</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>⚠️ 미검증: 데몬 <code>_get_supertrend_trader</code>(<code>intraday_buy_daemon.py:1280-1327</code>)는 <code>SupertrendAutoConfig</code>만 구성하고 내부 <code>config.params</code>(SupertrendParams)는 <strong>override하지 않는다</strong> → atr_period=10, multiplier=3.0, entry/exit_lookback=2는 default 그대로 사용. 휩쏘 게이트는 <code>SupertrendParams</code>(전략 경로)가 아니라 <code>SupertrendAutoConfig._whipsaw_pass</code>(<code>:632-696</code>)가 적용한다(이중 정의 — 혼동 주의).</p>
+</blockquote>
+<h2 id="6-standalone-supertrend-opt-in-dca">6. 활성·운영 상태 (★standalone 아키텍처 / --supertrend opt-in / DCA 제외)</h2>
+<h3 id="6-1-signalscanner-vs-standalone">6-1. SignalScanner 경로 vs standalone 경로 (★혼동 금지)</h3>
+<p>다른 단타 4종(sf_zone/f_zone/gold_zone/swing_38)은 <strong>SignalScanner 1분봉 경로</strong>에서 <code>_DEFAULT_ENABLED=True</code>로 매매된다(<code>signal_scanner.py:41-55</code>). supertrend는 이 dict에 <strong>키 자체가 없다</strong> — SignalScanner는 supertrend를 스캔하지 않는다.</p>
+<p>supertrend의 동작 경로는 완전히 분리되어 있다(설계 이유: SignalScanner는 1분봉, supertrend는 5분봉 → timeframe 충돌 회피, <code>supertrend_scanner.py:6-9</code>):</p>
+<ul>
+<li><code>SupertrendScanner</code>(진입 신호, <code>supertrend_scanner.py</code>)</li>
+<li><code>SupertrendExitWatcher</code>(청산 신호, <code>supertrend_exit_watcher.py</code>)</li>
+<li><code>SupertrendAutoTrader</code>(자동 진입+청산 루프, <code>supertrend_auto_trader.py</code>) — intraday 데몬이 실제 운영에 쓰는 경로</li>
+</ul>
+<p><code>STRATEGY_PRIORITY</code>에 supertrend=5가 있는 것(<code>signal_scanner.py:61</code>)은 <strong>슬롯/자본 경합 시 점수 동률 tiebreaker</strong>용 정의일 뿐, SignalScanner가 supertrend를 발행한다는 의미가 아니다. 거의 최하위(blue_line 6, crypto 7, closing_bet 8만 아래)로 둬 비중을 억제한다(약전략 처방, <code>supertrend_auto_trader.py:81-82</code>).</p>
+<h3 id="6-2-supertrend-opt-in-intraday_buy_daemonpy">6-2. --supertrend opt-in 배선 (<code>intraday_buy_daemon.py</code>)</h3>
+<ul>
+<li>플래그: <code>--supertrend</code>(action store_true, 기본 OFF), <code>--supertrend-top(=10)</code>, <code>--supertrend-max-pos(=10)</code>, <code>--supertrend-interval(=300s)</code>(<code>:1709-1723</code>).</li>
+<li>가동 시각: <code>--supertrend</code> 활성 시 데몬 개시를 <code>SUPERTREND_OPEN=09:00</code>으로 앞당김(일반 전략은 <code>MARKET_OPEN=09:05</code>)(<code>:58</code>, <code>:64</code>, <code>:1586</code>).</li>
+<li>사이클 순서: ①매도 평가 → ②일반 전략 매수 → ③supertrend 사이클(<code>:1617-1648</code>). 5분봉이므로 <code>supertrend_interval(300s)</code>마다 throttle(429 회피, <code>:1596-1640</code>).</li>
+<li><strong>이중 주문 방지</strong>: <code>run_telegram_bot</code>의 <code>SupertrendAutoTrader</code>가 담당 중(<code>SUPERTREND_AUTO_ENABLED</code> truthy)이면 데몬 <code>--supertrend</code>를 강제 OFF(<code>_supertrend_yield_to_bot</code>, <code>:101-109</code>, <code>:1736-1740</code>).</li>
+<li>단독 운영: <code>--strategies '' --supertrend</code>로 일반 전략 끄고 슈퍼트렌드만 운영 가능(<code>:1730</code>).</li>
+</ul>
+<h3 id="6-3-dca">6-3. DCA(물타기) 제외</h3>
+<p><code>_NO_DCA_STRATEGIES = {"swing_38", "supertrend"}</code>(<code>intraday_buy_daemon.py:634</code>). 트레이더가 전량 단일주문 진입인데 장부가 60/40 트랜치로 기록돼, 데몬 DCA가 가짜 tranche2를 실주문으로 추가 발사한 사고(6/10 319660: 장부 23 vs 실보유 32주 = 권고의 139%)를 막기 위한 방어선(<code>:630-634</code>). 1차 처방은 <code>single_tranche=True</code>(<code>supertrend_auto_trader.py:164-166</code>).</p>
+<h2 id="7-whipsaw-vs">7. 비용·손익분기 관점 (whipsaw 빈도 vs 비용)</h2>
+<ul>
+<li>거래비용(공통 사실): 편도 0.35% / 매도세 0.20% / 왕복 0.90%. (※ supertrend 코드 내 비용 상수 인용은 없음 — 미검증, 외부 공통 가정.)</li>
+<li>supertrend의 구조적 약점은 <strong>횡보 휩쏘</strong>다. 코드 주석 자체가 "횡보 박스권에서 BUY/SELL이 반복돼 비용만 소모"라고 명시(<code>supertrend.py:232-233</code>). 왕복 0.90% 비용을 감안하면 박스권 가짜 전환의 반복은 직접적 손실원이다.</li>
+<li>처방: ADX≥30 + FLIP≥1.5 게이트로 거짓 전환을 차단. 코드 주석의 sweep 근거(BAR-OPS-33, 4~6월): "adx≥30·flip≥1.5 시 거래 125→30건, MDD −41→−22, 전체 기대값 −0.08→+0.20"(<code>supertrend_auto_trader.py:78-83</code>). 거래 빈도를 1/4로 줄여 휩쏘·비용 드래그를 최소화하는 방향.</li>
+</ul>
+<h2 id="8-oos-whipsaw">8. 백테스트·OOS 근거 / 한계·리스크 (whipsaw)</h2>
+<p>코드 주석에 기록된 백테스트/복기 수치(별도 백테스트 산출물 파일은 미발견 — 주석 인용에 한함):</p>
+<ul>
+<li>BAR-OPS-33 sweep: adx≥30·flip≥1.5 → 거래 125→30, MDD −41→−22, 기대값 −0.08→+0.20. <strong>단 out-of-sample은 여전히 음수</strong> → "약전략"으로 명시(<code>supertrend_auto_trader.py:80-83</code>).</li>
+<li>휩쏘 백테스트(전략 주석): ADX≥25/FLIP≥1.0이 PF 1.76→2.00, 승률 35→44%(<code>:78-79</code>).</li>
+<li>2026-06-08 손익귀속(<code>:110-118</code>): 패배거래 평균 MFE +2.5~3.9%(수익 거쳤다 손실 청산)·청산후 +2.8% 반등(저점매도) → 손실 1차 원인이 "청산 지연". 트레일3.0+익절5%+고점위치≤90% 진입 시 22일 −3.27%→+2.73%.</li>
+<li>트레일 단독: 22일 −3.27%→+0.93% 흑자전환(<code>:117-118</code>).</li>
+<li>ATR 트레일 백테스트 권장 4.0: 최악손실 −25%→−11.5% 캡(단 총수익 일부 희생)(<code>supertrend.py:265-266</code>).</li>
+</ul>
+<p><strong>한계·리스크</strong>:
+1. 횡보 휩쏘(구조적) — 비용 드래그.
+2. OOS 기대값 음수 — priority 최하위 + DCA 제외 + 비중 억제로 관리(처방이지 해결 아님).
+3. 청산 지연(SELL 전환 지각) — 가격기반 트레일/하드손절/익절 OR로 보완.
+4. 이월(오버나잇) 갭하락 — 6/9 막판 진입 5종이 6/10 갭하락 −845K(6/9 +1,585K의 37% 반납), entry_cutoff 14:30 + carry_gap_stop −3% 처방(<code>supertrend_auto_trader.py:205-215</code>).
+5. 저가주/고변동주 수량 폭주 — min_price 1000원 + max_order_qty/value 하드캡(6/2 252670 38,219주 RuntimeError, <code>:87-90</code>, <code>:739-756</code>).</p>
+<h2 id="9">9. 관련 파일·테스트</h2>
+<ul>
+<li>메인 전략: <code>backend/core/strategy/supertrend.py</code> (522줄, <code>compute_supertrend</code>/<code>compute_adx</code>/<code>SupertrendStrategy</code>/<code>SupertrendParams</code>)</li>
+<li>standalone 자동 트레이더: <code>backend/core/supertrend_auto_trader.py</code> (1065줄, <code>SupertrendAutoTrader</code>/<code>SupertrendAutoConfig</code>)</li>
+<li>진입 스캐너: <code>backend/core/scanner/supertrend_scanner.py</code></li>
+<li>전용 청산 워처: <code>backend/core/scanner/supertrend_exit_watcher.py</code></li>
+<li>데몬 배선: <code>scripts/intraday_buy_daemon.py</code> (<code>--supertrend</code> 플래그 <code>:1709-1723</code>, <code>_get_supertrend_trader</code> <code>:1280-1327</code>, <code>_run_supertrend_cycle</code> <code>:1331+</code>, <code>_NO_DCA_STRATEGIES</code> <code>:634</code>)</li>
+<li>SignalScanner(미등록 확인): <code>backend/core/scanner/signal_scanner.py</code> (<code>_DEFAULT_ENABLED</code> <code>:41-55</code>, <code>STRATEGY_PRIORITY</code> <code>:59-62</code>)</li>
+<li>HoldingEvaluator(미참조 확인): <code>backend/core/risk/holding_evaluator.py</code> (supertrend 0건)</li>
+<li>테스트:</li>
+<li><code>backend/tests/scanner/test_supertrend_exit_watcher.py</code> (청산 워처·exit_on_signal 14케이스 — SELL 전환 청산, stale SELL 미청산, 타 전략 무개입)</li>
+<li><code>backend/tests/strategy/test_supertrend_whipsaw.py</code> (ADX·FLIP 게이트 — 횡보 거부/추세 통과)</li>
+</ul>
+<hr />
+<p><em>진실원천 주석</em>: 본 리포트의 모든 수치·로직은 origin/main(<code>013d54b</code>) 기준 코드 인용(file:line)으로 검증. 거래비용(0.35/0.20/0.90%)은 외부 공통 가정으로 코드 상수 인용 없음(미검증). 별도 백테스트 산출물 파일은 발견되지 않았으며, 백테스트/OOS 수치는 전부 코드 주석(BAR-OPS-33/BAR-OPS-10/2026-06-08~10 복기)에 기록된 내용을 인용한 것이다. SupertrendParams의 휩쏘 게이트 기본값(min_adx=0 등)과 SupertrendAutoConfig 운영 기본값(min_adx=30 등)이 다르며, 데몬은 후자만 구성하고 전자(config.params)는 override하지 않음을 확인.</p>
+</body>
+</html>

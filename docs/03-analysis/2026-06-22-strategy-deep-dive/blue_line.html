@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>blue_line</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<h1 id="barroaitrade-blue_line">BarroAiTrade 매매전략 심층 리포트 — blue_line (블루라인)</h1>
+<blockquote>
+<p>생성: 2026-06-22 · 진실원천: 코드 인용(file:line) · origin/main 기준
+상태: ⚪ 구현됨·비활성 (default OFF) · 분류: 1분봉 단타(이평 돌파) · 컨셉: 5EMA(블루라인)×20EMA 골든크로스 + 거래량 급증 추세추종</p>
+</blockquote>
+<h2 id="1-tldr">1. 요약 (TL;DR)</h2>
+<ul>
+<li><strong>무엇</strong>: 단기 5EMA("블루라인")가 중기 20EMA를 상향 돌파(골든크로스)하거나, 가격이 블루라인 위에서 지지받고 재상승할 때 진입하는 1분봉 추세추종 단타. (<code>backend/core/strategy/blue_line.py:1-9</code>, <code>:46</code>)</li>
+<li><strong>진입 게이트</strong>: <code>(골든크로스 OR 블루라인 지지반등) AND 상승률 ≥ 0.5% AND 거래량 ≥ 평균×1.5</code> 의 AND 결합. 셋 중 하나라도 깨지면 미진입. (<code>blue_line.py:113</code>)</li>
+<li><strong>점수</strong>: 기본 6.0 + 상승률 보너스(0~2.0) + 거래량 보너스(0~2.0), 상한 10.0. (<code>blue_line.py:115</code>, <code>:122</code>)</li>
+<li><strong>청산</strong>: 전용 <code>exit_plan</code> override <strong>없음</strong> → base 기본값(SL=-2%, TP 없음) 사용. <code>STRATEGY_EXIT_PROFILES</code> 에 <code>blue_line</code> 항목 <strong>없음</strong> → 운영 적응형 매도는 default <code>ExitPolicy</code>(TP +5% / SL -4%) 로 fallback. (<code>base.py:71-76</code>, <code>holding_evaluator.py:104-170</code>, <code>:178-179</code>)</li>
+<li><strong>운영 상태</strong>: <code>blue_line=False</code> (⚪ 구현됨·비활성). 단타 전용 모드(sf/f/gold/swing_38)로 전환되며 "단타 전략 완성 후 재개" 보류. 안정성 priority 6/8 로 낮음. (<code>signal_scanner.py:41-55</code>, <code>:59-62</code>)</li>
+</ul>
+<hr />
+<h2 id="2">2. 전략 개요 (블루라인 = 이평선 돌파 컨셉)</h2>
+<p>모듈 docstring 이 컨셉을 명시한다 (<code>blue_line.py:1-9</code>):</p>
+<pre><code class="language-python">&quot;&quot;&quot;
+블루라인 전략 (Blue Line Strategy)
+
+원리:
+  단기 이동평균선(5일 EMA) + 중기 이동평균선(20일 EMA)이 골든크로스되고
+  거래량이 증가할 때 진입하는 추세 추종 전략.
+
+  &quot;블루라인&quot; = 5일 EMA. 주가가 블루라인 위에서 지지받고 재상승할 때 매수.
+&quot;&quot;&quot;
+</code></pre>
+<ul>
+<li><strong>블루라인 = 5EMA</strong>, 중기선 = 20EMA. (<code>blue_line.py:29-30</code>, <code>:91-92</code>)</li>
+<li>두 가지 트리거를 OR 로 묶는다: ① <strong>골든크로스</strong>(5EMA가 20EMA를 막 상향 돌파), ② <strong>블루라인 지지 반등</strong>(저가가 5EMA에 근접했으나 종가는 5EMA 위 마감). (<code>blue_line.py:99-108</code>, <code>:114</code>)</li>
+<li>docstring 은 "5일 EMA / 20일 EMA"라 적지만 운영 dispatch 는 <strong>1분봉</strong>(<code>timeframe="1m"</code>) 으로 호출되므로, 실제로는 "최근 5봉/20봉 지수이평"이다(일·분봉 무관 동일 공식). (<code>signal_scanner.py:87</code>, <code>:163</code>, <code>:169-176</code>)</li>
+<li>지표는 외부 헬퍼가 아닌 <strong>pandas <code>ewm(span=…, adjust=False)</code></strong> 로 EMA를 직접 계산. 변동성 필터용으로만 공통 <code>indicators.atr_pct</code> 를 wrapper 로 호출. (<code>blue_line.py:91-92</code>, <code>:147-151</code>, <code>indicators.py:21-51</code>)</li>
+</ul>
+<hr />
+<h2 id="3">3. 진입 로직 (조건·점수·게이트) ← 코드 인용 필수</h2>
+<p>진입 본체는 <code>_analyze_impl</code> (<code>blue_line.py:58-134</code>). 순서대로:</p>
+<p><strong>0) 데이터 길이 게이트</strong> — <code>len(candles) &lt; min_candles(=60)</code> 이면 즉시 <code>None</code>. (<code>blue_line.py:66-67</code>, <code>:33</code>)</p>
+<p><strong>1) 변동성 필터 (default OFF)</strong> — <code>min_atr_pct &gt; 0</code> 일 때만 동작. ATR% &lt; 임계면 거부. default <code>min_atr_pct=0.0</code>(비활성) → 기존 회귀 보존. 운영 적용은 SignalScanner 명시 override(<code>BlueLineParams(min_atr_pct=0.035)</code>). (<code>blue_line.py:35-37</code>, <code>:70-77</code>)</p>
+<p><strong>2) 진입 시간 게이트 (default OFF)</strong> — <code>entry_time_cutoff</code> 가 None 이 아니고 마지막 candle 시각 ≥ cutoff 면 거부(장 후반 진입 손실 차단, Phase 8f). default None → 비활성. 운영은 <code>dtime(14, 0)</code> override 권장. (<code>blue_line.py:40-43</code>, <code>:79-87</code>)</p>
+<p><strong>3) 지표 산출</strong> (<code>blue_line.py:89-96</code>):</p>
+<pre><code class="language-python">ema_short = df[&quot;close&quot;].ewm(span=p.short_period, adjust=False).mean()   # 5EMA
+ema_long  = df[&quot;close&quot;].ewm(span=p.long_period,  adjust=False).mean()   # 20EMA
+avg_volume = df[&quot;volume&quot;].mean()
+current = df.iloc[-1]; prev = df.iloc[-2]
+</code></pre>
+<blockquote>
+<p>주의: <code>avg_volume</code> 은 <code>df["volume"].mean()</code> — <strong>전체 candle 구간(최대 candle_limit=120봉) 평균</strong>이다. <code>prev</code> 변수는 산출되나 진입 조건에서 직접 쓰이지 않는다. (<code>blue_line.py:93</code>, <code>:96</code>, <code>signal_scanner.py:88</code>)</p>
+</blockquote>
+<p><strong>4) 트리거 A — 골든크로스</strong> (<code>blue_line.py:99-102</code>):</p>
+<pre><code class="language-python">golden_cross = (
+    ema_short.iloc[-2] &lt;= ema_long.iloc[-2]      # 전봉: 5EMA ≤ 20EMA (데드)
+    and ema_short.iloc[-1] &gt; ema_long.iloc[-1]   # 현봉: 5EMA &gt; 20EMA (골든)
+)
+</code></pre>
+<p><strong>4) 트리거 B — 블루라인 지지 반등</strong> (<code>blue_line.py:104-108</code>):</p>
+<pre><code class="language-python">on_blue_line = (
+    current[&quot;low&quot;] &lt;= ema_short.iloc[-1] * 1.005   # 저가가 5EMA의 +0.5% 이내로 근접
+    and current[&quot;close&quot;] &gt; ema_short.iloc[-1]       # 종가는 5EMA 위 마감
+)
+</code></pre>
+<p><strong>5) 보조 게이트 — 상승률·거래량</strong> (<code>blue_line.py:110-111</code>):</p>
+<pre><code class="language-python">gain_pct  = (current[&quot;close&quot;] - current[&quot;open&quot;]) / current[&quot;open&quot;]   # 당봉 시가→종가 상승률
+volume_ok = current[&quot;volume&quot;] &gt;= avg_volume * p.volume_ratio          # 거래량 ≥ 평균×1.5
+</code></pre>
+<p><strong>6) 최종 진입 판정 (AND 결합)</strong> (<code>blue_line.py:113</code>):</p>
+<pre><code class="language-python">if (golden_cross or on_blue_line) and gain_pct &gt;= p.min_gain_pct and volume_ok:
+</code></pre>
+<p>즉 <strong>(트리거 A OR B) AND 상승률 ≥ 0.5% AND 거래량 1.5x</strong> 를 모두 만족해야 진입.</p>
+<p><strong>7) 점수 산정</strong> (<code>blue_line.py:115</code>, <code>:122</code>):</p>
+<pre><code class="language-python">score = 6.0 + min(gain_pct/0.03, 1.0)*2.0 + min(current[&quot;volume&quot;]/(avg_volume*1.5), 1.0)*2.0
+# 최종: round(min(score, 10.0), 2)
+</code></pre>
+<ul>
+<li>베이스 6.0. 상승률 3%에서 만점(+2.0), 거래량이 (평균×1.5)에 도달하면 만점(+2.0).</li>
+<li><strong>최소 점수 ≈ 6.0</strong>(게이트 통과 시점에 gain≥0.5%·vol≥1.5x 이므로 보너스가 0은 아님), <strong>상한 10.0</strong>.</li>
+<li>점수 임계 컷(예: score≥7.0)은 본 전략 코드에 <strong>없음</strong> — 게이트 통과 즉시 시그널 발행. 슬롯 경합 시 SignalScanner 가 점수·priority 로 정렬. (<code>signal_scanner.py:136-137</code>)</li>
+</ul>
+<p><strong>8) 시그널 산출</strong> — <code>EntrySignal(signal_type="blue_line", strategy_id="blue_line_v1", price=종가, metadata={ema_short, ema_long, volume_ratio, trigger})</code>. trigger 는 골든크로스 우선 라벨링. (<code>blue_line.py:113-133</code>, <code>:49</code>, <code>:121</code>, <code>:125</code>)</p>
+<p>진입점은 v2 <code>_analyze_v2(ctx)</code> → <code>_analyze_impl(...)</code>. SignalScanner 는 base <code>Strategy.analyze(symbol, name, candles, market_type)</code> legacy 시그니처로 호출(DeprecationWarning 경유 변환). (<code>blue_line.py:54-56</code>, <code>base.py:42-62</code>, <code>signal_scanner.py:176</code>)</p>
+<hr />
+<h2 id="4-profile">4. 청산 로직 (전용 profile 유무 명시)</h2>
+<p><strong>전용 청산 로직이 두 계층 모두에 없다 — 둘 다 fallback 사용.</strong></p>
+<p><strong>(a) ExitEngine 계층 (Strategy.exit_plan, 분봉 close 기반)</strong>
+- <code>BlueLineStrategy</code> 는 <code>exit_plan</code> / <code>exit_on_signal</code> 를 <strong>override 하지 않는다</strong> (<code>blue_line.py</code> 전체에 정의 없음 — <code>def exit_plan</code> 은 base.py·f_zone.py 에만 존재).
+- 따라서 base 기본값 사용: <strong>TP 없음(<code>take_profits=[]</code>), SL = 고정 -2%</strong> (<code>base.py:71-76</code>):</p>
+<pre><code class="language-python">def exit_plan(self, position, ctx) -&gt; ExitPlan:
+    return ExitPlan(take_profits=[], stop_loss=StopLoss(fixed_pct=Decimal(&quot;-0.02&quot;)))
+</code></pre>
+<p><strong>(b) HoldingEvaluator 계층 (broker pnl_rate 기반 적응형 2차 안전망)</strong>
+- <code>STRATEGY_EXIT_PROFILES</code> 에 <strong><code>blue_line</code> 키 없음</strong> (정의된 키: <code>f_zone</code>, <code>sf_zone</code>, <code>gold_zone</code>, <code>swing_38</code>, <code>closing_bet</code>). (<code>holding_evaluator.py:104-170</code>)
+- <code>resolve_policy()</code> 는 매칭 실패 시 base <code>ExitPolicy</code> 를 <strong>그대로 반환</strong> → blue_line 포지션은 default 정책 적용. (<code>holding_evaluator.py:177-179</code>)
+- 적용되는 default <code>ExitPolicy</code> (<code>holding_evaluator.py:56-66</code>):
+  - TP +5.0% / SL -4.0% / 트레일링 시작 +3.0%·offset 1.5% / 브레이크이븐 트리거 +2.5% / 분할익절 +3.5%(50%) / 보유 5일 후 SL -2.0% 강화.
+  - <code>min/max_hold_days = None</code> (intraday 회귀 보존 — 보유기간 게이트 미적용).
+- 단기고점(SHORT_TERM_HIGH)·국면적응·net-aware·distribution 청산은 모두 default-OFF 또는 ctx 주입 의존이라 blue_line 에 특별 적용 없음. (<code>holding_evaluator.py:313-346</code>, <code>:198-221</code>)</p>
+<blockquote>
+<p>정리: blue_line 은 1차 방어선 <strong>-2%(ExitEngine base)</strong>, 2차 안전망 <strong>-4% / TP+5%(HoldingEvaluator default)</strong> 로 청산된다. 다른 활성 단타(f/sf/gold)가 갖는 전략별 튜닝 profile 이 blue_line 엔 없다.</p>
+</blockquote>
+<hr />
+<h2 id="5">5. 파라미터 표</h2>
+<p><code>BlueLineParams</code> (<code>blue_line.py:27-43</code>). 비용·게이트 임계 모두 코드 default 인용.</p>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>default</th>
+<th>의미</th>
+<th>비고 (file:line)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>short_period</code></td>
+<td><code>5</code></td>
+<td>단기 EMA(블루라인) span</td>
+<td><code>blue_line.py:29</code></td>
+</tr>
+<tr>
+<td><code>long_period</code></td>
+<td><code>20</code></td>
+<td>중기 EMA span</td>
+<td><code>blue_line.py:30</code></td>
+</tr>
+<tr>
+<td><code>volume_ratio</code></td>
+<td><code>1.5</code></td>
+<td>거래량 배율 기준 (≥ 평균×1.5)</td>
+<td><code>blue_line.py:31</code></td>
+</tr>
+<tr>
+<td><code>min_gain_pct</code></td>
+<td><code>0.005</code></td>
+<td>당봉 최소 상승률 0.5%</td>
+<td><code>blue_line.py:32</code></td>
+</tr>
+<tr>
+<td><code>min_candles</code></td>
+<td><code>60</code></td>
+<td>최소 candle 수(미만이면 미분석)</td>
+<td><code>blue_line.py:33</code></td>
+</tr>
+<tr>
+<td><code>min_atr_pct</code></td>
+<td><code>0.0</code></td>
+<td>변동성 필터(0=비활성). 운영 override 0.035</td>
+<td><code>blue_line.py:37</code>, <code>:70</code></td>
+</tr>
+<tr>
+<td><code>atr_n</code></td>
+<td><code>14</code></td>
+<td>ATR 평균 봉 수</td>
+<td><code>blue_line.py:38</code></td>
+</tr>
+<tr>
+<td><code>entry_time_cutoff</code></td>
+<td><code>None</code></td>
+<td>진입 시간 cutoff(None=비활성). 운영 14:00 권장</td>
+<td><code>blue_line.py:43</code>, <code>:80</code></td>
+</tr>
+</tbody>
+</table>
+<p>파생 상수(코드 하드코딩, 파라미터 아님):
+- 블루라인 근접 허용폭 <code>*1.005</code> (+0.5%) — <code>blue_line.py:106</code>
+- 점수 상승률 만점 기준 <code>/0.03</code> (3%) — <code>blue_line.py:115</code>
+- 점수 베이스 <code>6.0</code>, 보너스 각 <code>*2.0</code>, 상한 <code>10.0</code> — <code>blue_line.py:115</code>, <code>:122</code>
+- <code>STRATEGY_ID = "blue_line_v1"</code> — <code>blue_line.py:49</code></p>
+<p>운영 청산 default (profile 부재 → 적용되는 <code>ExitPolicy</code>): TP <code>+5.0%</code> / SL <code>-4.0%</code> / trailing_start <code>+3.0%</code> / trailing_offset <code>1.5%</code> / breakeven <code>+2.5%</code> / partial_tp <code>+3.5%</code>(50%) / hold_days_tighten <code>5일</code>→SL <code>-2.0%</code>. (<code>holding_evaluator.py:56-66</code>)</p>
+<hr />
+<h2 id="6">6. 활성·운영 상태 (비활성 이유·토글 방법)</h2>
+<p><strong>상태</strong>: <code>blue_line: False</code> (⚪ 구현됨·비활성). (<code>signal_scanner.py:46</code>)</p>
+<p><strong>비활성 근거 (코드 주석 직접 인용)</strong>:
+- SignalScanner docstring (<code>signal_scanner.py:4-8</code>): "활성(default, 1분봉 intraday 단타): sf_zone, f_zone, gold_zone / 비활성(default): blue_line, crypto_breakout, swing_38 · <strong>단타 전략 완성 이후 재개 예정</strong> — <code>enabled_strategies</code> 인자로 override 가능".
+- <code>_DEFAULT_ENABLED</code> 주석 (<code>signal_scanner.py:38-40</code>): "Phase D2.1(2026-05-28) — 단타 전용 모드 default. 사용자 결정: 1·2·6번(sf/f/gold) 만 활성, 나머지(blue/crypto/swing_38) <strong>단타 전략 완성 후 재개</strong>." → 즉 비활성 사유는 (i) 단타 라인업 정리(sf/f/gold 우선) + (ii) 재개 보류 결정.
+- 안정성 우선순위가 낮음: <code>STRATEGY_PRIORITY["blue_line"] = 6</code> (8개 중 6위, 작을수록 우선). swing_38(1)·gold_zone(2)·f_zone(3)·sf_zone(4)·supertrend(5) 뒤. (<code>signal_scanner.py:59-62</code>)
+- 분석 문서도 "비활성(참조)"로 분류, "5EMA×20EMA 골든크로스 + 거래량 1.5x"로만 요약. (<code>docs/04-report/features/2026-05-28-daytrading-strategies-analysis.md:6</code>, <code>:307-308</code>)</p>
+<blockquote>
+<p>성능 미검증 측면: 실 OHLCV 백테스트가 아닌 합성 GBM 베이스라인만 존재(§8 참조). 재개 보류 사유는 명시적으로 "단타 전략 완성 후 재개"이며, swing_38 처럼 백테스트로 재활성된 사례(BAR-OPS-33)와 달리 blue_line 은 재검증·재활성 이력이 코드에 없다.</p>
+</blockquote>
+<p><strong>토글 방법</strong> (<code>signal_scanner.py:40</code>, <code>:99-102</code>, <code>:188-194</code> 테스트):</p>
+<pre><code class="language-python">scanner = SignalScanner(gateway, enabled_strategies={&quot;blue_line&quot;: True})
+# override 는 default 와 병합 — 지정 안 한 키(sf/f/gold/swing_38)는 default 유지.
+# 활성 시 1분봉 dispatch 에 우선순위 SF &gt; F &gt; Gold &gt; Blue &gt; Crypto 순으로 합류.
+</code></pre>
+<p>인스턴스는 비활성이라도 생성되어 있어(<code>signal_scanner.py:104-109</code>) flag 토글만으로 재활성 가능. dispatch 합류 위치: <code>signal_scanner.py:162-163</code>.</p>
+<hr />
+<h2 id="7">7. 비용·손익분기 관점</h2>
+<p>공통 비용 가정: <strong>편도 0.35% / 매도세 0.20% / 왕복 0.90%</strong> (= 매수 0.35% + 매도 0.35% + 매도세 0.20%).</p>
+<ul>
+<li><strong>진입 게이트 vs 비용</strong>: 진입 최소 상승률 <code>min_gain_pct=0.005</code>(0.5%)는 당봉 1개의 시가→종가 상승률 조건일 뿐, 진입 후 목표수익이 아니다. 왕복 비용 0.90%를 넘기려면 진입 후 추가로 +0.9%p 이상 올라야 본전. (<code>blue_line.py:32</code>, <code>:110</code>)</li>
+<li><strong>청산 임계 vs 비용 (default profile 기준)</strong>:</li>
+<li>SL -4% / 분할익절 +3.5% / TP +5% (gross 기준, <code>holding_evaluator.py:56-66</code>).</li>
+<li>왕복 0.90% 차감 시 net: 분할익절 +3.5% → <strong>약 +2.6% net</strong>, TP +5% → <strong>약 +4.1% net</strong>, SL -4% → <strong>약 -4.9% net</strong>.</li>
+<li>ExitEngine 1차선 SL -2%(base)는 왕복 비용 차감 시 <strong>약 -2.9% net</strong> 손실로 청산.</li>
+<li><strong>net-aware TP 미적용</strong>: <code>PositionContext.net_aware_tp</code> default False — blue_line 운영 경로에 명시 활성 코드 없음 → TP/익절은 gross 임계 그대로. (<code>holding_evaluator.py:214-216</code>, <code>:286-288</code>)</li>
+<li><strong>구조적 한계</strong>: blue_line 전용 profile 이 없어 비용 대비 TP/SL 비율(손익비)이 전략 특성(1분봉 추세추종)에 맞춰 튜닝되지 않았다. f_zone/gold_zone 처럼 partial_tp·trailing 을 전략별로 조정한 값이 아닌 generic default 를 쓴다. (§4 비교)</li>
+</ul>
+<blockquote>
+<p>위 net 환산은 본 리포트의 산술 계산이며 백테스트 실측이 아님(미검증).</p>
+</blockquote>
+<hr />
+<h2 id="8-oos">8. 백테스트·OOS 근거(있으면)/한계·리스크</h2>
+<p><strong>근거가 있으나 합성 데이터 기반이며 실 OOS 아님.</strong></p>
+<ul>
+<li>PHASE-0 베이스라인(합성 GBM 1년 데이터) 결과 (<code>docs/04-report/PHASE-0-baseline-2026-05.md:39</code>, JSON <code>:107-113</code>):</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Strategy</th>
+<th style="text-align: right;">거래수</th>
+<th style="text-align: right;">승률</th>
+<th style="text-align: right;">누적수익</th>
+<th style="text-align: right;">MDD</th>
+<th style="text-align: right;">Sharpe</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>blue_line_v1</code></td>
+<td style="text-align: right;">12</td>
+<td style="text-align: right;">58.3%</td>
+<td style="text-align: right;">1.82%</td>
+<td style="text-align: right;">0.62%</td>
+<td style="text-align: right;">5.38</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>문서 관찰: "blue_line_v1 가 가장 활발한 거래(12건) + 양의 수익. 합성 GBM 데이터의 마일드 트렌드를 잘 포착." (<code>PHASE-0-baseline-2026-05.md:44</code>)</li>
+<li><strong>명시된 한계 (인용)</strong>: "합성 데이터 1년 결과로 전략 성과 절대 평가는 불가 / 본 표는 후속 PR 회귀 비교의 기준점 역할만 / 실 OHLCV 5년 백테스트는 BAR-44b 에서 수행 예정." (<code>PHASE-0-baseline-2026-05.md:48-51</code>)</li>
+<li>이 수치는 <strong>회귀 비교 기준점</strong>일 뿐(±5% 임계, 예: win_rate ∈ [53.3%, 63.3%]) 실거래·실 OOS 근거가 아니다. (<code>PHASE-0-baseline-2026-05.md:55-68</code>)</li>
+<li>blue_line 에 대한 <strong>실 OHLCV 그리드 백테스트나 OOS 검증 결과는 코드/docs 에서 확인되지 않음</strong>(swing_38 의 Phase D 그리드 같은 산출물 부재) — 미검증.</li>
+</ul>
+<p><strong>리스크</strong>
+- <strong>전용 청산 profile 부재</strong>: 1분봉 단타인데 청산은 generic default(TP+5/SL-4, ExitEngine base -2%)에 의존 → 전략-청산 정합성 미튜닝(§4).
+- <strong>거래량 기준의 약점</strong>: <code>avg_volume</code> 이 전체 구간(최대 120봉) 단순평균이라, 장 초반/저거래 구간에서 1.5x 판정이 왜곡될 수 있음(코드 사실, 영향은 미검증). (<code>blue_line.py:93</code>)
+- <strong>운영 필터 default OFF</strong>: <code>min_atr_pct</code>·<code>entry_time_cutoff</code> 가 default 비활성이라, 운영 재활성 시 명시 override 없이는 저변동·장후반 가짜 시그널에 노출. (<code>blue_line.py:37</code>, <code>:43</code>)
+- <strong>점수 컷 부재</strong>: 게이트 통과 즉시 시그널(최소 ≈6.0점) → 슬롯 경합에서 우선순위는 SignalScanner 정렬에만 의존. (<code>blue_line.py:113</code>, <code>signal_scanner.py:136-137</code>)
+- <strong>성능 미검증 상태로 비활성</strong>: 실데이터 검증 전이며 재활성 트리거(백테스트 통과 등)가 코드에 정의돼 있지 않음.</p>
+<hr />
+<h2 id="9">9. 관련 파일·테스트</h2>
+<p><strong>구현</strong>
+- <code>backend/core/strategy/blue_line.py</code> — <code>BlueLineParams</code>(<code>:27-43</code>) + <code>BlueLineStrategy._analyze_impl</code>(<code>:58-134</code>). 진입 판정 <code>:113</code>, 점수 <code>:115</code>.
+- <code>backend/core/strategy/base.py</code> — <code>Strategy</code> ABC, default <code>exit_plan</code>(SL-2%/TP없음, <code>:71-76</code>), legacy analyze dispatch(<code>:42-62</code>).
+- <code>backend/core/strategy/indicators.py</code> — <code>atr_pct</code>(<code>:21-51</code>, 변동성 필터용 wrapper 대상).
+- <code>backend/core/scanner/signal_scanner.py</code> — <code>_DEFAULT_ENABLED["blue_line"]=False</code>(<code>:46</code>), <code>STRATEGY_PRIORITY["blue_line"]=6</code>(<code>:59-62</code>), dispatch 합류(<code>:162-163</code>), 토글 병합(<code>:99-102</code>).
+- <code>backend/core/risk/holding_evaluator.py</code> — <code>STRATEGY_EXIT_PROFILES</code>(blue_line <strong>부재</strong>, <code>:104-170</code>), <code>resolve_policy</code> fallback(<code>:173-195</code>), default <code>ExitPolicy</code>(<code>:55-80</code>).</p>
+<p><strong>테스트</strong>
+- <code>backend/tests/strategy/test_blue_line.py</code> — <code>TestBlueLineVolatilityFilter</code>(min_atr_pct 거부·default 0.0·atr_n 14) + <code>TestBlueLineEntryTimeGate</code>(cutoff None default·14:00 차단). 진입 핵심 로직(골든크로스/지지반등/점수) 직접 검증 테스트는 <strong>부재</strong> — 필터·게이트만 커버.
+- <code>backend/tests/scanner/test_signal_scanner_phase_c.py</code> — <code>is_enabled("blue_line") is False</code>(<code>:112</code>), override 병합 시 blue_line True(<code>:188-194</code>), priority tiebreaker(<code>:199-218</code>).
+- <code>backend/tests/strategy/test_baseline.py</code> — 합성 베이스라인 재현성(blue_line_v1 포함).</p>
+<p><strong>문서</strong>
+- <code>docs/04-report/PHASE-0-baseline-2026-05.md</code> — blue_line_v1 합성 베이스라인 수치(<code>:39</code>, <code>:107-113</code>) + 한계 명시(<code>:48-51</code>).
+- <code>docs/04-report/features/2026-05-28-daytrading-strategies-analysis.md</code> — 비활성 전략 참조(<code>:6</code>, <code>:307-308</code>).</p>
+<hr />
+<p><em>진실원천 주석</em>: 모든 수치·동작은 origin/main 기준 코드/docs 인용(file:line). §7 net 환산은 본 리포트 산술이며 백테스트 실측 아님. §8 baseline 은 합성 GBM 데이터 결과로 실 OOS·실거래 검증 아님(문서 자체 한계 명시). blue_line 실 OHLCV 백테스트·OOS·재활성 트리거는 코드/docs 에서 확인되지 않아 "미검증"으로 표기.</p>
+</body>
+</html>

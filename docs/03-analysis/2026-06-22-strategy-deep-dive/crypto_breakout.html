@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>crypto_breakout</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+  color: #222; line-height: 1.6; background: #fafafa;
+}
+h1, h2, h3 { color: #1a3a5f; }
+h1 { border-bottom: 3px solid #1a3a5f; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+h3 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.92em; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+th { background: #1a3a5f; color: white; }
+tr:nth-child(even) { background: #f0f4f8; }
+td:has(+ td:last-child), td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+td { font-variant-numeric: tabular-nums; }
+code { background: #e8eef4; padding: 2px 6px; border-radius: 3px; font-size: 0.92em; }
+blockquote {
+  border-left: 4px solid #1a3a5f; padding: 0.5em 1em;
+  background: #eef2f6; margin: 1em 0; color: #444;
+}
+strong { color: #c0392b; }
+</style>
+</head>
+<body>
+<h1 id="barroaitrade-crypto_breakout">BarroAiTrade 매매전략 심층 리포트 — crypto_breakout (암호화폐 돌파)</h1>
+<blockquote>
+<p>생성: 2026-06-22 · 진실원천: 코드 인용(file:line) · origin/main 기준(013d54b)
+상태: ⚪ 구현됨·비활성 (default OFF) · 분류: intraday(1분봉) 돌파 · 적용시장: crypto 전용 · 컨셉: 박스권 횡보 상단을 거래량 동반으로 돌파 시 진입</p>
+</blockquote>
+<h2 id="1-tldr">1. 요약 (TL;DR)</h2>
+<ul>
+<li><strong>무엇</strong>: 최근 N봉 박스권(횡보) 상단 저항선을 거래량 급증과 함께 돌파할 때 매수 신호를 내는 단순 돌파 전략. 진입 로직만 122줄로 구현돼 있고 청산 로직은 전략 자체에 없음(<code>crypto_breakout.py:1-122</code>).</li>
+<li><strong>시장 제약(하드 게이트)</strong>: <code>market_type != MarketType.CRYPTO</code> 면 즉시 <code>None</code> 반환 — <strong>암호화폐 전용</strong>(<code>crypto_breakout.py:57-58</code>). 한국주식(<code>MarketType.STOCK</code>)에는 절대 신호를 내지 않음.</li>
+<li><strong>현 상태</strong>: <code>_DEFAULT_ENABLED["crypto_breakout"] = False</code> (<code>signal_scanner.py:46</code>). default 비활성. <code>STRATEGY_PRIORITY=7</code>(8개 중 7위, <code>signal_scanner.py:61</code>).</li>
+<li><strong>이중 비활성</strong>: flag 가 False 일 뿐 아니라, 현재 모든 라이브 게이트웨이가 <code>MarketType.STOCK</code> 만 발행 — crypto OHLCV 를 공급하는 라이브 게이트웨이가 없음(아래 §6). 즉 <strong>토글을 켜도</strong> 한국주식 환경에선 신호가 0건.</li>
+<li><strong>검증 한계</strong>: 전용 단위 테스트·백테스트·OOS 근거 <strong>없음</strong>. 기존 테스트는 상속/통합 스모크 수준뿐(<code>test_base.py:159-163</code>, <code>test_baseline.py:77</code>). 진입 점수·청산 정책 모두 <strong>미검증</strong>.</li>
+</ul>
+<h2 id="2">2. 전략 개요 (돌파 컨셉·적용 시장)</h2>
+<p>모듈 docstring(<code>crypto_breakout.py:1-11</code>)이 명시하는 3단계 원리:</p>
+<ol>
+<li><strong>박스권 탐지</strong>: 최근 N봉의 고점/저점 범위가 좁을 때(횡보 구간).</li>
+<li><strong>돌파 신호</strong>: 현재 가격이 박스권 고점 +버퍼% 초과.</li>
+<li><strong>거래량 확인</strong>: 돌파 봉의 거래량이 평균 대비 크게 증가.</li>
+</ol>
+<p>docstring 은 "암호화폐 시장의 높은 변동성에 맞게 파라미터 조정"이라 밝히며(<code>crypto_breakout.py:4-6</code>), 이 의도는 코드의 시장 하드 게이트로 강제된다:</p>
+<pre><code class="language-python"># crypto_breakout.py:57-58
+if market_type != MarketType.CRYPTO:
+    return None
+</code></pre>
+<p><code>MarketType</code> 은 <code>STOCK</code>/<code>CRYPTO</code> 2종(<code>backend/models/market.py:14-16</code>). 따라서 본 전략은 <strong>crypto 전용</strong> 이며, 스캐너 timeframe 매트릭스상 1분봉(intraday) 전략으로 분류된다(<code>signal_scanner.py:12-13</code>, intraday dispatch 경로 <code>signal_scanner.py:164-165</code>).</p>
+<h2 id="3">3. 진입 로직 (조건·점수·게이트)</h2>
+<p>진입 본체는 <code>_analyze_impl</code>(<code>crypto_breakout.py:50-111</code>). 순차 게이트는 다음과 같다.</p>
+<p><strong>G0. 시장 게이트</strong> — crypto 아니면 즉시 탈락:</p>
+<pre><code class="language-python"># crypto_breakout.py:57-58
+if market_type != MarketType.CRYPTO:
+    return None
+</code></pre>
+<p><strong>G1. 데이터 충분성</strong> — <code>min_candles</code>(=40) 미만이면 탈락(<code>crypto_breakout.py:61-62</code>).</p>
+<p><strong>G2. 박스권 횡보 판정</strong> — 현재 봉을 제외한 직전 <code>box_period</code>(=20)봉의 고/저 범위가 <code>box_max_range_pct</code>(=8%) 이내여야 횡보로 인정:</p>
+<pre><code class="language-python"># crypto_breakout.py:68-76
+box = df.iloc[-(p.box_period + 1):-1]
+box_high = box[&quot;high&quot;].max()
+box_low = box[&quot;low&quot;].min()
+box_range_pct = (box_high - box_low) / box_low if box_low &gt; 0 else 999
+is_ranging = box_range_pct &lt;= p.box_max_range_pct
+if not is_ranging:
+    return None
+</code></pre>
+<p>주: <code>box_low &lt;= 0</code> 인 비정상 데이터는 <code>999</code> 로 처리돼 횡보 판정에서 탈락(방어 코드).</p>
+<p><strong>G3. 돌파 확인</strong> — 현재 종가가 박스 고점 ×(1+버퍼) 미만이면 탈락:</p>
+<pre><code class="language-python"># crypto_breakout.py:78-81
+breakout_level = box_high * (1 + p.breakout_buffer_pct)   # 버퍼 1%
+if current[&quot;close&quot;] &lt; breakout_level:
+    return None
+</code></pre>
+<p><strong>G4. 거래량 게이트</strong> — 현재 봉 거래량이 (현재 봉 제외) 평균 대비 <code>volume_ratio</code>(=2.5배=250%) 미만이면 탈락:</p>
+<pre><code class="language-python"># crypto_breakout.py:66, 83-86
+avg_volume = df[&quot;volume&quot;].iloc[:-1].mean()
+...
+vol_ratio = current[&quot;volume&quot;] / avg_volume if avg_volume &gt; 0 else 0
+if vol_ratio &lt; p.volume_ratio:
+    return None
+</code></pre>
+<p><strong>점수 산식</strong> — 0~10 클램프, 기본 5.0 + 돌파폭 가산(최대 +2.5) + 거래량 가산(최대 +2.5):</p>
+<pre><code class="language-python"># crypto_breakout.py:88-89
+breakout_pct = (current[&quot;close&quot;] - box_high) / box_high
+score = 5.0 + min(breakout_pct / 0.05, 1.0) * 2.5 + min(vol_ratio / (p.volume_ratio * 2), 1.0) * 2.5
+</code></pre>
+<ul>
+<li>돌파폭 5%(0.05)에서 가산 만점(+2.5), 거래량은 <code>volume_ratio*2</code>(=5.0배)에서 가산 만점(+2.5).</li>
+<li>모든 게이트 통과 + 돌파폭 ≥5% + 거래량 ≥5배면 이론상 만점 10.0.</li>
+<li>최소 통과 점수(게이트 4개 모두 막 통과 시점)는 5.0 근처 — <strong>별도 최소 점수 컷오프 게이트는 없음</strong>(게이트 통과 = 신호 발생). 점수는 스캐너 정렬·슬롯 경합용으로만 쓰임(<code>signal_scanner.py:137</code>).</li>
+</ul>
+<p><strong>산출물</strong> — <code>EntrySignal(signal_type="crypto_breakout", strategy_id="crypto_breakout_v1", ...)</code> 에 <code>metadata</code> 로 box_high/box_low/box_range_pct/volume_ratio/breakout_pct 기록(<code>crypto_breakout.py:91-111</code>). <code>STRATEGY_ID="crypto_breakout_v1"</code>(<code>crypto_breakout.py:41</code>).</p>
+<blockquote>
+<p>주(지표): 이 전략은 <code>indicators.py</code> 의 ATR·RSI·HTF 리샘플 헬퍼를 <strong>사용하지 않는다</strong>(import 없음, <code>crypto_breakout.py:12-24</code>). 변동성 필터(<code>atr_pct</code>)·RSI 확인·상위 타임프레임 게이트가 전혀 없는 순수 가격/거래량 돌파 로직이다 — 다른 단타 전략(f_zone/sf_zone 등) 대비 필터가 단순.</p>
+</blockquote>
+<h2 id="4">4. 청산 로직</h2>
+<p><strong>전략 자체에 청산 로직 없음.</strong> <code>CryptoBreakoutStrategy</code> 는 <code>exit_plan()</code> 을 override 하지 않으므로(<code>crypto_breakout.py</code> 전체에 정의 없음) 베이스 클래스 default 가 적용된다:</p>
+<pre><code class="language-python"># backend/core/strategy/base.py:71-76
+def exit_plan(self, position, ctx) -&gt; ExitPlan:
+    &quot;&quot;&quot;청산 계획 — 기본은 SL=-2%, TP 없음.&quot;&quot;&quot;
+    return ExitPlan(take_profits=[], stop_loss=StopLoss(fixed_pct=Decimal(&quot;-0.02&quot;)))
+</code></pre>
+<p>즉 ExitEngine 경로에서는 <strong>고정 SL -2%, TP 미설정</strong>.</p>
+<p><strong>운영 적응형 매도(HoldingEvaluator)에도 전용 프로파일 없음</strong>. <code>STRATEGY_EXIT_PROFILES</code>(<code>holding_evaluator.py:104-170</code>)에는 f_zone/sf_zone/gold_zone/swing_38/closing_bet 만 정의돼 있고 <strong>crypto_breakout 키가 없다</strong>. <code>resolve_policy()</code>(<code>holding_evaluator.py:173-179</code>)는 매칭 실패 시 base <code>ExitPolicy</code> 를 그대로 반환하므로, crypto_breakout 포지션은 기본 적응형 정책으로 평가된다:
+- TP +5.0%, SL -4.0%, 트레일링 시작 +3.0%/오프셋 1.5%, 브레이크이븐 +2.5%, 분할익절 +3.5%(50%) 등(<code>holding_evaluator.py:56-66</code> 기본값).</p>
+<p>요약: 청산은 (a) ExitEngine = 베이스 SL -2%, (b) HoldingEvaluator = 전략 무관 기본 ExitPolicy. <strong>돌파 실패(되돌림) 전용 청산·박스 하단 재진입 손절 등 컨셉 맞춤 청산이 전혀 없다</strong> — 설계 미완.</p>
+<h2 id="5">5. 파라미터 표</h2>
+<p><code>CryptoBreakoutParams</code>(<code>crypto_breakout.py:29-35</code>):</p>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>기본값</th>
+<th>의미</th>
+<th>코드 위치</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>box_period</code></td>
+<td>20</td>
+<td>박스권 탐지 기간(봉 수)</td>
+<td>crypto_breakout.py:31</td>
+</tr>
+<tr>
+<td><code>box_max_range_pct</code></td>
+<td>0.08 (8%)</td>
+<td>박스권 최대 범위(이내=횡보)</td>
+<td>crypto_breakout.py:32</td>
+</tr>
+<tr>
+<td><code>breakout_buffer_pct</code></td>
+<td>0.01 (1%)</td>
+<td>돌파 버퍼</td>
+<td>crypto_breakout.py:33</td>
+</tr>
+<tr>
+<td><code>volume_ratio</code></td>
+<td>2.5 (250%)</td>
+<td>거래량 배율(평균 대비)</td>
+<td>crypto_breakout.py:34</td>
+</tr>
+<tr>
+<td><code>min_candles</code></td>
+<td>40</td>
+<td>최소 캔들 수</td>
+<td>crypto_breakout.py:35</td>
+</tr>
+</tbody>
+</table>
+<p>점수 산식 내 상수(<code>crypto_breakout.py:89</code>): 돌파폭 만점 기준 <code>0.05</code>(5%), 거래량 만점 기준 <code>volume_ratio*2</code>(=5.0배). 베이스 점수 5.0.</p>
+<p>청산 측 기본값(전략 전용 아님): SL -2%(ExitEngine base, <code>base.py:75</code>) / 기본 ExitPolicy TP +5%·SL -4%(<code>holding_evaluator.py:57-58</code>).</p>
+<blockquote>
+<p>주: 위 파라미터는 코드 default 값이며, 라이브에서 검증·튜닝된 값이라는 근거는 코드/테스트에 없음(미검증).</p>
+</blockquote>
+<h2 id="6">6. 활성·운영 상태 (비활성 이유·적용시장 제약·토글)</h2>
+<p><strong>Default 비활성</strong>:</p>
+<pre><code class="language-python"># signal_scanner.py:41-46
+_DEFAULT_ENABLED = {
+    &quot;sf_zone&quot;: True, &quot;f_zone&quot;: True, &quot;gold_zone&quot;: True,
+    &quot;blue_line&quot;: False,
+    &quot;crypto_breakout&quot;: False,  # 4번 비활성
+    ...
+}
+</code></pre>
+<p>스캐너 docstring(<code>signal_scanner.py:4-8</code>)이 밝힌 이유: "BAR-OPS-09 Phase D2.1(2026-05-28) 단타 전용 모드" — sf/f/gold 만 활성, <strong>blue_line·crypto_breakout·swing_38 은 단타 전략 완성 이후 재개 예정</strong>(swing_38 은 이후 BAR-OPS-33 으로 재활성, <code>signal_scanner.py:47-50</code>). crypto_breakout 은 비활성 유지.</p>
+<p><strong>이중 비활성(더 근본적 제약)</strong> — 시장 미연결:
+- 본 전략은 <code>MarketType.CRYPTO</code> 봉에서만 작동(<code>crypto_breakout.py:57</code>).
+- 그러나 라이브 게이트웨이(kiwoom 계열)는 모두 <code>MarketType.STOCK</code> OHLCV 만 발행(<code>kiwoom.py:75</code> <code>market_type = MarketType.STOCK</code>, <code>kiwoom_native_candles.py:242,255</code> 등).
+- crypto 게이트웨이는 <code>StubUpbitGateway</code> 등 <strong>stub 뿐</strong>이며 <code>market_type = "crypto"</code>(문자열, <code>MarketType.CRYPTO</code> enum 도 아님)에 <code>fetch_ticker</code> 가 가격 0 을 반환하는 미구현 상태(<code>extensions.py:58-71</code>). docstring 도 "운영 진입 시 Upbit/Bithumb 어댑터로 교체, worktree 단계는 인터페이스+stub"(<code>extensions.py:1-5</code>)라 명시.
+- 결론: <strong>flag 를 켜도(<code>enabled_strategies={"crypto_breakout": True}</code>) 현재 시스템에선 신호 0건</strong> — crypto OHLCV 공급원이 없기 때문. 현 시스템은 한국주식 중심.</p>
+<p><strong>토글 방법</strong>(코드 변경 없이):</p>
+<pre><code class="language-python">SignalScanner(gateway, enabled_strategies={&quot;crypto_breakout&quot;: True})
+</code></pre>
+<p>override 키만 덮어쓰며 나머지는 default 유지(<code>signal_scanner.py:99-102</code>). 단 위 시장 제약 때문에 실효성은 crypto 게이트웨이 구현 이후에야 발생. 전략 인스턴스 자체는 비활성이라도 항상 생성됨(<code>signal_scanner.py:104-110</code>).</p>
+<h2 id="7">7. 비용·손익분기 관점</h2>
+<ul>
+<li><strong>공통 비용 모델은 한국주식 전용</strong>: <code>trading_costs.py</code> 의 <code>COMMISSION_RATE=0.0035</code>(편도 0.35%), <code>TAX_RATE_SELL=0.0020</code>(매도세 0.20%), <code>ROUND_TRIP_COST_RATE = 0.0035*2 + 0.0020 = 0.0090</code>(왕복 0.90%)(<code>trading_costs.py:29-33</code>). 근거는 키움 fill_audit 실측(<code>trading_costs.py:1-11</code>).</li>
+<li><strong>crypto 전용 비용 모델 없음</strong>: 코드베이스에 암호화폐 거래소(Upbit/Bithumb 등) 수수료·매도세 구조를 반영한 별도 cost 모델이 <strong>존재하지 않는다</strong>(검색 결과 <code>trading_costs.py</code> 단일 파일, crypto 분기 없음). 따라서 crypto_breakout 의 손익분기를 정확히 산정할 코드 근거가 현재 없음(미검증).</li>
+<li><strong>참고(주의)</strong>: 만약 한국주식 비용(왕복 0.90%)을 그대로 적용하면, 진입 점수 만점 조건의 돌파폭 5%·박스폭 8% 대비 비용 비중은 작아 보이나 — 실제 crypto 거래소 비용(예: 일반적으로 거래소별 0.04~0.25%/leg + 호가 슬리피지)은 코드에 반영돼 있지 않아 <strong>정량 결론 불가</strong>. crypto 라이브 진입 전 전용 cost 모델 도입이 선결 과제.</li>
+<li>청산이 SL -2%(ExitEngine base)로 좁아, 잦은 false breakout 되돌림 시 비용+손절 중첩으로 기대값이 음(-)이 될 위험 — 단, 이는 검증 데이터가 아닌 구조적 추론(미검증).</li>
+</ul>
+<h2 id="8-oos">8. 백테스트·OOS 근거(있으면)/한계·리스크</h2>
+<p><strong>백테스트·OOS 근거 없음(코드/테스트 기준).</strong>
+- swing_38(BAR-OPS-33 백테스트 4~6월) 같은 정량 근거 주석이 crypto_breakout 에는 전혀 없음.
+- baseline 테스트는 "거래 0건 전략도 무에러(수박/crypto_breakout 가능)"라 명시(<code>test_baseline.py:77</code>) — 즉 합성 데이터에서 신호가 거의/전혀 안 나오는 게 정상으로 취급됨. 성능 검증이 아님.</p>
+<p><strong>관련 리스크/한계</strong>:
+1. <strong>청산 미설계</strong>: 돌파 컨셉 전용 청산(되돌림 손절·박스 재진입 청산) 부재. 베이스 SL -2% + 기본 ExitPolicy 에 의존(§4).
+2. <strong>필터 단순</strong>: ATR 변동성 필터·RSI·HTF 확인 없음(§3 주). 저변동/가짜 돌파 차단 장치가 약함.
+3. <strong>시장 미연결</strong>: crypto 라이브 게이트웨이·전용 비용 모델 부재로 즉시 운영 불가(§6,§7).
+4. <strong>거래량 평균의 노이즈</strong>: <code>avg_volume</code> 이 박스 외 전체 직전 봉 평균(<code>df["volume"].iloc[:-1].mean()</code>, <code>crypto_breakout.py:66</code>)이라 box_period 와 일치하지 않음 — 의도/검증 불명(미검증).
+5. <strong>검증 부재</strong>: 전용 단위 테스트 없음 — 점수 산식·게이트 경계값 회귀 테스트 미존재.</p>
+<h2 id="9">9. 관련 파일·테스트</h2>
+<p><strong>소스</strong>
+- <code>backend/core/strategy/crypto_breakout.py</code> (메인 122줄 — <code>CryptoBreakoutParams</code>:29-35, <code>_analyze_impl</code>:50-111)
+- <code>backend/core/strategy/base.py</code> (Strategy ABC, default <code>exit_plan</code> SL -2%:71-76)
+- <code>backend/core/scanner/signal_scanner.py</code> (default OFF:46, priority 7:61, intraday dispatch:164-165, 토글:99-102)
+- <code>backend/core/risk/holding_evaluator.py</code> (<code>STRATEGY_EXIT_PROFILES</code>:104-170 — crypto_breakout <strong>미등록</strong>; <code>resolve_policy</code>:173-195)
+- <code>backend/core/trading_costs.py</code> (한국주식 비용 단일 진실원천:29-33; crypto 분기 없음)
+- <code>backend/core/strategy/indicators.py</code> (ATR/RSI/HTF 헬퍼 — 본 전략 <strong>미사용</strong>)
+- <code>backend/core/gateway/extensions.py</code> (<code>StubUpbitGateway</code> crypto stub:58-71)
+- <code>backend/models/market.py</code> (<code>MarketType.STOCK</code>/<code>CRYPTO</code>:14-16)
+- <code>backend/models/signal.py</code> (<code>EntrySignal</code> signal_type literal 에 "crypto_breakout":18)</p>
+<p><strong>테스트(전용 성능 테스트 없음 — 스모크/통합/매핑 수준)</strong>
+- <code>backend/tests/strategy/test_base.py:159-163</code> — 상속·<code>_analyze_v2</code> 존재 확인
+- <code>backend/tests/strategy/test_baseline.py:77</code> — 거래 0건 무에러
+- <code>backend/tests/scanner/test_signal_scanner_phase_c.py:98,113,174,194</code> — default 비활성·toggle 회귀
+- <code>backend/tests/legacy_scalping/test_adapter.py:132</code> — <code>(즉시, crypto) → crypto_breakout</code> signal_type 매핑</p>
+<hr />
+<p><em>진실원천 주석: 본 리포트의 모든 수치·동작은 origin/main(013d54b) 코드 직접 인용(file:line)에 근거한다. 백테스트·OOS 성능, crypto 전용 거래비용, 라이브 crypto 게이트웨이는 코드/테스트에 존재하지 않아 "미검증"으로 명시했다. 추측 결론은 배제했고, 구조적 추론은 그 출처(코드 근거 vs 추론)를 본문에 구분 표기했다.</em></p>
+</body>
+</html>
