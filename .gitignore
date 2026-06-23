@@ -94,3 +94,6 @@ frontend/tsconfig.tsbuildinfo
 .env.local.bak.*
 .env.*.bak.*
 .reports_premigration_backup_*/
+
+# loss-watch 에이전트 per-incident 산출물(운영 노이즈 — git 비대상)
+docs/04-report/daily/loss_incidents/
