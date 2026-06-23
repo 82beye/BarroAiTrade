@@ -440,6 +440,17 @@ def main(argv=None) -> int:
         if args.telegram:
             _maybe_telegram(verdicts)
             _maybe_telegram_market(data_dir)   # 시장국면·핫테마·포트폴리오 표시
+        # [2026-06-23] 에이전트 협업 방(@barroAiTrade_agents_bot) 공유 — default-OFF·fail-open.
+        #   BARRO_AGENT_ROOM_ENABLED=1 일 때만 게시(post 내부 게이트). 실패 무시(거래 무영향).
+        try:
+            from backend.core.agents import room_bus
+            if verdicts:
+                room_bus.post("advisory-writer", "finding", "verdict",
+                              {"text": f"{len(verdicts)}건 verdict: " + ", ".join(
+                                  f"{v['symbol']} {v['action']}({v['confidence']:.0%})"
+                                  for v in verdicts[:5])})
+        except Exception:  # noqa: BLE001 — fail-open
+            pass
 
     if one_shot:
         _tick()

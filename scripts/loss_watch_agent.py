@@ -147,6 +147,13 @@ def _esc(s):
 
 def tg_send(text):
     """텔레그램 sendMessage (HTML). DRYRUN/미설정이면 로그만."""
+    # [2026-06-23] 에이전트 협업 방(@barroAiTrade_agents_bot) 공유 — default-OFF·fail-open.
+    #   BARRO_AGENT_ROOM_ENABLED=1 일 때만 게시(post 내부 게이트). 거래봇 DRYRUN 과 독립.
+    try:
+        from backend.core.agents import room_bus
+        room_bus.post("loss-watch", "finding", "loss-alert", {"text": text[:600]}, priority="high")
+    except Exception:  # noqa: BLE001 — fail-open
+        pass
     if DRYRUN or not DO_TELEGRAM:
         log(f"[TG-SKIP] {text[:120].replace(chr(10),' ')}")
         return False

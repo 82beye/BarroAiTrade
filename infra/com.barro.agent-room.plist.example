@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.barro.agent-room — 에이전트 협업 방 코디네이터 launchd 템플릿.
+  방(room_bus)의 finding/proposal/vote 를 로컬 claude CLI 로 합성 → 집단 결정(advisory) 게시.
+  설치(운영 머신):
+    1) USERNAME / claude PATH 확인.
+    2) cp infra/com.barro.agent-room.plist.example ~/Library/LaunchAgents/com.barro.agent-room.plist
+    3) launchctl load -w ~/Library/LaunchAgents/com.barro.agent-room.plist
+  중지: launchctl unload ~/Library/LaunchAgents/com.barro.agent-room.plist
+  ★주문 실행 경로 없음 — 결정은 방 게시 + 감사로그(data/agent_room/decisions/)뿐. 매매 반영은 별도 HITL.★
+  킬스위치: .env.local BARRO_AGENT_ROOM_ENABLED=0 → 무동작. fail-open(claude/방 실패 → 사이클 skip).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.barro.agent-room</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-c</string>
+    <string>set -a; . /Users/USERNAME/Workspace/BarroAiTrade/.env.local; set +a; export PATH="/Applications/cmux.app/Contents/Resources/bin:$PATH"; cd /Users/USERNAME/Workspace/BarroAiTrade; exec ./venv/bin/python scripts/agent_room_coordinator.py --interval 60 >> logs/agent-room.log 2>&1</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/USERNAME/Workspace/BarroAiTrade</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/USERNAME/Workspace/BarroAiTrade/logs/agent-room.launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/USERNAME/Workspace/BarroAiTrade/logs/agent-room.launchd.log</string>
+</dict>
+</plist>
