@@ -168,21 +168,40 @@ def _tg_mirror(msg: RoomMessage) -> None:
     chat = os.environ.get("BARRO_AGENTS_CHAT_ID", "").strip()
     if not token or not chat:
         return  # 미설정 → 미러 비활성(버스는 정상)
+    import html as _html
+    import urllib.parse
+    import urllib.request
     icon = _ICON.get(msg.type, "•")
     sym = f" [{msg.symbol}]" if msg.symbol else ""
-    body = msg.payload.get("text") or msg.payload.get("summary") or json.dumps(
-        msg.payload, ensure_ascii=False)[:500]
-    text = f"{icon} <b>{msg.from_agent}</b>{sym} · {msg.topic}\n{body}\n<code>{msg.type}/{msg.priority} id={msg.id}</code>"
-    try:
-        import urllib.parse
-        import urllib.request
-        data = urllib.parse.urlencode(
-            {"chat_id": chat, "text": text, "parse_mode": "HTML"}).encode()
+    raw = msg.payload.get("text") or msg.payload.get("summary") or json.dumps(
+        msg.payload, ensure_ascii=False)
+    # 텔레그램 4096자 제한 + HTML parse 안전: 본문 절단 후 escape(헤더/푸터 여유 확보).
+    # (본문의 '<' '>' '&' 가 parse_mode=HTML 을 깨 HTTP400 나던 문제 — escape 로 해소.)
+    _MAX_BODY = 3500
+    if len(raw) > _MAX_BODY:
+        raw = raw[:_MAX_BODY] + " …(생략)"
+    body = _html.escape(raw)
+    agent = _html.escape(str(msg.from_agent))
+    topic = _html.escape(str(msg.topic))
+    esym = _html.escape(sym)
+    text = f"{icon} <b>{agent}</b>{esym} · {topic}\n{body}\n<code>{msg.type}/{msg.priority} id={msg.id}</code>"
+
+    def _send(payload_text: str, parse: Optional[str]) -> None:
+        params = {"chat_id": chat, "text": payload_text}
+        if parse:
+            params["parse_mode"] = parse
+        data = urllib.parse.urlencode(params).encode()
         req = urllib.request.Request(
             f"https://api.telegram.org/bot{token}/sendMessage", data=data)
         urllib.request.urlopen(req, timeout=10).read()
-    except Exception as e:  # noqa: BLE001 — fail-open
-        print(f"[room_bus] tg sendMessage 실패(무시): {e}")
+
+    try:
+        _send(text, "HTML")
+    except Exception:  # noqa: BLE001 — HTML parse/길이 실패 → plain text 폴백
+        try:
+            _send(f"{msg.from_agent}{sym} · {msg.topic}\n{raw}\n[{msg.type}/{msg.priority} id={msg.id}]", None)
+        except Exception as e:  # noqa: BLE001 — fail-open
+            print(f"[room_bus] tg sendMessage 실패(무시): {e}")
 
 
 # ── 상태(코디네이터 커서) ─────────────────────────────────────────────────────
