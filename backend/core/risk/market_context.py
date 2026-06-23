@@ -26,6 +26,7 @@ from backend.core.risk.theme_map import themes_of
 
 SOFT = "soft"
 HARD = "hard"
+SHADOW = "shadow"  # [6/23] 로그만·라이브 무영향(enforce 전 측정)
 
 
 def parse_ts(raw) -> Optional[datetime]:
@@ -205,17 +206,26 @@ def apply_market_context(max_buy, signals, cfg: MarketContextConfig,
     """
     if not cfg.enabled or not ctx.is_fresh(now, cfg.ttl_sec):
         return max_buy, signals, []
+    shadow = (cfg.mode == SHADOW)
     notes = []
     new_max = max_buy
     risk_off = (ctx.risk_on is False) or (ctx.regime == "bearish")
     if risk_off:
-        new_max = max(1, max_buy // 2)
-        notes.append(f"risk-off(regime={ctx.regime}) → max_buy {max_buy}→{new_max}")
+        would = max(1, max_buy // 2)
+        if shadow:
+            notes.append(f"[SHADOW] risk-off(regime={ctx.regime}) → max_buy {max_buy}→{would} [측정·미적용]")
+        else:
+            new_max = would
+            notes.append(f"risk-off(regime={ctx.regime}) → max_buy {max_buy}→{new_max}")
     kept = signals
-    if cfg.mode == HARD and ctx.strategy_gates:
-        kept = [s for s in signals if ctx.strategy_gates.get(s[1], True)]
-        if len(kept) != len(signals):
-            notes.append(f"strategy_gate 차단 {len(signals)-len(kept)}건")
+    if ctx.strategy_gates:
+        blocked = [s for s in signals if not ctx.strategy_gates.get(s[1], True)]
+        if cfg.mode == HARD:
+            kept = [s for s in signals if ctx.strategy_gates.get(s[1], True)]
+            if blocked:
+                notes.append(f"strategy_gate 차단 {len(blocked)}건")
+        elif shadow and blocked:
+            notes.append(f"[SHADOW] strategy_gate would-block {len(blocked)}건 [측정·미적용]")
     return new_max, kept, notes
 
 
@@ -298,7 +308,7 @@ def apply_sector_priority(signals, cfg: SectorThemesConfig, sector: SectorThemes
 
 
 __all__ = [
-    "SOFT", "HARD", "MarketContext", "SectorThemes", "PortfolioSignals", "MarketAdvisory",
+    "SOFT", "HARD", "SHADOW", "MarketContext", "SectorThemes", "PortfolioSignals", "MarketAdvisory",
     "load_market_advisory", "MarketContextConfig", "PortfolioThemeConfig", "PortfolioRiskConfig",
     "SectorThemesConfig", "apply_market_context", "apply_theme_guard", "apply_portfolio_risk",
     "apply_sector_priority", "parse_ts",

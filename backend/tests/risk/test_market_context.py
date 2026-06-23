@@ -216,3 +216,20 @@ def test_portfolio_risk_throttle_on_concentration_or_leverage():
     assert f2 == 0.5
     f3, note3 = apply_portfolio_risk(cfg, _psig({}, conc=0.1), _NOW)
     assert f3 == 1.0 and note3 is None
+
+
+def test_apply_market_context_shadow_logs_only():
+    """[6/23] SHADOW 모드: bearish 라도 max_buy·signals 불변, 로그(notes)만. enforce 전 측정."""
+    from datetime import datetime, timezone
+    from backend.core.risk.market_context import (
+        MarketContext, MarketContextConfig, apply_market_context, SHADOW,
+    )
+    now = datetime(2026, 6, 23, 5, 0, tzinfo=timezone.utc)
+    ctx = MarketContext(regime="bearish", risk_on=False, ts=now,
+                        strategy_gates={"swing_38": False})
+    cfg = MarketContextConfig(enabled=True, mode=SHADOW, ttl_sec=3600)
+    sigs = [("A", "005930", "swing_38"), ("B", "000660", "f_zone")]
+    new_max, kept, notes = apply_market_context(5, sigs, cfg, ctx, now)
+    assert new_max == 5            # max_buy 불변(shadow)
+    assert kept == sigs            # signals 불변(shadow)
+    assert any("SHADOW" in n for n in notes)   # would-block 측정 로그 존재
