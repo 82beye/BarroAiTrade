@@ -143,11 +143,14 @@ def _extract_json(text: str) -> dict | None:
     return obj if isinstance(obj, dict) else None
 
 
-def _run_claude_cli(prompt: str, timeout: float) -> dict | None:
-    """`claude -p` 헤드리스 호출 → JSON dict. 실패/타임아웃/비0 → None."""
+def _run_claude_cli(prompt: str, timeout: float, model: str | None = None) -> dict | None:
+    """`claude -p` 헤드리스 호출 → JSON dict. 실패/타임아웃/비0 → None. model 지정 시 --model."""
+    cmd = [_claude_bin(), "-p", prompt, "--output-format", "json"]
+    if model:
+        cmd += ["--model", str(model)]
     try:
         proc = subprocess.run(
-            [_claude_bin(), "-p", prompt, "--output-format", "json"],
+            cmd,
             capture_output=True, text=True, timeout=timeout,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):

@@ -36,6 +36,9 @@ _TRUTHY = {"1", "true", "yes", "on"}
 def _enabled() -> bool:
     return os.environ.get("BARRO_AGENT_ROOM_ENABLED", "0").strip().lower() in _TRUTHY
 
+# [6/24] 협업방 에이전트 LLM 모델(.env.local BARRO_ROOM_MODEL, 예: claude-sonnet-4-6). 빈값=CLI 기본.
+_ROOM_MODEL = (os.environ.get("BARRO_ROOM_MODEL", "").strip() or None)
+
 
 # ── 역할 정의 (역할별 관점 — 의견 다양성 보장) ────────────────────────────────
 ROLES = [
@@ -117,7 +120,7 @@ def discuss(topic: str, context: str, rounds: int, timeout: float, dry: bool) ->
             disc = "\n".join(log[-20:]) if log else "(아직 의견 없음 — 네가 첫 발언자다)"
             prompt = _AGENT_PROMPT.format(rid=role["id"], persona=role["persona"],
                                           topic=full_topic, discussion=disc)
-            obj = _run_claude_cli(prompt, timeout)
+            obj = _run_claude_cli(prompt, timeout, _ROOM_MODEL)
             if not obj or not obj.get("opinion"):
                 print(f"[discuss] R{rnd} {role['id']} 합성 실패 — skip")
                 continue
@@ -139,7 +142,7 @@ def discuss(topic: str, context: str, rounds: int, timeout: float, dry: bool) ->
             time.sleep(0.4)  # 텔레그램 rate
 
     transcript = "\n".join(log) if log else "(토론 없음)"
-    sobj = _run_claude_cli(_SYNTH_PROMPT.format(topic=topic, transcript=transcript), timeout)
+    sobj = _run_claude_cli(_SYNTH_PROMPT.format(topic=topic, transcript=transcript), timeout, _ROOM_MODEL)
     if not sobj:
         print("[discuss] 합의 합성 실패 — fail-open")
         return None
