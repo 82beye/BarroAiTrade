@@ -111,6 +111,20 @@ _CB_MAX_POS = int(os.environ.get("BARRO_CB_MAX_POS", "2"))       # 동시 보유
 _CB_MAX_PCT = float(os.environ.get("BARRO_CB_MAX_PCT", "0.10"))  # 종목당 비중(주문가능액 대비)
 _CB_TP = float(os.environ.get("BARRO_CB_TP", "4.5"))            # 익절%(익일 슈팅, 설계)
 _CB_SL = float(os.environ.get("BARRO_CB_SL", "5.0"))            # 손절%(갭 흡수, 설계)
+_CB_MIN_CASH_PCT = float(os.environ.get("BARRO_CB_MIN_CASH_PCT", "0") or 0)  # [6/24 토론] 현금버퍼 선결게이트(종베 신규, 0=off)
+
+
+def _cb_equity_estimate() -> float:
+    """총자산 추정(현금버퍼 게이트용) — balance_history.json 최신 estimated_asset. 없으면 0(fail-open)."""
+    try:
+        import json as _json
+        h = _json.loads((_MAIN_DATA / "balance_history.json").read_text(encoding="utf-8"))
+        hist = h if isinstance(h, list) else h.get("history", [])
+        if hist:
+            return float(hist[-1].get("estimated_asset", 0) or 0)
+    except Exception:  # noqa: BLE001 — fail-open
+        pass
+    return 0.0
 
 
 async def _cb_auto_buy(sym, name, price, oauth, dry_run, dry_print) -> None:
@@ -129,6 +143,13 @@ async def _cb_auto_buy(sym, name, price, oauth, dry_run, dry_print) -> None:
         orderable = float(getattr(dep, "orderable_cash", 0) or getattr(dep, "cash", 0) or 0)
     except Exception as e:  # noqa: BLE001
         print(f"  [CB-AUTOEXEC-SKIP] {sym} 잔고조회 실패 {type(e).__name__}: {e}"); return
+    # [6/24 토론 합의] 현금버퍼 선결게이트 — 주문가능액이 총자산의 _CB_MIN_CASH_PCT 미만이면 종베 신규 SKIP.
+    #   (bearish·현금소진 국면에서 오버나잇 갭 노출 신규 진입 차단. 0=off=byte-identical.)
+    if _CB_MIN_CASH_PCT > 0:
+        _eq = _cb_equity_estimate()
+        if _eq > 0 and orderable < _eq * _CB_MIN_CASH_PCT:
+            print(f"  [CB-AUTOEXEC-SKIP] {sym} 현금버퍼 미달 — 주문가능 {orderable:,.0f} < 총자산 {_eq:,.0f}×{_CB_MIN_CASH_PCT:.0%} (종베 신규 보류)")
+            return
     qty = int((orderable * _CB_MAX_PCT) // price)
     if qty <= 0:
         print(f"  [CB-AUTOEXEC-SKIP] {sym} 수량 0 (주문가능 {orderable:,.0f}x{_CB_MAX_PCT:.0%}/{price:,.0f})"); return
