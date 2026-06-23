@@ -903,10 +903,14 @@ async def _scan_and_buy(
     leaders = await picker.pick(top_n=args.top)
     if not leaders:
         return 0
-    # [6/23] 랭킹 degraded(전 종목 trade_value 0 = 빈/0값 응답) 시 신규진입 차단(BARRO_DEGRADED_BLOCK).
-    if _DEGRADED_BLOCK and all(float(getattr(c, "trade_value", 0) or 0) == 0 for c in leaders):
-        print(f"  [{_now_kst():%H:%M:%S}][SKIP-DEGRADED] leaders trade_value 전부 0 — 랭킹 degraded, 신규진입 차단")
-        return 0
+    # [6/23] 랭킹 degraded 시 신규진입 차단(BARRO_DEGRADED_BLOCK). ★trade_value 가 실제
+    #   채워진 경우(not None)에만 평가 — 미채움이면 판단 불가로 fail-open(전 진입 차단 방지).★
+    if _DEGRADED_BLOCK:
+        _tvs = [getattr(c, "trade_value", None) for c in leaders]
+        _populated = [t for t in _tvs if t is not None]
+        if _populated and all(float(t) <= 0 for t in _populated):
+            print(f"  [{_now_kst():%H:%M:%S}][SKIP-DEGRADED] leaders 거래대금 전부 0 — 랭킹 degraded, 신규진입 차단")
+            return 0
 
     # 보유/당일매도/세션매수 제외
     account = KiwoomNativeAccountFetcher(oauth=oauth)

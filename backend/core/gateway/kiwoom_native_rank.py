@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
+import time as _time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -65,6 +67,27 @@ def _parse_signed_pct(s: str) -> float:
         return 0.0
 
 
+# [6/23 매매복기] ka10080/ka10032 랭킹 429 백오프 + 결과 캐시 (전부 default-OFF=무변경).
+_MAX_429_RETRY = int(os.environ.get("BARRO_RANK_429_RETRY", "3") or 3)
+_RATE_BACKOFF_BASE = float(os.environ.get("BARRO_RANK_BACKOFF_SEC", "1.0") or 1.0)
+_RANK_CACHE_TTL = float(os.environ.get("BARRO_RANK_CACHE_SEC", "0") or 0)  # 0=off
+_RANK_CACHE: dict = {}   # base_url -> (monotonic_ts, list[LeaderCandidate])
+
+
+def _parse_amount(row) -> "Optional[float]":
+    """거래대금(원) 추출 — 필드명 best-effort. 미발견 → None(degraded 게이트 fail-open)."""
+    if not row:
+        return None
+    for k in ("trde_prica", "acc_trde_prica", "now_trde_prica", "trde_amt"):
+        v = row.get(k)
+        if v not in (None, "", "0"):
+            try:
+                return abs(float(str(v).replace("+", "").replace(",", "")))
+            except ValueError:
+                pass
+    return None
+
+
 @dataclass(frozen=True)
 class LeaderCandidate:
     symbol: str
@@ -106,6 +129,10 @@ class KiwoomNativeLeaderPicker:
         self._min_score = min_score
 
     async def pick(self, top_n: int = 5) -> list[LeaderCandidate]:
+        if _RANK_CACHE_TTL > 0:
+            _ent = _RANK_CACHE.get(self._oauth.base_url)
+            if _ent and (_time.monotonic() - _ent[0]) <= _RANK_CACHE_TTL:
+                return _ent[1][:top_n]
         tv_rows = await self._fetch_rank(_TR_TRADING_VALUE, _BODY_TRADING_VALUE, _KEY_TRADING_VALUE)
         fr_rows = await self._fetch_rank(_TR_FLUCT_RATE, _BODY_FLUCT_RATE, _KEY_FLUCT_RATE)
         vol_rows = await self._fetch_rank(_TR_VOLUME, _BODY_VOLUME, _KEY_VOLUME)
@@ -151,9 +178,12 @@ class KiwoomNativeLeaderPicker:
                 rank_flu_rate=fr_rank.get(sym),
                 rank_volume=vol_rank.get(sym),
                 score=score,
+                trade_value=_parse_amount(tv_meta.get(sym)),
             ))
 
         out.sort(key=lambda c: c.score, reverse=True)
+        if _RANK_CACHE_TTL > 0:
+            _RANK_CACHE[self._oauth.base_url] = (_time.monotonic(), out)
         return out[:top_n]
 
     async def _fetch_rank(self, tr_id: str, body: dict, list_key: str) -> list[dict]:
@@ -162,6 +192,7 @@ class KiwoomNativeLeaderPicker:
         owns = self._http is None
         url = f"{self._oauth.base_url}{_RANK_PATH}"
         _auth_retried = False
+        _r429 = 0
         try:
             while True:
                 try:
@@ -178,6 +209,18 @@ class KiwoomNativeLeaderPicker:
                     )
                     resp.raise_for_status()
                     data = resp.json()
+                except httpx.HTTPStatusError as exc:
+                    # [6/23] 429 rate-limit → 지수 백오프 재시도(고정 sleep 대체). 종가러시 경합 완화.
+                    if (exc.response is not None and exc.response.status_code == 429
+                            and _r429 < _MAX_429_RETRY):
+                        _r429 += 1
+                        _bo = _RATE_BACKOFF_BASE * (2 ** (_r429 - 1))
+                        logger.warning("rank 429 tr=%s — %.1fs 백오프 재시도 (%d/%d)",
+                                       tr_id, _bo, _r429, _MAX_429_RETRY)
+                        await asyncio.sleep(_bo)
+                        continue
+                    logger.error("kiwoom-native rank failed: tr=%s err=%s", tr_id, type(exc).__name__)
+                    raise
                 except Exception as exc:
                     logger.error("kiwoom-native rank failed: tr=%s err=%s", tr_id, type(exc).__name__)
                     raise
