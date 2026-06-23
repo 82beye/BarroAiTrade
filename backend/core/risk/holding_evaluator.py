@@ -11,6 +11,8 @@ OPS-17 LiveOrderGate 와 결합 시 자동 매도 가능.
 """
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -136,7 +138,7 @@ STRATEGY_EXIT_PROFILES: dict[str, dict] = {
         # BAR-OPS-09 Phase D2 (2026-05-28): 그리드 서치(S6 2D + S7 필터) 결합 최적.
         # Phase D -10/8 → Phase D2 -15/20 (자본가중 +0.597% → +1.808%, +203% 우위).
         # 운영 적응형 매도 (HoldingEvaluator) 도 exit_plan 과 동일 임계로 동기화.
-        "stop_loss_pct": Decimal("-15.0"),         # Phase D -10.0 → -15.0 (S6 결합 최적)
+        "stop_loss_pct": Decimal(os.environ.get("BARRO_SWING38_SL_PCT", "-15.0")),  # [6/23 복기] env tunable; 백테스트 default -15, .env.local 로 -8 타이트닝(즉시 롤백 가능)
         "take_profit_pct": Decimal("50.0"),        # Phase D 유지 (TP2 그리드 무영향)
         "partial_tp_pct": Decimal("20.0"),         # Phase D 유지 (TP1 그리드 최적)
         "partial_tp_ratio": Decimal("0.5"),

@@ -19,6 +19,7 @@ from datetime import datetime, time as dtime, timezone
 from decimal import Decimal
 from typing import Any, List, Optional
 
+import os
 import pandas as pd
 
 from backend.core.strategy.base import Strategy
@@ -296,7 +297,7 @@ class Swing38Strategy(Strategy):
                 ),
             ],
             stop_loss=StopLoss(fixed_pct=resolve_sl_pct(
-                self.STRATEGY_ID, avg, Decimal("-0.15"),
+                self.STRATEGY_ID, avg, (Decimal(os.environ.get("BARRO_SWING38_SL_PCT", "-15.0")) / 100),  # [6/23] env tunable(percent→fraction)
                 symbol=getattr(position, "symbol", ""))),
             breakeven_trigger=Decimal("0.10"),
             min_hold_days=p.min_hold_days,
