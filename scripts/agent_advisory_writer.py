@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -88,6 +89,16 @@ _QUICK_DECIDER_PROMPT = """\
 """
 
 
+def _claude_bin() -> str:
+    """claude CLI 실행 경로. headless(launchd/cron)에서 PATH 가 cmux 래퍼만
+    가리키면 래퍼가 실 바이너리를 PATH 에서 못 찾아 exit 127 → 합성 실패.
+    따라서 CLAUDE_CLI_BIN(절대경로) env 를 우선 사용하고, 없으면 PATH 의 claude."""
+    env_bin = (os.environ.get("CLAUDE_CLI_BIN") or "").strip()
+    if env_bin and os.path.isfile(env_bin) and os.access(env_bin, os.X_OK):
+        return env_bin
+    return shutil.which("claude") or "claude"
+
+
 def claude_cli_verdict(sig: dict, *, timeout: float = 25.0) -> dict | None:
     """`claude -p` 헤드리스 호출 → verdict. 실패/타임아웃 → None(해당 종목 fail-open)."""
     prompt = _QUICK_DECIDER_PROMPT.format(
@@ -97,7 +108,7 @@ def claude_cli_verdict(sig: dict, *, timeout: float = 25.0) -> dict | None:
     )
     try:
         proc = subprocess.run(
-            ["claude", "-p", prompt, "--output-format", "json"],
+            [_claude_bin(), "-p", prompt, "--output-format", "json"],
             capture_output=True, text=True, timeout=timeout,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
@@ -136,7 +147,7 @@ def _run_claude_cli(prompt: str, timeout: float) -> dict | None:
     """`claude -p` 헤드리스 호출 → JSON dict. 실패/타임아웃/비0 → None."""
     try:
         proc = subprocess.run(
-            ["claude", "-p", prompt, "--output-format", "json"],
+            [_claude_bin(), "-p", prompt, "--output-format", "json"],
             capture_output=True, text=True, timeout=timeout,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):

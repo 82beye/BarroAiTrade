@@ -2,8 +2,19 @@
 <!--
   com.barro.agent-room — 에이전트 협업 방 코디네이터 launchd 템플릿.
   방(room_bus)의 finding/proposal/vote 를 로컬 claude CLI 로 합성 → 집단 결정(advisory) 게시.
+
+  ★headless 인증·바이너리 해석★
+   - claude 인증은 macOS Keychain('Claude Code-credentials') 기반 — launchd(headless)에서도 동작.
+     (Keychain 토큰은 claude daemon 이 자동 refresh. 별도 API 키/CLAUDE_CODE_OAUTH_TOKEN 불필요.)
+   - 단, launchd 의 PATH 에 실 claude 바이너리가 없으면(예: cmux 래퍼만 PATH 에 있을 때)
+     래퍼가 실 바이너리를 못 찾아 exit 127 → 합성 실패. 따라서:
+       (a) .env.local 에 CLAUDE_CLI_BIN=<실 바이너리 절대경로> 를 두고(코드가 우선 사용), 그리고
+       (b) 아래처럼 PATH 선두에 nvm/claude bin 절대경로를 둔다(이중 안전).
+     실 바이너리 경로 확인: `readlink -f "$(command -v claude)"` 또는
+     `~/.nvm/versions/node/<ver>/bin/claude`.
+
   설치(운영 머신):
-    1) USERNAME / claude PATH 확인.
+    1) USERNAME / claude 실 바이너리 경로 확인 후 아래 PATH 치환.
     2) cp infra/com.barro.agent-room.plist.example ~/Library/LaunchAgents/com.barro.agent-room.plist
     3) launchctl load -w ~/Library/LaunchAgents/com.barro.agent-room.plist
   중지: launchctl unload ~/Library/LaunchAgents/com.barro.agent-room.plist
@@ -18,7 +29,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-c</string>
-    <string>set -a; . /Users/USERNAME/Workspace/BarroAiTrade/.env.local; set +a; export PATH="/Applications/cmux.app/Contents/Resources/bin:$PATH"; cd /Users/USERNAME/Workspace/BarroAiTrade; exec ./venv/bin/python scripts/agent_room_coordinator.py --interval 60 >> logs/agent-room.log 2>&1</string>
+    <string>set -a; . /Users/USERNAME/Workspace/BarroAiTrade/.env.local; set +a; export PATH="/Users/USERNAME/.nvm/versions/node/v24.14.0/bin:$PATH"; cd /Users/USERNAME/Workspace/BarroAiTrade; exec ./venv/bin/python scripts/agent_room_coordinator.py --interval 90 --timeout 60</string>
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/USERNAME/Workspace/BarroAiTrade</string>
@@ -27,8 +38,8 @@
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>/Users/USERNAME/Workspace/BarroAiTrade/logs/agent-room.launchd.log</string>
+  <string>/Users/USERNAME/Workspace/BarroAiTrade/logs/agent-room.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/USERNAME/Workspace/BarroAiTrade/logs/agent-room.launchd.log</string>
+  <string>/Users/USERNAME/Workspace/BarroAiTrade/logs/agent-room.log</string>
 </dict>
 </plist>

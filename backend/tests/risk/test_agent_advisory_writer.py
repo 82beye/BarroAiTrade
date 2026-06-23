@@ -20,6 +20,7 @@ from scripts.agent_advisory_writer import (
     read_refined_signals,
     run_once,
     _parse_verdict_text,
+    _claude_bin,
 )
 
 _NOW = datetime(2026, 6, 22, 5, 30, tzinfo=timezone.utc)
@@ -134,3 +135,22 @@ def test_parse_bare_json_and_normalize():
 def test_parse_invalid_action_returns_none():
     assert _parse_verdict_text('{"action":"MAYBE"}') is None
     assert _parse_verdict_text("그냥 텍스트") is None
+
+
+def test_claude_bin_prefers_env_absolute_path(tmp_path, monkeypatch):
+    """headless(launchd/cron) 회귀 가드: CLAUDE_CLI_BIN(절대경로·실행가능)을
+    PATH 상 cmux 래퍼보다 우선 해석한다. (래퍼는 nvm 미포함 PATH 에서 실 바이너리를
+    못 찾아 exit 127 → 합성/verdict 실패하던 버그의 회귀 방지.)"""
+    fake = tmp_path / "claude"
+    fake.write_text("#!/bin/sh\nexit 0\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("CLAUDE_CLI_BIN", str(fake))
+    assert _claude_bin() == str(fake)
+    # 비실행/부재 경로 → env 무시하고 PATH 폴백(예외 없음·truthy)
+    bad = tmp_path / "nope"
+    bad.write_text("x")
+    monkeypatch.setenv("CLAUDE_CLI_BIN", str(bad))
+    assert _claude_bin() != str(bad) and _claude_bin()
+    # env 미설정 → 'claude' 또는 PATH 해석(truthy)
+    monkeypatch.delenv("CLAUDE_CLI_BIN", raising=False)
+    assert _claude_bin()
