@@ -88,3 +88,12 @@ def test_coordinator_no_order_execution():
     for forbidden in ("place_buy(", "place_sell(", "LiveOrderGate",
                       "KiwoomNativeOrderExecutor", "live_order_gate", "kiwoom_native_orders"):
         assert forbidden not in text, f"coordinator 가 주문 실행({forbidden}) 참조 — 금지"
+
+
+def test_discuss_no_order_execution():
+    """★안전: 다자토론 엔진도 주문 실행 경로를 호출/임포트하지 않는다.★"""
+    src = Path(__file__).resolve().parents[2] / "scripts" / "agent_room_discuss.py"
+    text = src.read_text(encoding="utf-8")
+    for forbidden in ("place_buy(", "place_sell(", "LiveOrderGate",
+                      "KiwoomNativeOrderExecutor", "live_order_gate", "kiwoom_native_orders"):
+        assert forbidden not in text, f"discuss 가 주문 실행({forbidden}) 참조 — 금지"

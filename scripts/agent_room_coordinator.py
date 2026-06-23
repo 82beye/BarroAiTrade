@@ -28,6 +28,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.core.agents import room_bus  # noqa: E402
 from scripts.agent_advisory_writer import _run_claude_cli  # noqa: E402  (로컬 claude 재사용)
+try:
+    from scripts.agent_room_discuss import discuss as _discuss  # noqa: E402 (다자토론 엔진)
+except Exception:  # noqa: BLE001 — fail-open(엔진 부재 시 단방향 합성 폴백)
+    _discuss = None
 
 _AGENT_ID = "coordinator"
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -105,6 +109,17 @@ def run_once(dry: bool, timeout: float) -> dict | None:
     if not msgs:
         print("[coordinator] 신규 메시지 없음 — skip")
         return None
+    # [6/24] 사람/질문 메시지 감지 → 단방향 합성 대신 ★다자 토론(협업)★ 트리거.
+    #   BARRO_ROOM_AUTO_DISCUSS=1 일 때만. 코디네이터 자신의 글은 제외(무한루프 방지).
+    if _discuss is not None and os.environ.get("BARRO_ROOM_AUTO_DISCUSS", "0").strip().lower() in _TRUTHY:
+        _trig = [m for m in msgs if m.type in {"human", "question"} and m.from_agent != _AGENT_ID]
+        if _trig:
+            _topic = (_trig[-1].payload.get("text") or _trig[-1].topic or "").strip()
+            room_bus.save_cursor(_AGENT_ID, msgs[-1].ts)  # 선저장 — 재트리거 방지
+            if _topic:
+                _rounds = int(os.environ.get("BARRO_DISCUSS_ROUNDS", "2") or 2)
+                print(f"[coordinator] 사람/질문 감지 → 다자토론 트리거: {_topic[:60]}")
+                return _discuss(_topic, "", _rounds, timeout, dry)
     tallies = _tally_votes(room_bus.read_today())  # 투표는 당일 전체 기준
     prompt = _PROMPT.format(messages=_fmt_msgs(msgs))
     obj = _run_claude_cli(prompt, timeout)  # 로컬 claude CLI
