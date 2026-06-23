@@ -88,6 +88,13 @@ def _env_truthy(name: str, default: str = "") -> bool:
     return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
+# [6/23 매매복기] 진입 보호·선정 게이트 — 전부 default-OFF(byte-identical), .env.local 로 활성화.
+_OPEN_HOLD_HHMM = os.environ.get("BARRO_OPEN_HOLD_HHMM", "").strip()         # 개장 신규진입 보류 종료 HHMM(빈값=off)
+_CHASE_FLU_PCT = float(os.environ.get("BARRO_CHASE_FLU_PCT", "0") or 0)      # 당일급등 추격 차단 임계%(0=off)
+_MIN_ENTRY_PRICE = float(os.environ.get("BARRO_MIN_ENTRY_PRICE", "0") or 0)  # 동전주 진입 하한가(0=off)
+_DEGRADED_BLOCK = _env_truthy("BARRO_DEGRADED_BLOCK", "0")                   # 랭킹 degraded(trade_value 전부0) 진입 차단
+
+
 # BAR-OPS-33 (2026-06-08): 안정성 1위 swing_38 라이브 활성화. 4~6월 백테스트 최우수
 #   (승률55%·손익비7.36·기대값+5.34). 다일보유 청산은 STRATEGY_EXIT_PROFILES["swing_38"]
 #   (min_hold 3/max_hold 20)이 holding_evaluator 에서 게이트 → 당일 강제청산 안 됨.
@@ -874,6 +881,10 @@ async def _scan_and_buy(
     # 매수는 BUY_START 이후만
     if _now_kst().time() < BUY_START:
         return 0
+    # [6/23] 개장러시 군집진입 방지 — 첫 N분 신규진입 보류(BARRO_OPEN_HOLD_HHMM=HHMM).
+    if (_OPEN_HOLD_HHMM and len(_OPEN_HOLD_HHMM) == 4 and _OPEN_HOLD_HHMM.isdigit()
+            and _now_kst().time() < time(int(_OPEN_HOLD_HHMM[:2]), int(_OPEN_HOLD_HHMM[2:]))):
+        return 0
     # 일반 매수 전략 비활성(--strategies 빈 값) → 스캔 자체를 건너뜀(슈퍼트렌드 단독 운영).
     zone_strategies = getattr(args, "zone_strategies", DEFAULT_ZONE_STRATEGIES)
     if not zone_strategies:
@@ -891,6 +902,10 @@ async def _scan_and_buy(
 
     leaders = await picker.pick(top_n=args.top)
     if not leaders:
+        return 0
+    # [6/23] 랭킹 degraded(전 종목 trade_value 0 = 빈/0값 응답) 시 신규진입 차단(BARRO_DEGRADED_BLOCK).
+    if _DEGRADED_BLOCK and all(float(getattr(c, "trade_value", 0) or 0) == 0 for c in leaders):
+        print(f"  [{_now_kst():%H:%M:%S}][SKIP-DEGRADED] leaders trade_value 전부 0 — 랭킹 degraded, 신규진입 차단")
         return 0
 
     # 보유/당일매도/세션매수 제외
@@ -1014,6 +1029,12 @@ async def _scan_and_buy(
     signals = []
 
     for c in filtered:
+        # [6/23] 동전주 진입 하한가(BARRO_MIN_ENTRY_PRICE) — 저가·저유동 동전주 배제.
+        if _MIN_ENTRY_PRICE > 0 and float(getattr(c, "cur_price", 0) or 0) < _MIN_ENTRY_PRICE:
+            continue
+        # [6/23] 추격매수 가드(BARRO_CHASE_FLU_PCT) — 당일급등 추격을 전 전략(swing_38 포함) 차단.
+        if _CHASE_FLU_PCT > 0 and float(getattr(c, "flu_rate", 0) or 0) >= _CHASE_FLU_PCT:
+            continue
         try:
             candles = await fetcher.fetch_daily(symbol=c.symbol)
         except Exception:
