@@ -31,11 +31,12 @@ model: opus
    - 객관적 가중치를 Moderator 가 산정
 
 4. **Round 4 — 합의 시도 + 점수 산정**
-   - 7개 디멘션 (macro/fundamental/technical/event/sector/rag/pattern) × 가중치 (20/20/20/10/10/10/10)
-   - `vote_score = 50 + 50 × (합산 / 100)`
+   - 7개 디멘션 (macro/fundamental/technical/event/sector/rag/pattern) 각 [0~1] × 가중치 (20/20/20/10/10/10/10)
+   - `event_impact` 결정적 산식: `news_impact` 산출 시 `event_impact = materiality_confidence`, 미산출 시 `= sentiment_confidence`. 보조 `sentiment_confidence` 는 점수 가산이 아니라 **방향성 교차검증 전용** — materiality 와 sentiment 방향 상충 시 `×0.8`(confidence 조정만, 이중가중 방지). `news_impact.korea_conservative_flag=true` 시 추가 `×0.7`(※ fundamental 의 materiality 하향과 별개의 의도된 2차 안전마진 — layered conservatism). 결과 `clamp(0,1)`, `core_signal` 인용 필수
+   - `합산 = Σ(dimension_score[0~1] × weight)` (범위 0~100), `vote_score = 50 + 50 × (합산 / 100)` (범위 50~100)
 
 5. **Veto 조건 자동 검출**
-   - `barrotrade-macro-specialist.regime == 'crisis'`
+   - `barrotrade-macro-specialist.regime == 'regime_4'` (위기 국면 — macro 의 regime_1~4 taxonomy 와 정합)
    - `barrotrade-fundamental-specialist.audit_opinion ∈ {disclaimer, adverse, qualified}`
    - `barrotrade-rag-analyst.veto_keywords` 매칭
 
@@ -74,14 +75,15 @@ vote_score: 76.4
 decision: "PASS|FAIL_BELOW_THRESHOLD|VETO"
 user_profile: "balanced"
 veto_reason: null
-dimension_scores:
-  macro_alignment: 0.30
-  fundamental_safety: 0.45
-  technical_signal_quality: 0.55
-  event_impact: 0.20
-  sector_momentum: 0.15
-  rag_sentiment_confidence: 0.30
-  historical_pattern_match: 0.30
+dimension_scores:             # 각 [0~1]; 합산 = Σ(score × weight[20/20/20/10/10/10/10])
+  macro_alignment: 0.60
+  fundamental_safety: 0.55
+  technical_signal_quality: 0.60
+  event_impact: 0.45          # producer: 21_fundamental_report.md news_impact.materiality_confidence (+ 15_news_rag sentiment_confidence)
+  sector_momentum: 0.40
+  rag_sentiment_confidence: 0.50
+  historical_pattern_match: 0.43
+# 합산 = 12+11+12+4.5+4+5+4.3 = 52.8 → vote_score = 50 + 50×(52.8/100) = 76.4
 ```
 
 또한 `logs/consensus/<cycle_id>.jsonl` 에 라운드별 라인 append.
