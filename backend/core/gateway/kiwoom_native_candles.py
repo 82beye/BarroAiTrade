@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import time as _time
 from datetime import datetime, date
 from typing import Optional
 
@@ -34,6 +36,14 @@ def _abs_int(s: str) -> int:
     """가격 부호 정규화 — '-268500' → 268500."""
     s = (s or "0").lstrip("+-")
     return int(s) if s else 0
+
+
+# [6/24 종가러시 429 하드닝] chart(ka10080 분봉/ka10081 일봉) 지수 백오프 + 결과 캐시.
+#   종가베팅 scan 이 종가러시(15:00~15:20) 429 폭주에 starvation 되던 문제(6/24 종베 0건) 대응.
+_CHART_429_RETRY = int(os.environ.get("BARRO_CHART_429_RETRY", "3") or 3)
+_CHART_BACKOFF_BASE = float(os.environ.get("BARRO_CHART_BACKOFF_SEC", "1.0") or 1.0)
+_CHART_CACHE_SEC = float(os.environ.get("BARRO_CHART_CACHE_SEC", "0") or 0)  # 0=off
+_CHART_CACHE: dict = {}
 
 
 class KiwoomNativeCandleFetcher:
@@ -169,12 +179,18 @@ class KiwoomNativeCandleFetcher:
         list_key: str,
         parse_kind: str,
     ) -> list[OHLCV]:
+        # [6/24] 결과 캐시(종가러시 429 완화) — 동일 (tr,symbol,params) N초 재사용.
+        _ck = None
+        if _CHART_CACHE_SEC > 0:
+            _ck = (str(self._oauth.base_url), tr_id, symbol, parse_kind, tuple(sorted(body.items())))
+            _ent = _CHART_CACHE.get(_ck)
+            if _ent and (_time.monotonic() - _ent[0]) <= _CHART_CACHE_SEC:
+                return _ent[1]
         token = await self._oauth.get_token()
         client = self._http or httpx.AsyncClient(timeout=15)
         owns = self._http is None
         url = f"{self._oauth.base_url}{_CHART_PATH}"
-        _retries = 3
-        _retry_delay = 1.0
+        _retries = _CHART_429_RETRY
         try:
             for attempt in range(_retries):
                 try:
@@ -190,7 +206,7 @@ class KiwoomNativeCandleFetcher:
                         json=body,
                     )
                     if resp.status_code == 429 and attempt < _retries - 1:
-                        wait = _retry_delay * (attempt + 1)
+                        wait = _CHART_BACKOFF_BASE * (2 ** attempt)  # 지수 백오프
                         logger.warning("chart 429 rate-limit tr=%s sym=%s — %.1fs 후 재시도 (%d/%d)",
                                        tr_id, symbol, wait, attempt + 1, _retries)
                         await asyncio.sleep(wait)
@@ -207,7 +223,7 @@ class KiwoomNativeCandleFetcher:
                     break
                 except Exception as exc:
                     if attempt < _retries - 1:
-                        await asyncio.sleep(_retry_delay * (attempt + 1))
+                        await asyncio.sleep(_CHART_BACKOFF_BASE * (2 ** attempt))
                         continue
                     logger.error("kiwoom-native chart fetch failed: tr=%s sym=%s err=%s",
                                  tr_id, symbol, type(exc).__name__)
@@ -227,6 +243,8 @@ class KiwoomNativeCandleFetcher:
         # 응답 정렬: 최신 → 과거. 시뮬용은 시간 오름차순 필요 → reverse.
         out = [parser(symbol, r) for r in rows]
         out.sort(key=lambda c: c.timestamp)
+        if _ck is not None:
+            _CHART_CACHE[_ck] = (_time.monotonic(), out)
         return out
 
 
