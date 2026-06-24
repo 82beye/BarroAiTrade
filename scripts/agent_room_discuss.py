@@ -46,6 +46,8 @@ ROLES = [
     {"id": "risk-officer",    "persona": "리스크·노출·손절(SL)·드로다운·포지션 사이징·집중도/쏠림."},
     {"id": "execution-trader", "persona": "체결품질·진입 타이밍·슬리피지·API(429)·주문 운영·실행 가능성."},
     {"id": "strategy-quant",  "persona": "전략 성과·종목 선정·파라미터·승률/손익비·백테스트 정합성."},
+    {"id": "macro-specialist", "persona": "글로벌/美 거시 — Growth·Inflation Sentiment, 거시 regime(고성장저인플레/저성장고인플레/박스권/위기), 美증시(나스닥·SOX)·연준·VIX·환율의 한국 영향·전략 게이팅·섹터 회전."},
+    {"id": "trend-expert", "persona": "기술적 추세추종 — EMA(8/21/55)·ADX(14)·MACD. ADX≥25 게이트(whipsaw 방어)로 추세 강도·방향을 정량 판단(横보엔 비활성)."},
     {"id": "devils-advocate", "persona": "반론·맹점 지적·낙관 견제. 합의를 근거로 도전(groupthink 방지)."},
 ]
 
