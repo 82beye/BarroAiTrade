@@ -34,9 +34,19 @@ model: opus
    - 선택된 broker 의 자격증명 환경변수 존재
    - 일일 누적 손실이 회로 차단기 임계 이내인지
 
-4. **Dispatch plan 수립**
-   - mode 별 stage 시퀀스 결정 (cycle 은 전체 7 stage, analyze 는 I+II+III 만)
-   - 병렬 가능한 stage 는 동시 Task 호출
+4. **Dispatch plan 수립** (agents.json 의 stage/layer/available 참조)
+   - stage 배치(17 에이전트):
+     - 1 data: data-preprocessor → `10_market_snapshot.md`
+     - 2 analysis(**병렬**): macro-specialist(`20`)·fundamental-specialist(`21`)·rag-analyst(`15`)
+     - 3 strategy: trend-expert(`30`)
+     - 4 consensus: bull-researcher(`40`)·bear-researcher(`41`) **병렬** → debate-moderator(`50`)
+     - 5 risk: risk-manager(`60`) → 6 order: portfolio-pm(`70`) → 10 control: compliance-officer(`80`, order 직후 게이트)
+     - 종료 후 7 report(intraday-reporter)·8 reflect(self-reflector, 조건부)·10 compliance 사후감사
+   - mode 별 stage 시퀀스:
+     - cycle: 1→2→3→4→5→6→10→(7/8)  · analyze: 1→2→3  · debate: 2→3→4
+     - consensus: 4  · risk: 5  · order: 6→10  · reflect: 8  · doctor/init: pre-flight/scaffold
+   - `available:false` 에이전트는 graceful skip(현재 17종 모두 available:true) — bull/bear 누락 시 debate-moderator 의 "Bear 의무 호출" 규칙으로 사이클 abort
+   - 병렬 가능한 stage(2, 4의 bull/bear)는 동시 Task 호출
 
 5. **단계별 산출물 검증**
    - 각 stage 종료 시 산출 파일 존재 + frontmatter 필수 키 확인
