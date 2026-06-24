@@ -55,6 +55,11 @@ htmlcov/
 !.claude/team-agent/
 !.claude/team-agent/**
 .claude/team-agent/sessions/
+# [6/24] 에이전트 모드·스킬 정의 트래킹(개발머신 공유) — 런타임 외 정의는 git 전달.
+!.claude/agents/
+!.claude/agents/**
+!.claude/skills/
+!.claude/skills/**
 
 # IDE / Editor workspaces
 *.code-workspace

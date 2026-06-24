@@ -1,0 +1,8 @@
+{ "version": "scaffold-2026-06-24",
+  "regime_gates": {
+    "regime1_growth_lowinfl": ["trend", "event"],
+    "regime2_lowgrowth_highinfl": ["meanrev", "pattern"],
+    "regime3_sideways": [],
+    "regime4_crisis": []
+  },
+  "note": "macro-specialist regime → 활성 전략. regime3는 trend 강제 비활성, regime4 회로차단 권장." }

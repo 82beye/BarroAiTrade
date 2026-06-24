@@ -1,0 +1,5 @@
+{ "version": "scaffold-2026-06-24",
+  "atr_period": 14, "trailing": "variable",
+  "daily_loss_circuit_pct": -3.0,
+  "max_position_pct": 0.10, "max_total_pct": 0.80,
+  "note": "risk-manager ATR 동적 사이징 + 일일누적 손실 회로차단(-3%). 라이브 .env.local/policy.json과 정렬 권장." }

@@ -1,0 +1,6 @@
+{ "version": "scaffold-2026-06-24",
+  "real_order_endpoints_blocked": ["/uapi/.../order-cash", "/uapi/.../order-*", "/api/dostk/ordr(REAL)"],
+  "mode": "mock_only", "base_url_required": "mockapi.kiwoom.com",
+  "hitl_required_for": ["entry", "exit", "trim", "real_order"],
+  "hitl_expire_hours": 24,
+  "note": "★실거래 송출 금지. 현 시스템 mock+HITL. 실주문은 기존 LiveOrderGate/사람 승인만.★" }

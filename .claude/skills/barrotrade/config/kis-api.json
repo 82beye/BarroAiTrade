@@ -1,0 +1,3 @@
+{ "version": "scaffold-2026-06-24", "broker": "kis",
+  "base_url": "", "credentials_env": ["KIS_APP_KEY", "KIS_APP_SECRET"],
+  "enabled": false, "note": "현 시스템 미사용(kiwoom mock 전용). stub." }

@@ -1,0 +1,5 @@
+{ "version": "scaffold-2026-06-24",
+  "threshold": 70.0, "scale": 100,
+  "debate_rounds": 4,
+  "on_below_threshold": "block_order_trigger_reflect",
+  "note": "합의점수 < threshold → Stage VI(order) 진입 차단, reflect 자동 트리거." }

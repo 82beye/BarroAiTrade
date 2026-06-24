@@ -1,0 +1,5 @@
+{ "version": "scaffold-2026-06-24", "broker": "kiwoom",
+  "base_url": "https://mockapi.kiwoom.com",
+  "credentials_env": ["KIWOOM_APP_KEY", "KIWOOM_APP_SECRET"],
+  "order_endpoints_blocked": true,
+  "note": "라이브 BarroAiTrade는 .env.local KIWOOM_BASE_URL=mockapi 사용(실금0). order는 compliance로 차단." }
