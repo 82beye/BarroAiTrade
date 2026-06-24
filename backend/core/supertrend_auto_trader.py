@@ -26,7 +26,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+import os
+from datetime import datetime, time as _dtime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Awaitable, Callable, Optional, Sequence
 
@@ -42,6 +43,22 @@ from backend.models.market import TradingSession
 logger = logging.getLogger(__name__)
 
 _STRATEGY_ID = "supertrend"   # ActivePosition.strategy / audit strategy_id
+
+
+def _close_rush_active() -> bool:
+    """종가러시 throttle — 평일 BARRO_CLOSE_RUSH_START~END(default 15:00~15:20)에 봇 진입
+    스캔을 양보(종베 API 우선권). default OFF=무동작. 청산은 호출부에서 이미 수행됨."""
+    if os.environ.get("BARRO_CLOSE_RUSH_THROTTLE", "0").strip().lower() not in {"1", "true", "yes", "on"}:
+        return False
+    n = datetime.now(timezone(timedelta(hours=9)))
+    if n.weekday() >= 5:
+        return False
+    st = os.environ.get("BARRO_CLOSE_RUSH_START", "1500").strip()
+    en = os.environ.get("BARRO_CLOSE_RUSH_END", "1520").strip()
+    try:
+        return _dtime(int(st[:2]), int(st[2:])) <= n.time() <= _dtime(int(en[:2]), int(en[2:]))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 @dataclass
@@ -405,6 +422,10 @@ class SupertrendAutoTrader:
         if self._entry_cutoff_passed():
             logger.debug("슈퍼트렌드 진입 보류 — 컷오프(≥ %s) 이후(이월 리스크)",
                          self.config.entry_cutoff_time)
+            return result
+
+        # [6/24] 종가러시 throttle — 종베 API 우선권 위해 봇 진입 스캔 양보(청산 위에서 수행).
+        if _close_rush_active():
             return result
 
         # ── 진입: 유니버스 BUY 전환 (미보유만, 상한 준수) ────────────────────

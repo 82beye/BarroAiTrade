@@ -27,6 +27,7 @@ from backend.core.strategy.supertrend import compute_supertrend
 from backend.core.supertrend_auto_trader import (
     SupertrendAutoConfig,
     SupertrendAutoTrader,
+    _close_rush_active,
 )
 from backend.models.market import TradingSession
 
@@ -79,6 +80,10 @@ class LimitUpChaseTrader(SupertrendAutoTrader):
 
         # ── 청산 (limit_up_chase 포지션만) ───────────────────────────────────
         await self._run_exit_cycle(daily_pnl_pct, result)
+
+        # [6/24] 종가러시 throttle — 종베 API 우선권 위해 상따 진입 스캔 양보(청산 위에서 수행).
+        if _close_rush_active():
+            return result
 
         # ── 진입: 진입 시간창(start~end) 안에서만 ────────────────────────────
         if not self._entry_window_open():
