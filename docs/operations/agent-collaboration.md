@@ -139,6 +139,51 @@ python scripts/_daily_collab_summary.py --date 2026-06-24
 
 ---
 
+## cron 자동화 배선 (운영 머신)
+
+EOD(장 마감 15:30 KST 이후)에 일일 요약을 자동 생성하도록 배선한다. **운영 머신에서** 아래를 실행한다.
+
+### 빠른 배선 (셋업 스크립트)
+
+```bash
+cd ~/workspace/BarroAiTrade          # 운영 머신 repo 경로
+bash scripts/setup_daily_collab_cron.sh                 # ① 점검 + 등록 명령 출력만(설치 X)
+bash scripts/setup_daily_collab_cron.sh --install-cron  # ② crontab 등록(월-금 16:20, 멱등)
+# 또는 launchd(macOS):
+bash scripts/setup_daily_collab_cron.sh --install-launchd
+```
+
+- 기본 실행은 **점검만**(디렉터리 보장 + 컴파일 + 스모크 + 등록 라인 출력). 실제 설치는 `--install-*` 플래그로 opt-in(HITL).
+- 시각 변경: `COLLAB_HOUR=16 COLLAB_MIN=30 bash scripts/setup_daily_collab_cron.sh --install-cron`
+
+### 구성 요소
+
+| 파일 | 역할 |
+|------|------|
+| `scripts/run_daily_collab_summary.sh` | cron/launchd 가 호출하는 래퍼 — `.env.local` 로딩 · venv fallback · 중복실행 lock · 로그 |
+| `scripts/setup_daily_collab_cron.sh` | 배선 셋업(점검 + opt-in crontab/launchd 설치, 멱등) |
+| `infra/com.barro.daily-collab.plist.example` | launchd 템플릿(macOS, 월-금 16:20) |
+
+### 수동 등록 (crontab 직접)
+
+기존 cron 4건과 동일 패턴([[../05-paperclip/runbook-ops|runbook-ops]]):
+```cron
+20 16 * * 1-5 cd /Users/USERNAME/workspace/BarroAiTrade && bash scripts/run_daily_collab_summary.sh >> logs/daily_collab_summary.log 2>&1
+```
+
+### 검증 · 운영
+
+```bash
+bash scripts/run_daily_collab_summary.sh --date $(date +%F)   # 수동 1회
+tail -f logs/daily_collab_summary.log                         # 실행 로그
+ls -1 docs/operations/daily-collab/                           # 생성된 <date>.md
+```
+
+- 중복 실행은 `/tmp/barro-daily-collab.lock` 으로 방지(fail-open: 실행 중이면 skip).
+- read-only 집계 — 거래/주문 경로 미접촉. 데이터 없으면 graceful(헤더+안내).
+
+---
+
 ## 관련 문서
 
 - [[agent-advisory-runbook]] — advisory.json verdict 운영

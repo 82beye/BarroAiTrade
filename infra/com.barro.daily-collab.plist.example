@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  일일 협업 요약 launchd 템플릿 (운영 머신, macOS)
+
+  당일 에이전트 협업 결정 + 코드/설정 수정을 docs/operations/daily-collab/<date>.md 로 집계.
+  cron 대신 launchd 를 쓸 때 사용(둘 중 하나만).
+
+  설치(수동):
+    cp infra/com.barro.daily-collab.plist.example ~/Library/LaunchAgents/com.barro.daily-collab.plist
+    # USERNAME·경로 치환 후
+    sed -i '' "s#/Users/USERNAME/workspace/BarroAiTrade#$(pwd)#g; s#USERNAME#$(whoami)#g" \
+      ~/Library/LaunchAgents/com.barro.daily-collab.plist
+    launchctl load -w ~/Library/LaunchAgents/com.barro.daily-collab.plist
+  중지:
+    launchctl unload ~/Library/LaunchAgents/com.barro.daily-collab.plist
+  자동 설치:
+    bash scripts/setup_daily_collab_cron.sh --install-launchd
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.barro.daily-collab</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/USERNAME/workspace/BarroAiTrade/scripts/run_daily_collab_summary.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/USERNAME/workspace/BarroAiTrade</string>
+
+  <!-- 월(1)~금(5) 16:20 KST — 장 마감 15:30 + EOD 여유 -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>20</integer></dict>
+  </array>
+
+  <!-- 단발 EOD 작업 — 부팅 자동 실행/상시 유지 불필요 -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/USERNAME/workspace/BarroAiTrade/logs/daily_collab_summary.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/USERNAME/workspace/BarroAiTrade/logs/daily_collab_summary.err.log</string>
+</dict>
+</plist>
