@@ -388,6 +388,7 @@ def _maybe_telegram(verdicts: list[dict]) -> None:
 
 
 _last_market_msg: str | None = None
+_last_market_ts: float = 0.0  # [6/25] 시장국면 텔레그램 throttle(monotonic)
 
 
 def build_market_message(data_dir: Path) -> str:
@@ -407,9 +408,14 @@ def build_market_message(data_dir: Path) -> str:
 
 def _maybe_telegram_market(data_dir: Path) -> None:
     """market-context 섹션을 텔레그램 표시. 변경 없으면 재전송 안 함(스팸 방지). 실패 무시."""
-    global _last_market_msg
+    global _last_market_msg, _last_market_ts
+    import time as _t
     msg = build_market_message(data_dir)
     if not msg or msg == _last_market_msg:
+        return
+    # [6/25] 시장국면 텔레그램 최소 간격(default 15분) — 1분 스팸 방지. 0=무제한.
+    _iv = float(os.environ.get('BARRO_MARKET_TG_INTERVAL_MIN', '15') or 15) * 60
+    if _iv > 0 and _last_market_ts and (_t.monotonic() - _last_market_ts) < _iv:
         return
     try:
         import asyncio
@@ -420,6 +426,7 @@ def _maybe_telegram_market(data_dir: Path) -> None:
             return
         asyncio.run(notifier.send(msg))
         _last_market_msg = msg
+        _last_market_ts = _t.monotonic()
     except Exception:
         pass
 
