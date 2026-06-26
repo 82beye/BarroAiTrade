@@ -446,7 +446,12 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
 
     decisions = evaluate_all(balance.holdings, policy, contexts)
     # [사용자 요청 2026-06-18] 종베 보유분 + [2026-06-22] 수동관리 보유분(예스티 등)은 자동청산 제외 — 수동매도 전용.
-    _no_autosell = _closing_bet_held() | _manual_hold_held()
+    # [2026-06-26] 전략 없는 수동매매 종목도 자동청산 제외
+    _manual_trade_syms = {
+        h.symbol for h in balance.holdings
+        if not (active_positions.get(h.symbol) and (active_positions[h.symbol].strategy or "").strip())
+    }
+    _no_autosell = _closing_bet_held() | _manual_hold_held() | _manual_trade_syms
     if _no_autosell:
         decisions = [d for d in decisions if d.symbol not in _no_autosell]
 
