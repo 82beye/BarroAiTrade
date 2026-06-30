@@ -735,18 +735,22 @@ _CUTOFF_EXEMPT_STRATEGIES = {"swing_38"}
 
 # [2026-06-22] EOD 강제청산(carry-limit 이월한도 트림) 제외 전략 — 다일보유가 설계인
 #   swing_38 은 이월이 의도(L653 참조)이므로, 이월총액 한도(20%) 초과 트림에서도 명시 보존한다.
-#   (종베는 _closing_bet_held() 로 별도 제외 — 수동관리 전용.) 장중 보유평가의 자체 손절·시간청산은
-#   그대로 적용되므로(여기서 제외하지 않음), 이 면제는 'EOD 강제 트림'에만 한정된다.
+#   (종베/수동관리 보유분은 심볼 기준으로 별도 제외.) 전략 태그가 비어 있는 보유분도 수동/외부
+#   매매로 간주해 자동 강제청산하지 않는다. 장중 보유평가의 자체 손절·시간청산과는 무관하며,
+#   이 면제는 'EOD 강제 트림'에만 한정된다.
 _FORCE_CLOSE_EXEMPT_STRATEGIES = {"swing_38"}
 
 
 def _force_close_skip(symbol: str, strategy: str | None, cb_skip: set[str]) -> bool:
     """EOD 강제청산(carry-limit)에서 해당 보유분을 건너뛸지 판정.
 
-    True 면 청산 제외: ① 종베(closing_bet) 보유분(수동관리 전용) ②다일보유 면제 전략(swing_38).
+    True 면 청산 제외: ① 종베/수동관리 보유분 ②전략 태그 없는 수동/외부 매매 보유분
+    ③다일보유 면제 전략(swing_38).
     장중 보유평가의 자체 손절/시간청산과는 무관(여기는 'EOD 강제 트림' 전용 게이트).
     """
     if symbol in cb_skip:
+        return True
+    if not (strategy or "").strip():
         return True
     if strategy in _FORCE_CLOSE_EXEMPT_STRATEGIES:
         return True
@@ -1554,7 +1558,7 @@ async def _eod_carry_limit(args, oauth, notifier) -> int:
             break
         strategy = getattr(book.get(h.symbol), "strategy", None) if book else None
         if _force_close_skip(h.symbol, strategy, _cb_skip):
-            continue  # 종베(수동관리) + 다일보유 면제전략(swing_38) EOD 강제청산 제외
+            continue  # 종베/수동관리 + 전략없음 + 다일보유 면제전략(swing_38) EOD 강제청산 제외
         try:
             r = await gate.place_sell(symbol=h.symbol, qty=int(h.qty),
                                       strategy_id=strategy)
