@@ -5,7 +5,7 @@
 - **대상**: BarroAiTrade (mock-live, 실금 아님)
 - **결과**: 총 58건 — CONFIRMED 39 · PLAUSIBLE 11 · REJECTED 5 · positive 3
 - **심각도**: 🔴 critical 5 · 🟠 high 15 · 🟡 medium 22 · 🔵 low 8
-- **⚠️ 커버리지 노트**: 활성 핵심전략 **supertrend는 이 배치에서 StructuredOutput 실패로 누락** → 단독 재분석 별도 진행(완료 시 이 문서에 §추가).
+- **커버리지 노트**: 활성 핵심전략 supertrend는 초기 배치에서 StructuredOutput 실패로 누락됐으나 **단독 재분석 완료 → 아래 「Supertrend 단독 재분석」 섹션 참조**.
 
 ## 요약 (Executive Summary)
 
@@ -329,3 +329,36 @@ fix_safety 분류: safe_auto 27 · needs_restart 14 · risky_hitl 9
 
 ---
 *멀티에이전트 전략 리뷰 워크플로우(run `wf_734b31ea-f11`)의 적대적 검증 통과 결과. mock 환경 현실 영향 보정. 실거래 주문 미호출. supertrend 단독 재분석 결과는 별도 추가 예정.*
+
+## Supertrend 단독 재분석 (활성 핵심전략, 보완)
+
+> 초기 배치 누락분 보완. 4개 파일(supertrend.py, supertrend_auto_trader.py, intraday_buy_daemon.py, run_telegram_bot.py) + 게이트·정책·env 교차 확인. 읽기 전용, 수정안은 미적용 제안.
+
+### 🟠 [HIGH] MAX_ORDERS=0 = 매수 무한 (needs_restart)
+- **경로**: `.env.local:122` → 봇 `run_telegram_bot.py:597`(daily_max_orders=0) → `live_order_gate.py:198` 체크 skip.
+- **영향**: 휩쏘장에서 진입/청산 폭주 → Kiwoom 429 플러드(6/15 인시던트) 재현 위험. 현 완화책은 MAX_ENTRIES=1+cooldown30+maxpos10뿐이라 종목 로테이션 시 총주문 무제한.
+- **수정**: 일한도 50~100 캡 복원.
+
+### 🟠 [HIGH] 트레일 청산 미작동 (needs_restart)
+- **경로**: `run_telegram_bot.py:640` env default "0" → trail_atr_mult=0 (dataclass default 3.0을 env가 덮어씀).
+- **영향**: 6/8 백테스트에서 -3.27%→+2.73% 흑자전환의 핵심이던 트레일 청산 개선이 **라이브에 미적용**. 현재 hard_stop -6%·TP +5%만 방어.
+- **수정**: `SUPERTREND_AUTO_TRAIL_ATR=3` 설정.
+
+### 🟠 [HIGH] entry_lookback=100 과확장 (risky_hitl)
+- **경로**: `.env.local:57` → `supertrend_auto_trader.py:470`.
+- **영향**: 설계상 flip 이벤트(N=2) 진입이 "상승추세면 늦게라도 진입"으로 변질. FLIP 강도게이트(`:671`)가 최대 100봉 전 flip 기준으로 측정돼 사실상 무력화 → 만료된 추세의 고점 진입.
+- **수정**: 5~10으로 축소 + out-of-sample 재검증. (진입빈도 급변 → HITL)
+
+### 🟡 [MEDIUM] 게이트 분절/교차오염 (risky_hitl)
+- **경로**: 봇·데몬이 동일 `order_audit.csv` 공유, `_count_today_buys`(`:355`)는 전역 집계.
+- **영향**: supertrend(cap0)는 무한이나 그 매수가 데몬 budget(policy.json=300) 카운트를 잠식 → 일반전략 조기차단 유발. 반대로 supertrend는 어떤 캡에도 안 걸림(비대칭).
+- **수정**: 전략별 count 분리 또는 통합 글로벌 캡.
+
+### 🔵 [LOW] 마지막 5분봉 repaint (needs_restart)
+- 폴링이 봉경계와 미동기 → forming bar로 trend/buy_signal이 intrabar 흔들림. 단 `compute_supertrend`/`compute_adx`(`supertrend.py:174-205`) 자체는 완전 인과적(룩어헤드 없음). 완화: 확정봉 기준 평가.
+
+### ⚪ 정상 확인 (positive)
+지표는 Pine 충실·인과적(룩어헤드 없음). `min_price=1000` + `_cap_qty`(5000주/5M원)로 동전주 수량폭주(6/2 252670 사고) 차단. exclude_etf/leverage·MAX_ATR 0.05·MAX_OPEN_GAP 15·MAX_ENTRY_GAP 3·재진입가드·daily_loss -3%(sticky latch, `daily_gate_input`=실현net+평가/예탁 보수적) 모두 배선·활성 확인. 데몬은 SUPERTREND_AUTO_ENABLED=1이면 봇에 양보(`_supertrend_yield_to_bot`) → 이중주문 없음.
+
+### Supertrend 종합
+현재 mock 안전. 지표·동전주가드·손실래치 등 방어의 기본 골격은 견고하나, **라이브에서 트레일 청산이 꺼져있고(HIGH) 일일주문한도가 해제(HIGH)돼 있어 6/15式 주문폭주 재발 소지**가 있다. entry_lookback=100은 진입 타이밍을 늦춰 고점진입 위험을 키운다. 세 HIGH 모두 env/param 조정(재시작·HITL)이며 코드 로직 자체 버그는 아님.
