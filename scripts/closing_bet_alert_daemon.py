@@ -196,12 +196,17 @@ def sell_signals(pos: dict, cur: float, now: datetime) -> list[tuple[str, str]]:
         out.append(("TP", f"+{tp:.1f}% 익절 도달"))
     if cur <= e * (1 - sl / 100):
         out.append(("SL", f"-{sl:.1f}% 손절 도달"))
-    ed = date.fromisoformat(pos["entry_date"])
-    if now.date() > ed and now.time() >= dtime(10, 0):
-        out.append(("MORNING", "익일 10시 정산 시각 — 아침 슈팅 정리 구간"))
-    held = (now.date() - ed).days
-    if held >= 3:
-        out.append(("D3", f"D{held} 보유한도(달력일) 도달"))
+    try:
+        ed = date.fromisoformat(str(pos["entry_date"]))
+    except (ValueError, KeyError, TypeError):
+        print(f"  [CB-WARN] {pos.get('symbol','?')} entry_date 파싱 실패({pos.get('entry_date')!r}) — MORNING/D3 시그널 skip")
+        ed = None
+    if ed is not None:
+        if now.date() > ed and now.time() >= dtime(10, 0):
+            out.append(("MORNING", "익일 10시 정산 시각 — 아침 슈팅 정리 구간"))
+        held = (now.date() - ed).days
+        if held >= 3:
+            out.append(("D3", f"D{held} 보유한도(달력일) 도달"))
     fired = set(pos.get("alerted", []))
     return [(k, m) for k, m in out if k not in fired]
 
@@ -211,7 +216,8 @@ def _cache_price(symbol: str) -> float | None:
     p = _MAIN_DATA / "ohlcv_cache" / f"{symbol}.json"
     if not p.exists():
         return None
-    d = json.load(open(p))["data"]
+    with open(p) as _f:
+        d = json.load(_f)["data"]
     return float(d[-1]["close"]) if d else None
 
 
@@ -260,7 +266,9 @@ def _load_daily(symbol: str) -> list[OHLCV]:
     if not p.exists():
         return []
     out = []
-    for r in json.load(open(p))["data"]:
+    with open(p) as _f:
+        _rows = json.load(_f)["data"]
+    for r in _rows:
         out.append(OHLCV(symbol=symbol, timestamp=datetime.strptime(str(r["date"]), "%Y%m%d"),
                          open=float(r["open"]), high=float(r["high"]), low=float(r["low"]),
                          close=float(r["close"]), volume=float(r["volume"]), market_type=MarketType.STOCK))
