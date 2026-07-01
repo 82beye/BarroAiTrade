@@ -22,6 +22,19 @@
 
 > `python3 -m py_compile` 구문 검증 통과. 라이브 데몬(main 체크아웃)은 미변경 — 재시작 전까지 효과 없음.
 
+### [2026-07-01 추가 적용 · 라이브 반영 완료] supertrend 트레일 청산 복원
+
+사용자 지시로 supertrend 트레일 청산(HIGH)을 **라이브에 즉시 반영**했다.
+
+| 항목 | 내용 |
+|------|------|
+| 변경 | `.env.local`: `SUPERTREND_AUTO_TRAIL_ATR` (주석·기본 0) → **`=3`** |
+| 근거값 | dataclass 기본 3.0 + 6/8 백테스트 검증(트레일 단독 -3.27%→+0.93%, TP5%·range0.90 결합 +2.73%). `take_profit_pct`(5.0)·`max_intraday_range_pos`(0.90)는 봇이 오버라이드 안 해 기본값 유지 → 트레일만 켜면 검증 조합 완성 |
+| 배포 | `.env.local` 백업(`.env.local.bak.20260702_085504`) 후 편집 → 봇 재시작(`launchctl kickstart -k com.barroai.telegram-bot`) |
+| 검증 | 신규 PID 14015(08:55:15 기동, .env 편집 08:55:04 이후) · 기동로그 `🛡 ATR 트레일링 청산 ON — 고점종가 −3×ATR 이탈 시 청산` · 단일 인스턴스(409 없음) · Telegram getMe 200 |
+| 롤백 | `.env.local`에서 해당 라인 `=0` 또는 재주석 후 봇 재시작 |
+| 부가 | 봇 err 로그의 `poll cycle failed`(ConnectTimeout)은 누적 23,427건의 **기존 만성 이슈**로 이번 변경과 무관(재시작 후 미증가·getMe 정상). supertrend 자동매매 루프는 telegram 폴링과 독립 |
+
 ## 교차전략 위험 (Cross-Strategy)
 
 # BarroAiTrade 멀티 전략 결함 분석 — Cross-Strategy 위험 & Top3 조치
@@ -339,10 +352,10 @@ fix_safety 분류: safe_auto 27 · needs_restart 14 · risky_hitl 9
 - **영향**: 휩쏘장에서 진입/청산 폭주 → Kiwoom 429 플러드(6/15 인시던트) 재현 위험. 현 완화책은 MAX_ENTRIES=1+cooldown30+maxpos10뿐이라 종목 로테이션 시 총주문 무제한.
 - **수정**: 일한도 50~100 캡 복원.
 
-### 🟠 [HIGH] 트레일 청산 미작동 (needs_restart)
+### 🟠 [HIGH] 트레일 청산 미작동 → ✅ **[2026-07-01 해결·라이브 반영 완료]**
 - **경로**: `run_telegram_bot.py:640` env default "0" → trail_atr_mult=0 (dataclass default 3.0을 env가 덮어씀).
-- **영향**: 6/8 백테스트에서 -3.27%→+2.73% 흑자전환의 핵심이던 트레일 청산 개선이 **라이브에 미적용**. 현재 hard_stop -6%·TP +5%만 방어.
-- **수정**: `SUPERTREND_AUTO_TRAIL_ATR=3` 설정.
+- **영향**: 6/8 백테스트에서 -3.27%→+2.73% 흑자전환의 핵심이던 트레일 청산 개선이 **라이브에 미적용**이었음. 현재 hard_stop -6%·TP +5%만 방어.
+- **수정**: `SUPERTREND_AUTO_TRAIL_ATR=3` 설정 → **적용 완료(봇 PID 14015 트레일 ON 확인)**. 상세는 위 「트레일 청산 복원」 절.
 
 ### 🟠 [HIGH] entry_lookback=100 과확장 (risky_hitl)
 - **경로**: `.env.local:57` → `supertrend_auto_trader.py:470`.
