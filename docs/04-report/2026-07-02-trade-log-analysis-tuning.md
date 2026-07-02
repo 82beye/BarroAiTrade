@@ -222,3 +222,10 @@ OPTION 1 (Safe via env
 - DCA는 "BAR-166 방어적 매수"로 **의도적 설계**. 일일손실 편입은 나쁜 날 물타기 폭주를 막지만, 반대로 반등 직전 저점 물타기 기회를 놓칠 수 있음(설계 트레이드오프).
 - 대안: 완전 편입 대신 **DCA 전용 별도 상한**(예: -6%)이나 **당일 DCA 횟수 캡**(supertrend MAX_ENTRIES=1 대칭)이 더 균형적일 수 있음.
 - ∴ 접근법 선택은 사용자 결정. 위 스펙은 "완전 편입" 버전이며 env default-OFF라 배선해도 무영향, 승인 시 `=1`로 활성.
+
+### [2026-07-02 구현 완료] DCA 서킷브레이커 편입 적용
+사용자 승인("스펙대로 구현") → 구현·배포·활성.
+- **코드**(main `cfe6e50`, 워크트리 `1fde864`): `intraday_buy_daemon.py` — import에 `DailyLossLimitExceeded` 추가, `_evaluate_and_sell` DCA 게이트에 `BARRO_DCA_RESPECT_DAILY_LOSS` 분기(=1시 `daily_loss_limit_pct=cfg.daily_loss_limit` + `daily_pnl_pct=compute_daily_gate_input(account,balance)` 전달), place_buy에 daily_pnl_pct 전달, DailyLossLimitExceeded 캐치(DCA 중단).
+- **검증**: py_compile OK · byte-identical(미설정=-100·0.0 동일) · 476 passed.
+- **활성**: `.env.local BARRO_DCA_RESPECT_DAILY_LOSS=1` (백업 .bak.20260702_125947). ★데몬 cron 관리라 **내일 08:58 크론 재기동 시 반영**(장중 데몬 미종료)★. 되돌리기=0.
+- **효과**: 일일손실 -3%(계좌대비, 버그없는 compute_daily_gate_input) 도달 시 DCA 물타기 중단 → 나쁜날 물타기 폭주 차단.
