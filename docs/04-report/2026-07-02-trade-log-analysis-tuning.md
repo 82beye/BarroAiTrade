@@ -178,3 +178,26 @@ OPTION 1 (Safe via env
 2. CB auto-sell 체결확인(접수정체 대응) — ka10075/잔고재조회.
 3. 전략횡단 종목 집중도 캡.
 4. zone avg_loss>SL(3.3배) 근본원인 포렌식(SL미발화/갭/DCA).
+
+## 9. [2026-07-02 자율조사] zone SL 괴리 근본원인 규명 (퀀트 후속 #4)
+
+퀀트가 "avg_loss -5% vs SL -1.5%(3.3배)" 근본원인 규명을 우선순위로 지목 → 조사 완료. **"SL 미발화"가 아니라 아래 3중 구조.**
+
+### (1) 실제 enforced SL은 -4% (게이트 분절)
+- 튜닝에서 본 SL -1.5%는 **전략 exit_plan**(sf_zone.py:80) 값. 그러나 **데몬 holding_evaluator 프로파일이 f/sf/gold 전부 `stop_loss_pct=-4.0`으로 덮음**(holding_evaluator.py:108/118/128). 데몬 장중 `evaluate_all`(L447)이 이 -4%로 SL 판정.
+- ∴ 평균손실 -5% ≈ SL -4% + 슬리피지/갭. "SL이 안 걸린다"는 오해 — 실제 -4%에서 걸림.
+
+### (2) ★DCA 물타기가 손실 증폭 + 일일손실한도 우회 (핵심 리스크 홀)★
+- 데몬은 **의도적 DCA 분할매수** 기능 보유(intraday_buy_daemon.py:458~493). zone 매수일 **69일 중 46일(67%)이 DCA**(동일종목 당일 복수매수). swing_38만 `_NO_DCA_STRATEGIES` 제외.
+- **`:469` "BAR-166: DCA는 방어적 매수 — 일일 손실 한도 적용 불필요"** → DCA 매수가 -3% 일일손실 게이트를 **건너뜀**. 나쁜 날 손실종목에 무제한 물타기 가능 = 퀀트가 우려한 "포트폴리오 차단기 부재"의 정확한 실체(차단기는 -3%로 있으나 DCA가 우회).
+- 물타기로 평단 기저 확대 → -4% SL이라도 실현손실 절대액이 단일진입 SL 초과. **zone 손실구조의 진짜 증폭기.**
+- 오늘(07-02) `042660` gold_zone: DCA 2회 ORDERED + **2건 UNFILLED(접수정체, 6/8 이슈 재현)**.
+
+### (3) swing_38 min_hold_days=3 → 당일 SL 청산 차단
+- holding_evaluator.py:152 swing_38 `min_hold_days=3` → 진입 후 3일 미만 청산평가 차단. 당일 급락해도 못 자름 → swing avg_loss -11.36% 설명. (closing_bet은 min_hold 1/max 3.)
+
+### 권고 (HITL — DCA는 의도적 설계라 신중)
+1. ★**DCA를 일일손실한도에 편입**★(`:469` 예외 제거) 또는 DCA 전용 일일 상한 — 최우선. 나쁜 날 물타기 폭주 차단.
+2. zone 당일 DCA 횟수 캡(예: max 1~2회) — supertrend `MAX_ENTRIES=1` 대칭.
+3. mock 접수정체(UNFILLED) 체결확인 로직(§8 auto-sell 후속과 공통).
+4. SL 정의 이원화(전략 -1.5% vs 데몬 -4%) 정합 — 게이트 분절 해소의 일부.
