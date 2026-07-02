@@ -201,3 +201,24 @@ OPTION 1 (Safe via env
 2. zone 당일 DCA 횟수 캡(예: max 1~2회) — supertrend `MAX_ENTRIES=1` 대칭.
 3. mock 접수정체(UNFILLED) 체결확인 로직(§8 auto-sell 후속과 공통).
 4. SL 정의 이원화(전략 -1.5% vs 데몬 -4%) 정합 — 게이트 분절 해소의 일부.
+
+## 10. [2026-07-02 자율] DCA 서킷브레이커 우회 — 검증된 수정 스펙 (구현 대기, HITL)
+
+§9 최우선 리스크(DCA가 -3% 일일손실 게이트 우회)의 정확한 수정 스펙. 코드 확인 결과 **우회는 이중 구조** — 스펙도 그에 맞춰 3부분.
+
+### 우회 메커니즘 (확인)
+- `intraday_buy_daemon.py:465` DCA 게이트가 `daily_loss_limit_pct=Decimal("-100.0")`로 명시적 무력화.
+- `:511-513` DCA `place_buy`가 **`daily_pnl_pct`를 미전달** → 게이트가 현재손익을 default 0.0으로 봄. ∴ 한도값만 -3으로 바꿔도 `0 > -3`이라 영원히 미발동. **한도값+일일손익 이중 우회.**
+
+### 정확한 수정 (default-OFF, byte-identical)
+정상 매수경로 패턴 미러: `:1294 daily_pnl_pct = await compute_daily_gate_input(account, balance)` + `:1324 place_buy(..., daily_pnl_pct=daily_pnl_pct)`.
+
+1. **env 플래그**: `BARRO_DCA_RESPECT_DAILY_LOSS`(default 0=현행 -100 exempt, byte-identical).
+2. **DCA 함수(~447-527)에서 daily_pnl_pct 계산**: `account` 스코프 확보 후 `dca_pnl = await compute_daily_gate_input(account, balance)`. (`balance`는 :476에 있음; `account`가 해당 함수 스코프에 없으면 호출부에서 인자 전달 필요 — 구현 시 확인.)
+3. **게이트 한도 조건부**: `:465` `daily_loss_limit_pct` 를 `_dca_respect ? (정책값 예 SUPERTREND_AUTO_DAILY_LOSS_LIMIT/-3.0) : Decimal("-100.0")`.
+4. **place_buy에 전달**: `:511` `gate.place_buy(symbol=h.symbol, qty=tranche.qty, strategy_id=pos.strategy, daily_pnl_pct=dca_pnl if _dca_respect else Decimal("0.0"))`.
+
+### 왜 HITL인가
+- DCA는 "BAR-166 방어적 매수"로 **의도적 설계**. 일일손실 편입은 나쁜 날 물타기 폭주를 막지만, 반대로 반등 직전 저점 물타기 기회를 놓칠 수 있음(설계 트레이드오프).
+- 대안: 완전 편입 대신 **DCA 전용 별도 상한**(예: -6%)이나 **당일 DCA 횟수 캡**(supertrend MAX_ENTRIES=1 대칭)이 더 균형적일 수 있음.
+- ∴ 접근법 선택은 사용자 결정. 위 스펙은 "완전 편입" 버전이며 env default-OFF라 배선해도 무영향, 승인 시 `=1`로 활성.
