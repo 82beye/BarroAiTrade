@@ -152,3 +152,29 @@ OPTION 1 (Safe via env
 - **"고장나지 않은 걸 고치지 마라"**: supertrend는 활성전략 중 유일 최선(PF 0.95·평균손실 -2.39% 타이트, 트레일3 복원 효과). entry_lookback=100이 이 전략을 명백히 훼손한 증거 없음. 검증 없이 잘 도는 전략의 진입로직 변경은 유일 작동전략 훼손 위험.
 - 권고는 risky_hitl·"OOS 선행 필요"로 분류된 **가설**(검증된 개선 아님).
 - **적용 조건**: (1) 5m 히스토리를 대표 유니버스로 수집 → entry_lookback {2,5,10,20,100} sweep 백테스트, (2) 우위 확인 시에만 DRY_RUN 관찰 후 반영. 그 전까지 100 유지.
+
+## 8. [2026-07-02] daytrading-quant 전문가 검토 + 보정 조치
+
+퀀트 전문가(daytrading-quant) 서브에이전트가 §6 수정 전체를 읽기전용 검토. 실제 결함 3건 확인 → 보정.
+
+### 검토가 짚은 결함 & 보정
+| 지적 | 판정 | 조치 |
+|------|------|------|
+| **overnight "carry_gap_stop -3% 보호"가 미작동** — `limit_up_chase_trader.py:180-238` `_run_exit_cycle` override가 부모의 `_carry_gap_stop_hit` 미호출. 오버나잇 갭 무보호(hard_stop-4%만, 갭다운 시가체결 -10~20% 가능) | 🔴 제 판단오류 확인 | **overnight→daily 되돌림**(.env.local) + 오칭 주석 정정. 봇 재시작 |
+| **auto-sell 제출-즉시제거 → mock 미접수 시 orphan** | 🔴 타당 | `_cb_auto_sell` 접수확인(order_no+rc 성공)된 실주문만 포지션제거, 거부시 유지·재시도(main ab85e7a). ※접수≠체결 완전대응은 후속 |
+| **포트폴리오 서킷브레이커 부재(-100 OFF)** | ⚠️ 부분오판정 | ★실제 -100은 주석(6/10 이력)이고 활성값은 `SUPERTREND_AUTO_DAILY_LOSS_LIMIT=-3.0`+`policy.json -3.0`★ — 차단기 켜져있음. |
+
+### daily_loss_limit 과대계상 버그 확인 (사용자 조건부 요청)
+- 봇 경로 `daily_gate_input.py:152`: `(realized+eval_pnl)/estimated_deposit` = **계좌대비(수정 완료)**.
+- 데몬 경로 `intraday_buy_daemon.py:808`: 여전히 invested-relative(`total_pnl_rate`) = **과대계상 잔존** — 단 손실%를 과대계상 → **조기차단(과보수)** 방향이라 안전측 오류(구멍 아님).
+- **결론**: daily_loss_limit은 이미 -3% 작동 중이고 데몬은 과보수적 → **완화/변경 불필요·미적용**(데몬 계산 정정은 게이트를 느슨하게 만들어 안전상 보류).
+
+### 포렌식 (전문가 우선순위 지적)
+- **"?" 미귀속 -1,491,463원 = 수동매매**: 전량 예스티(122640, 9건 -1.39M)·다스코(058730, 12건 -96K), 둘 다 order_audit 매수기록 없음 = 사용자 수동/외부 진입. **자동전략 버그 아님**(태깅 정상, auto-SL 제외 대상). 자동전략들은 이 손실과 무관.
+- **전략간 교차진입**: 87 매수종목 중 **28종(32%)을 2+ 전략이 매수**(예: 080220=closing_bet+gold_zone+supertrend). 종목당 전략횡단 집중 캡 부재 → 손실 증폭 가능. **후속(코드): per-symbol cross-strategy 캡 검토.**
+
+### 잔여 후속(HITL/코드)
+1. limit_up_chase: overnight 재도입하려면 `_run_exit_cycle`에 carry_gap_stop 실배선 필요(현재 daily).
+2. CB auto-sell 체결확인(접수정체 대응) — ka10075/잔고재조회.
+3. 전략횡단 종목 집중도 캡.
+4. zone avg_loss>SL(3.3배) 근본원인 포렌식(SL미발화/갭/DCA).
