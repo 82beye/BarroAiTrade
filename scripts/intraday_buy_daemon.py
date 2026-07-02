@@ -53,7 +53,7 @@ from backend.core.risk.market_context import (
 from backend.core.risk.theme_map import load_theme_map
 from backend.core.risk.daily_gate_input import compute_daily_gate_input
 from backend.core.risk.live_order_gate import (
-    GatePolicy, LiveOrderGate, DailyOrderLimitExceeded,
+    GatePolicy, LiveOrderGate, DailyOrderLimitExceeded, DailyLossLimitExceeded,
 )
 from backend.core.backtester.market_regime import (
     MarketRegime, classify_regime, regime_weights,
@@ -446,12 +446,7 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
 
     decisions = evaluate_all(balance.holdings, policy, contexts)
     # [사용자 요청 2026-06-18] 종베 보유분 + [2026-06-22] 수동관리 보유분(예스티 등)은 자동청산 제외 — 수동매도 전용.
-    # [2026-06-26] 전략 없는 수동매매 종목도 자동청산 제외
-    _manual_trade_syms = {
-        h.symbol for h in balance.holdings
-        if not (active_positions.get(h.symbol) and (active_positions[h.symbol].strategy or "").strip())
-    }
-    _no_autosell = _closing_bet_held() | _manual_hold_held() | _manual_trade_syms
+    _no_autosell = _closing_bet_held() | _manual_hold_held()
     if _no_autosell:
         decisions = [d for d in decisions if d.symbol not in _no_autosell]
 
@@ -464,10 +459,17 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     sl_symbols = {d.symbol for d in decisions if d.signal in _SELL_SIGNALS}
 
     executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
+    # BAR-166: DCA는 방어적 매수 — 기본은 일일 손실 한도 미적용(-100 exempt).
+    # [2026-07-02] BARRO_DCA_RESPECT_DAILY_LOSS=1 → DCA도 일일손실 게이트 적용(서킷브레이커 우회 차단).
+    #   우회는 이중구조였음: 한도값(-100) + place_buy 에 daily_pnl_pct 미전달(게이트가 0%로 봄).
+    #   → 두 부분 모두 조건부 정정. default 0 = 기존 -100 exempt·pnl 0.0 (byte-identical).
+    #   정책값 = policy.json daily_loss_limit(cfg, 정상 매수경로 :1302 와 동일).
+    _dca_respect = os.environ.get("BARRO_DCA_RESPECT_DAILY_LOSS", "0").strip().lower() in {"1", "true", "yes", "on"}
+    _dca_loss_limit = Decimal(str(cfg.daily_loss_limit)) if _dca_respect else Decimal("-100.0")
+    _dca_pnl_pct = (await compute_daily_gate_input(account, balance)) if _dca_respect else Decimal("0.0")
     gate = LiveOrderGate(
         executor=executor, audit_path=args.audit_log,
-        # BAR-166: DCA는 방어적 매수 — 일일 손실 한도 적용 불필요.
-        policy=GatePolicy(daily_loss_limit_pct=Decimal("-100.0"),
+        policy=GatePolicy(daily_loss_limit_pct=_dca_loss_limit,
                           daily_max_orders=cfg.daily_max_orders),
         notifier=notifier,
     )
@@ -514,7 +516,8 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
                 # 미전달 시 strategy_id 가 빈칸으로 기록돼 전략별 실현손익 귀속이
                 # 'unknown' 버킷에 격리됨(5/29 018880 DCA 행 빈칸). pos 는 232줄 로드.
                 r = await gate.place_buy(
-                    symbol=h.symbol, qty=tranche.qty, strategy_id=pos.strategy
+                    symbol=h.symbol, qty=tranche.qty, strategy_id=pos.strategy,
+                    daily_pnl_pct=_dca_pnl_pct,   # [2026-07-02] DCA도 일일손실 게이트 반영(_dca_respect 시)
                 )
                 tag = "DRY_RUN" if r.dry_run else "DCA"
                 ts = _now_kst().strftime("%H:%M:%S")
@@ -527,6 +530,10 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
             except DailyOrderLimitExceeded:
                 ts = _now_kst().strftime("%H:%M:%S")
                 print(f"  [{ts}][DCA] 일일 거래수 한도 도달 — DCA 중단")
+                break
+            except DailyLossLimitExceeded:
+                ts = _now_kst().strftime("%H:%M:%S")
+                print(f"  [{ts}][DCA] 일일 손실 한도 도달 — DCA 중단(서킷브레이커, BARRO_DCA_RESPECT_DAILY_LOSS)")
                 break
             except Exception as e:
                 print(f"  [DCA-ERR] {h.symbol}: {e}")
@@ -735,22 +742,18 @@ _CUTOFF_EXEMPT_STRATEGIES = {"swing_38"}
 
 # [2026-06-22] EOD 강제청산(carry-limit 이월한도 트림) 제외 전략 — 다일보유가 설계인
 #   swing_38 은 이월이 의도(L653 참조)이므로, 이월총액 한도(20%) 초과 트림에서도 명시 보존한다.
-#   (종베/수동관리 보유분은 심볼 기준으로 별도 제외.) 전략 태그가 비어 있는 보유분도 수동/외부
-#   매매로 간주해 자동 강제청산하지 않는다. 장중 보유평가의 자체 손절·시간청산과는 무관하며,
-#   이 면제는 'EOD 강제 트림'에만 한정된다.
+#   (종베는 _closing_bet_held() 로 별도 제외 — 수동관리 전용.) 장중 보유평가의 자체 손절·시간청산은
+#   그대로 적용되므로(여기서 제외하지 않음), 이 면제는 'EOD 강제 트림'에만 한정된다.
 _FORCE_CLOSE_EXEMPT_STRATEGIES = {"swing_38"}
 
 
 def _force_close_skip(symbol: str, strategy: str | None, cb_skip: set[str]) -> bool:
     """EOD 강제청산(carry-limit)에서 해당 보유분을 건너뛸지 판정.
 
-    True 면 청산 제외: ① 종베/수동관리 보유분 ②전략 태그 없는 수동/외부 매매 보유분
-    ③다일보유 면제 전략(swing_38).
+    True 면 청산 제외: ① 종베(closing_bet) 보유분(수동관리 전용) ②다일보유 면제 전략(swing_38).
     장중 보유평가의 자체 손절/시간청산과는 무관(여기는 'EOD 강제 트림' 전용 게이트).
     """
     if symbol in cb_skip:
-        return True
-    if not (strategy or "").strip():
         return True
     if strategy in _FORCE_CLOSE_EXEMPT_STRATEGIES:
         return True
@@ -1558,7 +1561,7 @@ async def _eod_carry_limit(args, oauth, notifier) -> int:
             break
         strategy = getattr(book.get(h.symbol), "strategy", None) if book else None
         if _force_close_skip(h.symbol, strategy, _cb_skip):
-            continue  # 종베/수동관리 + 전략없음 + 다일보유 면제전략(swing_38) EOD 강제청산 제외
+            continue  # 종베(수동관리) + 다일보유 면제전략(swing_38) EOD 강제청산 제외
         try:
             r = await gate.place_sell(symbol=h.symbol, qty=int(h.qty),
                                       strategy_id=strategy)
