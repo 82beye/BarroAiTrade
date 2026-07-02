@@ -113,6 +113,12 @@ _CB_TP = float(os.environ.get("BARRO_CB_TP", "4.5"))            # 익절%(익일
 _CB_SL = float(os.environ.get("BARRO_CB_SL", "5.0"))            # 손절%(갭 흡수, 설계)
 _CB_MIN_CASH_PCT = float(os.environ.get("BARRO_CB_MIN_CASH_PCT", "0") or 0)  # [6/24 토론] 현금버퍼 선결게이트(종베 신규, 0=off)
 
+# ── 종베 자동매도 (BARRO_CB_AUTOEXEC_SELL, default-OFF) — SL/TP/MORNING/D3 실청산 ──
+#   [2026-07-01] 매도 신호가 텔레그램 알림만 나가고 실주문이 없어 실측 평균손실 -12.55% 폭주
+#   (SL -5% 무의미)한 근본원인 대응. 플래그 OFF(기본)면 기존 동작(알림만) 100% byte-identical.
+_CB_AUTOEXEC_SELL = os.environ.get("BARRO_CB_AUTOEXEC_SELL", "0").strip().lower() in {"1", "true", "yes", "on"}
+_CB_SELL_SIGNALS = {"SL", "TP", "MORNING", "D3"}   # 실거래성 매도 신호(전부 실청산 대상)
+
 
 def _cb_equity_estimate() -> float:
     """총자산 추정(현금버퍼 게이트용) — balance_history.json 최신 estimated_asset. 없으면 0(fail-open)."""
@@ -176,6 +182,36 @@ async def _cb_auto_buy(sym, name, price, oauth, dry_run, dry_print) -> None:
         add_position(sym, price, qty, name, _CB_TP, _CB_SL)   # 체결 즉시 등록(보호·모니터링)
 
 
+async def _cb_auto_sell(sym, name, qty, sell_reason, cur_price, oauth, dry_run, dry_print) -> bool:
+    """[2026-07-01] 종베 자동매도(config-gated, BARRO_CB_AUTOEXEC_SELL). _cb_auto_buy 대칭.
+    SL/TP/MORNING/D3 신호 시 보유 전량을 place_sell(strategy_id="closing_bet") 게이트로 실청산.
+    성공(실체결) 시 텔레그램 체결 알림 + True 반환 → 호출부(scan_sell)가 포지션 파일에서 제거.
+    dry_run=True 면 DRY_RUN 알림만 하고 False(상태변경 없음, _cb_auto_buy 가 dry 시 add_position
+    를 건너뛰는 것과 대칭). 수량 0/이상·주문 예외 시 False 반환(파일 무변경)."""
+    if qty <= 0:
+        print(f"  [CB-SELL-SKIP] {sym} 수량 {qty} — 매도 불가"); return False
+    notifier = None
+    if not dry_print:
+        try:
+            from backend.core.notify.telegram import TelegramNotifier
+            notifier = TelegramNotifier.from_env()
+        except Exception:  # noqa: BLE001
+            notifier = None
+    executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=dry_run)
+    gate = LiveOrderGate(executor=executor, audit_path=str(_MAIN_DATA / "order_audit.csv"),
+                         policy=GatePolicy(daily_max_orders=int(os.environ.get("BARRO_CB_MAX_ORDERS", "10"))),
+                         notifier=notifier)
+    try:
+        r = await gate.place_sell(symbol=sym, qty=int(qty), strategy_id="closing_bet")
+    except Exception as e:  # noqa: BLE001
+        print(f"  [CB-SELL-ERR] {sym} 매도주문 실패 {type(e).__name__}: {e}"); return False
+    is_dry = bool(getattr(r, "dry_run", dry_run))
+    tag = "DRY_RUN" if is_dry else "SOLD"
+    await notify(f"\U0001f534 [종베 자동매도-{tag}] {name}({sym}) {int(qty)}주 @~{cur_price:,.0f} "
+                 f"사유={sell_reason} order_no={getattr(r,'order_no','') or '-'}", dry_print)
+    return not is_dry   # 실체결만 True — 파일에서 포지션 제거(전량 매도). dry 는 상태 무변경.
+
+
 # ── 알림 전송 ────────────────────────────────────────────────────────────────
 async def notify(text: str, dry_print: bool) -> None:
     print(text + "\n" + "─" * 40)
@@ -196,12 +232,17 @@ def sell_signals(pos: dict, cur: float, now: datetime) -> list[tuple[str, str]]:
         out.append(("TP", f"+{tp:.1f}% 익절 도달"))
     if cur <= e * (1 - sl / 100):
         out.append(("SL", f"-{sl:.1f}% 손절 도달"))
-    ed = date.fromisoformat(pos["entry_date"])
-    if now.date() > ed and now.time() >= dtime(10, 0):
-        out.append(("MORNING", "익일 10시 정산 시각 — 아침 슈팅 정리 구간"))
-    held = (now.date() - ed).days
-    if held >= 3:
-        out.append(("D3", f"D{held} 보유한도(달력일) 도달"))
+    try:
+        ed = date.fromisoformat(str(pos["entry_date"]))
+    except (ValueError, KeyError, TypeError):
+        print(f"  [CB-WARN] {pos.get('symbol','?')} entry_date 파싱 실패({pos.get('entry_date')!r}) — MORNING/D3 시그널 skip")
+        ed = None
+    if ed is not None:
+        if now.date() > ed and now.time() >= dtime(10, 0):
+            out.append(("MORNING", "익일 10시 정산 시각 — 아침 슈팅 정리 구간"))
+        held = (now.date() - ed).days
+        if held >= 3:
+            out.append(("D3", f"D{held} 보유한도(달력일) 도달"))
     fired = set(pos.get("alerted", []))
     return [(k, m) for k, m in out if k not in fired]
 
@@ -211,7 +252,8 @@ def _cache_price(symbol: str) -> float | None:
     p = _MAIN_DATA / "ohlcv_cache" / f"{symbol}.json"
     if not p.exists():
         return None
-    d = json.load(open(p))["data"]
+    with open(p) as _f:
+        d = json.load(_f)["data"]
     return float(d[-1]["close"]) if d else None
 
 
@@ -224,17 +266,20 @@ async def _live_price(fetcher, symbol: str) -> float | None:
 
 
 # ── 매도 스캔 ────────────────────────────────────────────────────────────────
-async def scan_sell(dry_print: bool, from_cache: bool) -> None:
+async def scan_sell(dry_print: bool, from_cache: bool, dry_run: bool = False) -> None:
     positions = load_positions()
     if not positions:
         print("등록된 종베 포지션 없음 (--add 로 등록).")
         return
     fetcher = None
+    oauth = None
     if not from_cache:
         from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
-        fetcher = KiwoomNativeCandleFetcher(oauth=_build_oauth())
+        oauth = _build_oauth()   # 자동매도(place_sell) 재사용 위해 캡처
+        fetcher = KiwoomNativeCandleFetcher(oauth=oauth)
     now = _now()
     changed = False
+    sold: set[str] = set()   # BARRO_CB_AUTOEXEC_SELL 실체결 → 파일에서 제거할 심볼(전량 매도)
     for p in positions:
         cur = _cache_price(p["symbol"]) if from_cache else await _live_price(fetcher, p["symbol"])
         if cur is None:
@@ -250,7 +295,18 @@ async def scan_sell(dry_print: bool, from_cache: bool) -> None:
                 f"※ 자동매도 안 함 — 직접 매도 판단하세요.", dry_print)
             p.setdefault("alerted", []).append(key)
             changed = True
+            # [2026-07-01] BARRO_CB_AUTOEXEC_SELL=1 이고 실거래성 신호(SL/TP/MORNING/D3)면
+            #   보유 전량 실청산. from_cache 테스트 모드는 실주문/저장 안 함(기존 관례 준수).
+            if (_CB_AUTOEXEC_SELL and not from_cache
+                    and key in _CB_SELL_SIGNALS and p["symbol"] not in sold):
+                ok = await _cb_auto_sell(p["symbol"], p["name"], int(p.get("qty", 0)),
+                                         f"{key}:{reason}", float(cur), oauth, dry_run, dry_print)
+                if ok:
+                    sold.add(p["symbol"])   # 실체결 → 전량 매도 완료(파일에서 제거)
+                    break   # 청산 완료 — 이 포지션의 잔여 신호는 처리 불필요
     if changed and not from_cache:
+        if sold:
+            positions = [p for p in positions if p["symbol"] not in sold]   # 청산분 제거
         save_positions(positions)   # 캐시 테스트는 상태 저장 안 함
 
 
@@ -260,7 +316,9 @@ def _load_daily(symbol: str) -> list[OHLCV]:
     if not p.exists():
         return []
     out = []
-    for r in json.load(open(p))["data"]:
+    with open(p) as _f:
+        _rows = json.load(_f)["data"]
+    for r in _rows:
         out.append(OHLCV(symbol=symbol, timestamp=datetime.strptime(str(r["date"]), "%Y%m%d"),
                          open=float(r["open"]), high=float(r["high"]), low=float(r["low"]),
                          close=float(r["close"]), volume=float(r["volume"]), market_type=MarketType.STOCK))
@@ -313,7 +371,7 @@ async def scan_buy(dry_print: bool, from_cache: bool, symbols: list[str], top_n:
 # ── 메인 ─────────────────────────────────────────────────────────────────────
 async def _run(args) -> None:
     if args.mode == "sell":
-        await scan_sell(args.dry_print, args.from_cache)
+        await scan_sell(args.dry_print, args.from_cache, args.dry_run)
     elif args.mode == "buy":
         if not args.force and not (BUY_WINDOW[0] <= _now().time() <= BUY_WINDOW[1]):
             print(f"매수창(15:00~15:20) 밖 — skip. --force 로 무시.")
@@ -331,7 +389,7 @@ async def _run(args) -> None:
                     await scan_buy(args.dry_print, args.from_cache,
                                    [s.strip() for s in args.symbols.split(",") if s.strip()], args.top, args.dry_run)
                 if dtime(9, 0) <= t <= dtime(15, 30):
-                    await scan_sell(args.dry_print, args.from_cache)
+                    await scan_sell(args.dry_print, args.from_cache, args.dry_run)
             except Exception as e:  # noqa: BLE001 — 사이클 격리(다음 주기 계속)
                 print(f"[cb-loop-err] {type(e).__name__}: {e}")
             await asyncio.sleep(args.interval)
