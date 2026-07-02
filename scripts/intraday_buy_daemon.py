@@ -53,7 +53,7 @@ from backend.core.risk.market_context import (
 from backend.core.risk.theme_map import load_theme_map
 from backend.core.risk.daily_gate_input import compute_daily_gate_input
 from backend.core.risk.live_order_gate import (
-    GatePolicy, LiveOrderGate, DailyOrderLimitExceeded,
+    GatePolicy, LiveOrderGate, DailyOrderLimitExceeded, DailyLossLimitExceeded,
 )
 from backend.core.backtester.market_regime import (
     MarketRegime, classify_regime, regime_weights,
@@ -459,10 +459,17 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     sl_symbols = {d.symbol for d in decisions if d.signal in _SELL_SIGNALS}
 
     executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
+    # BAR-166: DCA는 방어적 매수 — 기본은 일일 손실 한도 미적용(-100 exempt).
+    # [2026-07-02] BARRO_DCA_RESPECT_DAILY_LOSS=1 → DCA도 일일손실 게이트 적용(서킷브레이커 우회 차단).
+    #   우회는 이중구조였음: 한도값(-100) + place_buy 에 daily_pnl_pct 미전달(게이트가 0%로 봄).
+    #   → 두 부분 모두 조건부 정정. default 0 = 기존 -100 exempt·pnl 0.0 (byte-identical).
+    #   정책값 = policy.json daily_loss_limit(cfg, 정상 매수경로 :1302 와 동일).
+    _dca_respect = os.environ.get("BARRO_DCA_RESPECT_DAILY_LOSS", "0").strip().lower() in {"1", "true", "yes", "on"}
+    _dca_loss_limit = Decimal(str(cfg.daily_loss_limit)) if _dca_respect else Decimal("-100.0")
+    _dca_pnl_pct = (await compute_daily_gate_input(account, balance)) if _dca_respect else Decimal("0.0")
     gate = LiveOrderGate(
         executor=executor, audit_path=args.audit_log,
-        # BAR-166: DCA는 방어적 매수 — 일일 손실 한도 적용 불필요.
-        policy=GatePolicy(daily_loss_limit_pct=Decimal("-100.0"),
+        policy=GatePolicy(daily_loss_limit_pct=_dca_loss_limit,
                           daily_max_orders=cfg.daily_max_orders),
         notifier=notifier,
     )
@@ -509,7 +516,8 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
                 # 미전달 시 strategy_id 가 빈칸으로 기록돼 전략별 실현손익 귀속이
                 # 'unknown' 버킷에 격리됨(5/29 018880 DCA 행 빈칸). pos 는 232줄 로드.
                 r = await gate.place_buy(
-                    symbol=h.symbol, qty=tranche.qty, strategy_id=pos.strategy
+                    symbol=h.symbol, qty=tranche.qty, strategy_id=pos.strategy,
+                    daily_pnl_pct=_dca_pnl_pct,   # [2026-07-02] DCA도 일일손실 게이트 반영(_dca_respect 시)
                 )
                 tag = "DRY_RUN" if r.dry_run else "DCA"
                 ts = _now_kst().strftime("%H:%M:%S")
@@ -522,6 +530,10 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
             except DailyOrderLimitExceeded:
                 ts = _now_kst().strftime("%H:%M:%S")
                 print(f"  [{ts}][DCA] 일일 거래수 한도 도달 — DCA 중단")
+                break
+            except DailyLossLimitExceeded:
+                ts = _now_kst().strftime("%H:%M:%S")
+                print(f"  [{ts}][DCA] 일일 손실 한도 도달 — DCA 중단(서킷브레이커, BARRO_DCA_RESPECT_DAILY_LOSS)")
                 break
             except Exception as e:
                 print(f"  [DCA-ERR] {h.symbol}: {e}")
