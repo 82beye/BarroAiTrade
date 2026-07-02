@@ -206,10 +206,18 @@ async def _cb_auto_sell(sym, name, qty, sell_reason, cur_price, oauth, dry_run, 
     except Exception as e:  # noqa: BLE001
         print(f"  [CB-SELL-ERR] {sym} 매도주문 실패 {type(e).__name__}: {e}"); return False
     is_dry = bool(getattr(r, "dry_run", dry_run))
-    tag = "DRY_RUN" if is_dry else "SOLD"
+    order_no = getattr(r, "order_no", "") or ""
+    rc = getattr(r, "return_code", None)
+    # [2026-07-02 퀀트검토 orphan 방지] 접수확인(order_no 존재 + rc 성공)된 실주문만 True → 파일 제거.
+    #   미접수/거부(order_no 없음·rc≠0)면 포지션 유지 → 브로커 orphan(로컬만 삭제) 방지.
+    accepted = (not is_dry) and bool(order_no) and (rc in (None, 0, "0"))
+    tag = "DRY_RUN" if is_dry else ("SOLD" if accepted else "REJECTED")
     await notify(f"\U0001f534 [종베 자동매도-{tag}] {name}({sym}) {int(qty)}주 @~{cur_price:,.0f} "
-                 f"사유={sell_reason} order_no={getattr(r,'order_no','') or '-'}", dry_print)
-    return not is_dry   # 실체결만 True — 파일에서 포지션 제거(전량 매도). dry 는 상태 무변경.
+                 f"사유={sell_reason} order_no={order_no or '-'} rc={rc}", dry_print)
+    if (not is_dry) and (not accepted):
+        print(f"  [CB-SELL-ORPHAN-GUARD] {sym} 매도 미접수(order_no={order_no or '-'}·rc={rc}) — 포지션 유지·다음 스캔 재시도")
+    # NOTE(후속): 접수(order_no)≠체결. mock '접수정체'(6/8 이력) 완전대응은 별도 체결확인(ka10075/잔고재조회) 필요.
+    return accepted
 
 
 # ── 알림 전송 ────────────────────────────────────────────────────────────────
