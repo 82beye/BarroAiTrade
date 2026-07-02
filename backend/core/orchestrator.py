@@ -338,7 +338,10 @@ class TradingOrchestrator:
                                 gateway,
                                 f_zone_params=FZoneParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
                                 blue_line_params=BlueLineParams(min_atr_pct=0.035, entry_time_cutoff=_dtime(14, 0)),
-                                enabled_strategies={"sf_zone": False, "f_zone": False, "gold_zone": False},
+                                # [2026-07-02] supertrend 검증 완료 → zone 백엔드 알림스캔 복원(사용자 지시 재활성화).
+                                #   본 스캔은 on_daily_scan_result 알림 전용(주문 경로 아님 — 실집행은 데몬).
+                                #   원복(재비활성): 아래 override 주석 해제.
+                                # enabled_strategies={"sf_zone": False, "f_zone": False, "gold_zone": False},
                             )
                             signals = await scanner.scan(app_state.watchlist)
                             last_scan_time = now
