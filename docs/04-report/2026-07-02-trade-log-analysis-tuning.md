@@ -118,3 +118,28 @@ OPTION 1 (Safe via env
 
 ---
 *멀티에이전트 튜닝 워크플로우(run `wf_63a3f2df-b54`) 적대적 검증 결과. REJECTED 12건은 파라미터명 불일치·이미구현·오해 등으로 정확히 배제됨. 실거래 주문 미호출.*
+
+## 6. [2026-07-02 실행] 중단 전략 재활성화 + 튜닝 이슈 해결 + closing_bet auto-sell (라이브 반영 완료)
+
+사용자 지시: "매매중단된 전략 전체 재활성화(튜닝 이슈 해결 후) + closing_bet auto-sell·이격필터 적용".
+테스트 85 passed, main 배포(8decc3b), 3개 서비스 재시작 검증 완료.
+
+### 적용 항목
+
+| # | 변경 | 위치 | 라이브 반영 |
+|---|------|------|-------------|
+| 1 | **closing_bet 자동매도 배선** | `scripts/closing_bet_alert_daemon.py` `_cb_auto_sell()` + `BARRO_CB_AUTOEXEC_SELL=1` | 종베데몬 PID 37431 재시작 — SL/TP/MORNING/D3 시 place_sell 실청산+전량 포지션제거 (평균손실-12.55% 폭주 근본대응) |
+| 2 | **종베 이격필터** | `.env.local` `BARRO_CB_DISPARITY_YELLOW=1` | 5일선 이격게이트 ON — 진입품질↑(shadow +298bps·승률58→62%) |
+| 3 | **zone 백엔드스캔 재활성화** | `backend/core/orchestrator.py:341` override 주석해제 | 백엔드 PID 37439 재시작 — zone 알림스캔 복원(on_daily_scan_result 알림전용·주문경로 아님) |
+| 4 | **limit_up_chase 재활성화 + overnight** | `.env.local` `LIMIT_UP_CHASE_ENABLED=1`·`LIMIT_UP_OVERNIGHT_MODE=overnight` | 봇 PID 37434 재시작 — 상따 ON(overnight). 상한가락→익일 갭 부분익절(carry_gap_stop-3% 보호)로 강제 당일손절청산 회피 |
+| 5 | **zone 개장러시 차단 강화** | `.env.local` `BARRO_OPEN_HOLD_HHMM` 0915→0930 | ★내일 08:58 cron 적용★(intraday_buy_daemon은 cron관리 — 중간종료 시 미복구라 미재시작) |
+| 6 | **trap_guard SHADOW 관찰** | `.env.local` `BARRO_TRAP_*`+`BARRO_TRAP_SHADOW=1` | ★내일 cron 적용★ — 6월 트랩손실 방어 로그측정(매매 무영향) |
+
+> `.env.local` 백업 `.env.local.bak.20260702_105416`. 전 항목 되돌리기 쉬움(env 원복/재주석 + 재시작).
+
+### 안전장치·유의
+- **auto-sell byte-identical 가드**: `BARRO_CB_AUTOEXEC_SELL=0`이면 기존 알림전용 100% 동일. place_sell 시그니처 코드확인(live_order_gate.py:217), from_cache 테스트모드 미집행.
+- **재활성화 시 검증**: on_daily_scan_result 주문경로 아님(이중매수 없음), place_sell은 손실한도·거래수 게이트 미적용(청산 우선).
+- **★limit_up_chase 잔여 고위험★**: PF 0.01은 구조적 문제로 overnight/재활성만으로 흑자보장 불가. entry·wall 확대 튜닝은 손실 증폭 우려로 의도적 미적용. 반드시 밀착 관찰, 재악화 시 재중단 권고.
+- **미적용(추가 검증 필요)**: sf_zone SL 타이트닝(-1.5→-1.2)은 '손실>SL'의 근본이 SL 미발화인지 불명확해 blind 변경 보류. supertrend entry_lookback 100→20도 관찰 롤아웃 대기.
+- **daemon env(0930·trap)**: 장중 데몬 종료 시 내일까지 미복구 위험이라 미재시작 — 내일 개장 cron에 자동 적용.
