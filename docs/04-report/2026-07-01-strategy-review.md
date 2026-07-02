@@ -35,6 +35,26 @@
 | 롤백 | `.env.local`에서 해당 라인 `=0` 또는 재주석 후 봇 재시작 |
 | 부가 | 봇 err 로그의 `poll cycle failed`(ConnectTimeout)은 누적 23,427건의 **기존 만성 이슈**로 이번 변경과 무관(재시작 후 미증가·getMe 정상). supertrend 자동매매 루프는 telegram 폴링과 독립 |
 
+### [2026-07-02 추가 적용 · 라이브 반영 완료] supertrend 일일주문 캡 복원
+
+사용자 지시("남은 supertrend 권고도 적용")로 MAX_ORDERS 무한(HIGH)을 라이브 반영.
+
+| 항목 | 내용 |
+|------|------|
+| 변경 | `.env.local`: `SUPERTREND_AUTO_MAX_ORDERS` **0(무한) → 100** |
+| 값 근거 | 권고는 "50~100 캡". ★6/26에 사용자가 의도적으로 0으로 해제한 설정을 되돌리는 것★이나, 당시 문제는 *낮은* 캡(15)이 정상주문을 차단한 것이었고, 100은 넉넉(supertrend max_pos=10 → 10회 로테이션분)해 정상매매는 안 막으면서 429 폭주(6/15式)만 백스톱 |
+| 배포 | 백업(`.env.local.bak.20260702_100937`) 후 편집 → 봇 재시작. **장중(10:09 KST) 적용** — 오늘 매수 6건(≪100)이라 즉시차단 없음, ~75s 다운타임 |
+| 검증 | 신규 PID 14775(10:09:47 기동, .env 편집 10:09:37 직후) · 트레일 ON 유지 · 단일 인스턴스 · getMe 200 |
+| 롤백 | `.env.local` 해당 라인 `=0` 후 봇 재시작 |
+| 잔여 | 게이트 분절(#3)은 미해소 — 데몬 일반전략은 여전히 policy.json=300, supertrend=100로 별도 카운터. 근본 통합은 코드변경(아래 보류 항목) |
+
+### [보류] 나머지 supertrend 권고 — 자동적용 부적절, 사용자 확인 필요
+
+| 권고 | 왜 보류했나 | 필요 조치 |
+|------|------------|-----------|
+| **entry_lookback=100 → 5~10 축소** (risky_hitl) | 권고 자체가 "**OOS 재검증 필요**"를 명시. 진입빈도가 급변하는 라이브 로직 변경을 검증 없이 적용하면 매매행태가 예측불가로 바뀜 | 실 KRX 데이터 백테스트로 5/10/20 후보 비교 후 값 확정 → 그 다음 env 반영 |
+| **게이트 분절 통합** (risky_hitl) | 봇/데몬이 `order_audit.csv` 전역 카운트를 공유하나 캡은 분리(supertrend 100 / 데몬 300). 통합은 `live_order_gate.py`/`GatePolicy` **코드·구조 변경** + 회귀테스트 필요 | 브랜치에서 통합 글로벌 캡 구현 + 테스트 후 머지(HITL) |
+
 ## 교차전략 위험 (Cross-Strategy)
 
 # BarroAiTrade 멀티 전략 결함 분석 — Cross-Strategy 위험 & Top3 조치
@@ -347,10 +367,10 @@ fix_safety 분류: safe_auto 27 · needs_restart 14 · risky_hitl 9
 
 > 초기 배치 누락분 보완. 4개 파일(supertrend.py, supertrend_auto_trader.py, intraday_buy_daemon.py, run_telegram_bot.py) + 게이트·정책·env 교차 확인. 읽기 전용, 수정안은 미적용 제안.
 
-### 🟠 [HIGH] MAX_ORDERS=0 = 매수 무한 (needs_restart)
+### 🟠 [HIGH] MAX_ORDERS=0 = 매수 무한 → ✅ **[2026-07-02 해결·라이브 반영 완료]**
 - **경로**: `.env.local:122` → 봇 `run_telegram_bot.py:597`(daily_max_orders=0) → `live_order_gate.py:198` 체크 skip.
-- **영향**: 휩쏘장에서 진입/청산 폭주 → Kiwoom 429 플러드(6/15 인시던트) 재현 위험. 현 완화책은 MAX_ENTRIES=1+cooldown30+maxpos10뿐이라 종목 로테이션 시 총주문 무제한.
-- **수정**: 일한도 50~100 캡 복원.
+- **영향**: 휩쏘장에서 진입/청산 폭주 → Kiwoom 429 플러드(6/15 인시던트) 재현 위험이었음. 현 완화책은 MAX_ENTRIES=1+cooldown30+maxpos10뿐이라 종목 로테이션 시 총주문 무제한.
+- **수정**: `SUPERTREND_AUTO_MAX_ORDERS=100` 캡 복원 → **적용 완료(봇 PID 14775)**. 상세·6/26 되돌림 유의사항은 위 「일일주문 캡 복원」 절.
 
 ### 🟠 [HIGH] 트레일 청산 미작동 → ✅ **[2026-07-01 해결·라이브 반영 완료]**
 - **경로**: `run_telegram_bot.py:640` env default "0" → trail_atr_mult=0 (dataclass default 3.0을 env가 덮어씀).
