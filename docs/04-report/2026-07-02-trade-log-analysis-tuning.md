@@ -285,3 +285,12 @@ OPTION 1 (Safe via env
 
 ### 다음 단계 (안정 확인 후 하나씩)
 Phase 2 +closing_bet → Phase 3 +gold_zone(실데이터 백테스트 후) → f_zone. swing_38(add_on 배선)·sf_zone(재작성)·limit_up_chase(재설계/드롭)는 수정 후.
+
+## 14. [2026-07-03] 존 활성 조정 — f_zone·sf_zone만 ON
+
+사용자 지시: 존 4종 중 f존·sf존만 활성, gold_zone·swing_38 비활성.
+- `BARRO_DAEMON_STRATEGIES` `off`→**`f_zone,sf_zone`**. 데몬 로그 `[전략] 일반 매수 스캔: f_zone, sf_zone` 확인.
+- 데몬 수동 기동(PID 58560, cron 동일명령·env오버라이드) — 15:20 자체종료(`_daemon_hours` MARKET_CLOSE) 확인돼 내일 cron과 이중실행 없음. 대원전선(swing_38) 기존보유분은 계속 관리(신규진입만 OFF).
+- **현재 활성**: supertrend(봇)+f_zone+sf_zone(데몬). limit_up·종베·gold_zone·swing_38 OFF.
+- .env백업 .bak.20260703_125131. 되돌리기=BARRO_DAEMON_STRATEGIES 값 변경.
+- ⚠️ 참고: 완성도 스코어카드상 sf_zone은 PF 0.13(존 중 최약·103L 미완의심)으로 평가됨 — 밀착 관찰 권고.
