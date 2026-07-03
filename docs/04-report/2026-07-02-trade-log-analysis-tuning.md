@@ -245,3 +245,19 @@ OPTION 1 (Safe via env
 ### 적용 수정 (regime 표본 견고화)
 - `intraday_buy_daemon.py`(main **1dff234**, 워크트리 b7a3eab): `BARRO_REGIME_MIN_SYMBOLS`(default 3) 미만 분석 시 BULL/BEARISH를 **SIDEWAYS로 보수 폴백**(항상 보수방향=게이팅 완화 방지). =0 비활성, 표본충분/이미 sideways면 무변경(byte-identical). py_compile OK·32 regime 테스트 통과. ★데몬 cron이라 내일 08:58 반영★.
 - 타점 관련: 오늘 진입가드(동전주 min_price·추격 flu·시초갭)는 정상 배선 확인. 교차전략 휩쏘가 타점 품질의 남은 약점(후속).
+
+## 12. [2026-07-03 구현] 교차전략 종목당 당일 진입 캡
+
+§8·11 후속(교차전략 동일종목 휩쏘) 구현. 사용자 승인.
+
+### 문제 정밀화
+- 데몬은 이미 `already_held`(계좌 전체 보유)+30분 쿨다운으로 **동시 교차보유·단기재진입 차단**. supertrend도 `held_after`(동시 교차보유 차단)+자기 `max_entries=1`.
+- 잔여 갭 = **순차 교차전략 churn**: 7/3 477850을 f_zone(데몬, 00:30~36 매수·매도) → supertrend(봇, 00:47) 순차 진입. 각 전략의 per-strategy 캡은 교차전략을 못 잡음.
+
+### 구현 (env-gated, default-OFF, byte-identical)
+- **`BARRO_MAX_ENTRIES_PER_SYMBOL_DAY`**(default 0=off): order_audit 당일 매수(ORDERED/DRY_RUN, **전 전략**) 횟수가 캡 이상인 종목은 신규진입 제외.
+- 데몬 `intraday_buy_daemon.py`: `excluded` 집합에 `daily_capped` 추가.
+- 봇 `supertrend_auto_trader.py`: 진입 사이클 1회 order_audit 집계 → 진입루프에서 캡 종목 skip.
+- DCA·동시보유가드와 별개(순차 교차전략 대상). py_compile OK·**471 테스트 통과**.
+- **활성**: `.env.local BARRO_MAX_ENTRIES_PER_SYMBOL_DAY=2`(moderate, 종목당 당일 최대 2진입). 1=엄격(1전략만)·0=off. 백업 .bak.20260703_113705.
+- **반영**: 봇 즉시(재시작 PID 56861), 데몬 내일 08:58 cron. main **4bf9537**, 워크트리 e0e32e8.
