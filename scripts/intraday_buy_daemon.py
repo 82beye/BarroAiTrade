@@ -1924,7 +1924,11 @@ def main():
     args = ap.parse_args()
 
     # 일반 매수 전략 파싱 + 슈퍼트렌드 이중가동 가드 (BAR-OPS-10).
-    args.zone_strategies = _parse_strategies(args.strategies)
+    # [2026-07-03] BARRO_DAEMON_STRATEGIES env 오버라이드 — crontab 수정 없이(.env.local 소싱)
+    #   데몬 일반전략 제어. "off"/"none"=supertrend 단독(단계별 활성 Phase1). 미설정 시 --strategies 인자 사용(기존, byte-identical).
+    args.zone_strategies = _parse_strategies(
+        os.environ.get("BARRO_DAEMON_STRATEGIES") or args.strategies
+    )
     _want_st = args.supertrend
     args.supertrend = _supertrend_yield_to_bot(args.supertrend)
     if _want_st and not args.supertrend:
