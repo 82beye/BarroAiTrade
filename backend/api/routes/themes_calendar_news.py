@@ -1,6 +1,7 @@
 """BAR-62 — REST 엔드포인트 (themes / calendar / news)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import date
@@ -10,7 +11,11 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import text
 
 from backend.api.schemas.theme import EventOut, NewsOut, ThemeOut, ThemeStockOut
+from backend.core.state import app_state
 from backend.db.database import get_db
+
+# tima P0: 테마 종목 시세 보강 종목 수 상한 (gateway 부하 방지)
+_THEME_QUOTE_CAP = 20
 
 logger = logging.getLogger(__name__)
 
@@ -48,15 +53,42 @@ async def get_theme_stocks(theme_id: int) -> list[ThemeStockOut]:
             ),
             {"id": theme_id},
         )
-        return [
-            ThemeStockOut(
-                symbol=r["symbol"],
-                score=float(r["score"]),
-                theme_id=theme_id,
-                theme_name=theme["name"],
-            )
-            for r in res2.mappings().all()
-        ]
+        rows = res2.mappings().all()
+
+    stocks = [
+        ThemeStockOut(
+            symbol=r["symbol"],
+            score=float(r["score"]),
+            theme_id=theme_id,
+            theme_name=theme["name"],
+        )
+        for r in rows
+    ]
+
+    # tima P0: gateway 가용 시 ticker 시세 보강 (동시성, 개별 실패는 None 유지).
+    await _enrich_theme_stocks(stocks)
+    return stocks
+
+
+async def _enrich_theme_stocks(stocks: list[ThemeStockOut]) -> None:
+    """theme_stocks 시세 보강 (in-place). gateway 미초기화 시 no-op (하위호환)."""
+    gateway = app_state.market_gateway
+    if gateway is None or not stocks:
+        return
+
+    async def _fill(stock: ThemeStockOut) -> None:
+        try:
+            ticker = await gateway.get_ticker(stock.symbol)
+        except Exception as e:  # 개별 실패는 무시 (None 유지)
+            logger.debug("theme stock ticker 보강 실패 %s: %s", stock.symbol, e)
+            return
+        stock.name = ticker.name
+        stock.price = ticker.price
+        stock.change_pct = ticker.change_pct
+        if ticker.price and ticker.volume:
+            stock.value_traded = round(ticker.price * ticker.volume / 1e8, 2)
+
+    await asyncio.gather(*(_fill(s) for s in stocks[:_THEME_QUOTE_CAP]))
 
 
 @router.get("/api/calendar", response_model=list[EventOut])

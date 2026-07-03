@@ -147,4 +147,67 @@ export const api = {
 
   // 시장 전종목
   getUniverse: () => apiClient.get('/api/market/universe'),
+
+  // ── 티마(TIMA) 스크리너 / 테마 / 차트 기준선 ──
+  getScreenerStrategies: () => apiClient.get('/api/screener/strategies'),
+
+  getScreener: (strategy: string, symbols?: string, limit?: number) =>
+    apiClient.get(`/api/screener/${strategy}`, { params: { symbols, limit } }),
+
+  getChartLevels: (symbol: string) =>
+    apiClient.get('/api/chart/levels', { params: { symbol } }),
+
+  getThemes: () => apiClient.get('/api/themes'),
+
+  getThemeStocks: (id: number | string) =>
+    apiClient.get(`/api/themes/${id}/stocks`),
 };
+
+// ── 티마 공용 타입 ──
+export interface StrategyLevel {
+  label: string; // SF, B1, B2, B3, G1..G3, J1..J3
+  price: number;
+  kind: 'support' | 'target' | 'anchor';
+  active: boolean;
+}
+
+export interface ScreenerItem {
+  symbol: string;
+  name?: string | null;
+  detected_at?: string | null;
+  price: number;
+  change_pct?: number | null;
+  value_traded?: number | null; // 억원
+  market_cap?: number | null; // 억원
+  score: number;
+  reason?: string;
+  levels: StrategyLevel[];
+}
+
+export interface ScreenerResponse {
+  strategy: string;
+  generated_at?: string;
+  count: number;
+  status: string;
+  disclaimer?: string;
+  items: ScreenerItem[];
+}
+
+export interface StrategyMeta {
+  key: string;
+  label: string;
+}
+
+export interface ThemeStockItem {
+  symbol: string;
+  score: number;
+  theme_id: number;
+  theme_name?: string | null;
+  name?: string | null;
+  price?: number | null;
+  change_pct?: number | null;
+  day_open?: number | null;
+  day_high?: number | null;
+  day_low?: number | null;
+  value_traded?: number | null; // 억원
+}

@@ -44,6 +44,28 @@ module.exports = {
         success: '#10B981',
         warning: '#F59E0B',
         danger: '#EF4444',
+        // ── 티마(TIMA) 벤치마크 토큰 (PRD §6.8, 실측 hex) ──
+        tima: {
+          teal: '#10B8A8',    // 테마 헤더·브랜드 (모드 불변)
+          bg: '#E0E8E8',      // 라이트 배경
+          bgDark: '#202020',  // 다크 배경
+          card: '#F8F8F8',
+          cardDark: '#383838',
+          up: '#D00010',      // 상승 (한국 관례)
+          down: '#2060C0',    // 하락
+          active: '#E0C008',  // 활성 서브탭 (황색)
+          surge: '#F8F880',   // 급등 하이라이트
+          select: '#D83870',  // 선택 탭·뱃지 (분홍)
+          emph: '#E08040',    // 기준가 강조 박스
+        },
+        strategyLine: {
+          sf: '#5820B8',
+          b1: '#38B068',
+          b2: '#3090E0',
+          b3: '#7B40C8',
+          g: '#E0A000',
+          j: '#C81880',
+        },
       },
       borderRadius: {
         lg: 'var(--radius)',
