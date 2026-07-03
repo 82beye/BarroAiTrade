@@ -261,3 +261,27 @@ OPTION 1 (Safe via env
 - DCA·동시보유가드와 별개(순차 교차전략 대상). py_compile OK·**471 테스트 통과**.
 - **활성**: `.env.local BARRO_MAX_ENTRIES_PER_SYMBOL_DAY=2`(moderate, 종목당 당일 최대 2진입). 1=엄격(1전략만)·0=off. 백업 .bak.20260703_113705.
 - **반영**: 봇 즉시(재시작 PID 56861), 데몬 내일 08:58 cron. main **4bf9537**, 워크트리 e0e32e8.
+
+## 13. [2026-07-03] 단계별 활성화 Phase 1 — supertrend 단독
+
+전략별 완성도 체크(§아래 스코어카드) 후 사용자 방침대로 "1개씩 활성화" 시작. 완성도 최상·최선성과(PF 0.95) supertrend부터.
+
+### 완성도 등급 (라이브 근거)
+- 🟢 상: **supertrend**(PF0.95·최다 안전장치·검증), **closing_bet**(이번세션 auto-sell 완성)
+- 🟡 중: gold_zone(PF0.56)·f_zone(PF0.63) — 실KRX 백테스트·튜닝검증 필요
+- 🔴 하: **swing_38**(★2차분할 add_on 미배선→반쪽구현★·GBM합성백테스트), sf_zone(PF0.13·미완의심), **limit_up_chase**(PF0.01·구조적결함·백테스트전무)
+
+### Phase 1 적용 (supertrend 단독)
+| 전략 | 조치 | 방법 |
+|------|------|------|
+| supertrend | **유지 ON** | `SUPERTREND_AUTO_ENABLED=1`, 봇 PID58306 |
+| limit_up_chase | OFF | `LIMIT_UP_CHASE_ENABLED=0` |
+| closing_bet | OFF(자동매수) | `BARRO_CB_AUTOEXEC=0`, 종베데몬 알림전용 |
+| zone 4종(swing/f/sf/gold) | OFF | ★`BARRO_DAEMON_STRATEGIES=off` env 오버라이드★(daemon `intraday_buy_daemon.py` 신규, main 6523eb7) — crontab 샌드박스 차단 우회 |
+
+- 오늘 intraday 데몬 종료(zone 매매 중단), 내일 08:58 cron 재기동 시 .env 소싱→supertrend 단독 지속.
+- .env 백업 .bak.20260703_124232. 되돌리기=각 토글 원복.
+- **잔여**: 대원전선(006340, swing_38) 오전 진입분 보유 중 — 다일보유(min_hold3) 정상, 사용자 판단.
+
+### 다음 단계 (안정 확인 후 하나씩)
+Phase 2 +closing_bet → Phase 3 +gold_zone(실데이터 백테스트 후) → f_zone. swing_38(add_on 배선)·sf_zone(재작성)·limit_up_chase(재설계/드롭)는 수정 후.
