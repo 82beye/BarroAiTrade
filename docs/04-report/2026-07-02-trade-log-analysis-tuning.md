@@ -229,3 +229,19 @@ OPTION 1 (Safe via env
 - **검증**: py_compile OK · byte-identical(미설정=-100·0.0 동일) · 476 passed.
 - **활성**: `.env.local BARRO_DCA_RESPECT_DAILY_LOSS=1` (백업 .bak.20260702_125947). ★데몬 cron 관리라 **내일 08:58 크론 재기동 시 반영**(장중 데몬 미종료)★. 되돌리기=0.
 - **효과**: 일일손실 -3%(계좌대비, 버그없는 compute_daily_gate_input) 도달 시 DCA 물타기 중단 → 나쁜날 물타기 폭주 차단.
+
+## 11. [2026-07-03] 당일매매 타점·시장상황 점검 + regime 견고화 수정
+
+사용자 요청: 당일매매 전략의 타점(매수/매도)·시장상황 처리가 잘 구현·구동되는지 체크 + 디테일 수정.
+
+### 시장상황 처리 — 구현·구동 상태
+- **결정적 regime 경로가 실제 매수결정에 통합·작동 중** (양호): `intraday_buy_daemon.py:1048` `classify_regime`(top종목 30일봉) → 국면별 max_buy(BEARISH 1·SIDEWAYS 2)·신호강도 임계(BEARISH best_pnl>50k)·전략 가중치(`regime_weights`) 적용. 매 사이클 실데이터로 신선(7/3=sideways).
+- **LLM advisory market_context는 shadow+8일 stale**(regime bearish@06-25, advisory-writer 6/26 중지) — 단 `mode=shadow`(로그만)라 매매 무영향. 결정적 regime과 중복이라 무해. (재가동은 토큰비용 — 미권장, 결정적 경로로 충분.)
+
+### 발견한 디테일 이슈 2건
+1. **★regime 표본 부족★**: 7/3 "종목 1개 분석" — 429 등으로 캔들 미확보 시 1~2종목으로 시장전체 국면을 단정(불안정). → **수정 적용**.
+2. **교차전략 동일종목 휩쏘**: 7/3 477850을 f_zone+supertrend가 4~6분내 반복 매수/매도 + FAILED 매도 1건. 어제 지적한 종목당 교차진입 문제 라이브 재현. → 후속(per-symbol cross-strategy 캡, HITL).
+
+### 적용 수정 (regime 표본 견고화)
+- `intraday_buy_daemon.py`(main **1dff234**, 워크트리 b7a3eab): `BARRO_REGIME_MIN_SYMBOLS`(default 3) 미만 분석 시 BULL/BEARISH를 **SIDEWAYS로 보수 폴백**(항상 보수방향=게이팅 완화 방지). =0 비활성, 표본충분/이미 sideways면 무변경(byte-identical). py_compile OK·32 regime 테스트 통과. ★데몬 cron이라 내일 08:58 반영★.
+- 타점 관련: 오늘 진입가드(동전주 min_price·추격 flu·시초갭)는 정상 배선 확인. 교차전략 휩쏘가 타점 품질의 남은 약점(후속).
