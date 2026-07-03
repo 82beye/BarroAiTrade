@@ -1046,8 +1046,16 @@ async def _scan_and_buy(
             pass
 
     regime = classify_regime(candles_for_regime, lookback=30)
-    weights = regime_weights(regime)
     ts_r = _now_kst().strftime("%H:%M:%S")
+    # [2026-07-03] 시장국면 표본 견고화 — 캔들 미확보(429 등)로 분석 종목이 너무 적으면
+    #   1~2종목으로 시장 전체 국면을 단정하지 않고 보수 기본(SIDEWAYS)으로 폴백한다.
+    #   폴백은 항상 보수 방향(BULL/BEARISH 게이팅 완화·강화를 SIDEWAYS로 중화)이라 안전.
+    #   BARRO_REGIME_MIN_SYMBOLS=0 이면 비활성(기존 동작). 표본 충분/이미 SIDEWAYS면 무변경.
+    _regime_min = int(os.environ.get("BARRO_REGIME_MIN_SYMBOLS", "3"))
+    if _regime_min > 0 and len(candles_for_regime) < _regime_min and regime != MarketRegime.SIDEWAYS:
+        print(f"  [{ts_r}][REGIME] 표본부족 {len(candles_for_regime)}<{_regime_min} — {regime.value.upper()}→SIDEWAYS 폴백(보수)")
+        regime = MarketRegime.SIDEWAYS
+    weights = regime_weights(regime)
     print(f"  [{ts_r}][REGIME] {regime.value.upper()} (종목 {len(candles_for_regime)}개 분석)")
 
     # 2026-05-20 P8 — 시장 국면별 매수 제한 강화.
