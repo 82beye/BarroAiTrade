@@ -161,6 +161,29 @@ export const api = {
 
   getThemeStocks: (id: number | string) =>
     apiClient.get(`/api/themes/${id}/stocks`),
+
+  // ── 티마 P1 — 알림센터 / 스냅숏 / 종목상세 / 티커 ──
+  getAlertsHistory: (strategy?: string, limit?: number) =>
+    apiClient.get('/api/alerts/history', { params: { strategy, limit } }),
+
+  getAlertSettings: () => apiClient.get('/api/alerts/settings'),
+
+  updateAlertSettings: (patch: Partial<AlertSettings>) =>
+    apiClient.put('/api/alerts/settings', patch),
+
+  getThemeSnapshots: (date?: string, slot?: string) =>
+    apiClient.get('/api/themes/snapshots', { params: { date, slot } }),
+
+  getStockThemes: (symbol: string) =>
+    apiClient.get(`/api/stocks/${symbol}/themes`),
+
+  getMarketIndices: () => apiClient.get('/api/market/indices'),
+
+  getRecentNews: (limit?: number) =>
+    apiClient.get('/api/news/recent', { params: { limit } }),
+
+  getCalendarBySymbol: (symbol: string) =>
+    apiClient.get(`/api/calendar/symbol/${symbol}`),
 };
 
 // ── 티마 공용 타입 ──
@@ -169,6 +192,8 @@ export interface StrategyLevel {
   price: number;
   kind: 'support' | 'target' | 'anchor';
   active: boolean;
+  reached_at?: string | null; // 도달 시각 (SF존 등) — 하위호환
+  d_offset?: number | null; // 포착일 기준 상대일 (D+N) — 하위호환
 }
 
 export interface ScreenerItem {
@@ -210,4 +235,83 @@ export interface ThemeStockItem {
   day_high?: number | null;
   day_low?: number | null;
   value_traded?: number | null; // 억원
+}
+
+// ── 티마 P1 타입 ──
+export interface AlertItem {
+  id: number | string;
+  strategy: string; // f_zone / sf_zone / gold_zone / swing_38
+  symbol: string;
+  name?: string | null;
+  message: string;
+  level_label?: string | null;
+  occurred_at: string;
+}
+
+export interface AlertHistoryResponse {
+  items: AlertItem[];
+  count: number;
+  status: string;
+}
+
+export interface AlertSettings {
+  f_zone: boolean;
+  sf_zone: boolean;
+  gold_zone: boolean;
+  swing_38: boolean;
+}
+
+export interface SnapshotTheme {
+  id: number;
+  name: string;
+  description?: string | null;
+  stocks: ThemeStockItem[];
+}
+
+export interface ThemeSnapshot {
+  date: string;
+  slot: string;
+  captured_at?: string | null;
+  themes: SnapshotTheme[];
+}
+
+export interface ThemeSnapshotSlotList {
+  date: string;
+  slots: string[];
+  status?: string;
+}
+
+export interface StockTheme {
+  id: number;
+  name: string;
+  description?: string | null;
+  score?: number | null;
+}
+
+export interface StockThemesResponse {
+  symbol: string;
+  themes: StockTheme[];
+}
+
+export interface MarketIndex {
+  code: string;
+  name: string;
+  value: number;
+  change: number;
+  change_pct: number;
+}
+
+export interface MarketIndicesResponse {
+  items: MarketIndex[];
+  status: string;
+}
+
+export interface NewsItem {
+  id: number | string;
+  source: string;
+  source_id?: string;
+  title: string;
+  url: string;
+  published_at: string;
+  tags?: string[];
 }

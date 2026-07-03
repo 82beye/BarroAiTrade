@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, time as _dtime, timezone
+from datetime import date, datetime, time as _dtime, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -35,6 +35,40 @@ from backend.core.strategy.reference_levels import SUPPORTED_STRATEGIES, compute
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# (D+N) 상대일 표기 대상 전략 (골드존·38스윙 — PRD §4.2)
+_D_OFFSET_STRATEGIES = ("gold_zone", "swing_38")
+
+
+def _parse_detected_date(detected_at: Optional[str]) -> Optional[date]:
+    """detected_at(ISO8601)의 날짜 부분만 추출 (파싱 실패 시 None)."""
+    if not detected_at:
+        return None
+    try:
+        return datetime.fromisoformat(detected_at).date()
+    except (ValueError, TypeError):
+        try:
+            return date.fromisoformat(detected_at[:10])
+        except (ValueError, TypeError):
+            return None
+
+
+def _attach_d_offset(
+    levels: List[dict], strategy: str, detected_at: Optional[str]
+) -> None:
+    """골드존·38스윙 level 에 d_offset = (오늘 - 포착일).days + 1 부여 (in-place).
+
+    포착일 파싱 불가 시 미부여(None 유지). reached_at 은 산출 근거 없어 건드리지 않음.
+    """
+    if strategy not in _D_OFFSET_STRATEGIES:
+        return
+    det = _parse_detected_date(detected_at)
+    if det is None:
+        return
+    d_offset = (datetime.now(timezone.utc).date() - det).days + 1
+    for lv in levels:
+        lv["d_offset"] = d_offset
+
 
 # 스크리너 전략 탭 메타 (표시 순서 유지)
 _STRATEGY_TABS = [
@@ -126,6 +160,7 @@ async def _build_item(strategy: str, sig: dict) -> ScreenerItemOut:
         signal_price=signal_price,
         current_price=current_price,
     )
+    _attach_d_offset(levels, strategy, sig.get("timestamp"))
 
     return ScreenerItemOut(
         symbol=symbol,
@@ -247,6 +282,7 @@ async def chart_levels(
         signal_price=signal_price,
         current_price=current_price,
     )
+    _attach_d_offset(levels, strategy, sig.get("timestamp"))
     from backend.api.schemas.screener import LevelOut
 
     return ChartLevelsResponse(

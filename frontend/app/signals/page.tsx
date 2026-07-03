@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Disclaimer } from '@/components/layout/disclaimer';
@@ -35,6 +36,19 @@ function fmtDetected(s?: string | null): string | null {
 
 function fmtNum(n?: number | null): string {
   return n === null || n === undefined ? '-' : n.toLocaleString('ko-KR');
+}
+
+// 도달 시각 HH:MM:SS (SF존 등)
+function fmtReached(s?: string | null): string | null {
+  if (!s) return null;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  return d.toLocaleTimeString('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
 }
 
 const POLL_MS = 30_000;
@@ -181,7 +195,13 @@ export default function SignalsPage() {
                         }`}
                       >
                         <td className="p-3">
-                          <div className="font-medium text-slate-100">{it.name ?? it.symbol}</div>
+                          <Link
+                            href={`/stocks/${it.symbol}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="font-medium text-slate-100 hover:text-tima-teal hover:underline"
+                          >
+                            {it.name ?? it.symbol}
+                          </Link>
                           <div className="text-xs text-slate-500">
                             {it.symbol}
                             {detected && <span className="ml-1">· {detected}</span>}
@@ -227,6 +247,11 @@ export default function SignalsPage() {
                               </td>
                             );
                           }
+                          const dOffset =
+                            lv.d_offset === null || lv.d_offset === undefined
+                              ? null
+                              : `(D+${lv.d_offset})`;
+                          const reached = fmtReached(lv.reached_at);
                           return (
                             <td key={lb} className="p-3 text-right">
                               <div
@@ -235,7 +260,13 @@ export default function SignalsPage() {
                                 }`}
                               >
                                 <span className="font-mono text-slate-100">{fmtNum(lv.price)}</span>
-                                <span className="text-[10px] text-slate-500">{lv.kind}</span>
+                                <span className="text-[10px] text-slate-500">
+                                  {lv.kind}
+                                  {dOffset && <span className="ml-1 lowercase">{dOffset}</span>}
+                                </span>
+                                {reached && (
+                                  <span className="font-mono text-[10px] text-slate-500">{reached}</span>
+                                )}
                               </div>
                             </td>
                           );

@@ -238,6 +238,53 @@ class TestChartLevels:
         assert [lv["label"] for lv in data["levels"]] == ["J1", "J2", "J3"]
 
 
+# ── tima P1: (D+N) d_offset 부여 ──────────────────────────────────────────────
+
+class TestDOffset:
+    def _write(self, refined, signal_type, detected_at):
+        refined.write_text(
+            json.dumps(
+                {
+                    "signals": [
+                        {
+                            "symbol": "005930", "name": "삼성전자", "price": 70000,
+                            "signal_type": signal_type, "score": 7.0, "reason": "x",
+                            "timestamp": detected_at,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_gold_zone_levels_get_d_offset(self, client):
+        c, refined = client
+        # 포착일 = 오늘 → d_offset == 1 (당일 D+1)
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).date().isoformat() + "T09:00:00+09:00"
+        self._write(refined, "gold_zone", today)
+        r = c.get("/api/screener/gold_zone")
+        levels = r.json()["items"][0]["levels"]
+        assert all(lv["d_offset"] == 1 for lv in levels)
+        # reached_at 은 산출 근거 없어 None 유지
+        assert all(lv["reached_at"] is None for lv in levels)
+
+    def test_swing_38_gets_d_offset(self, client):
+        c, refined = client
+        self._write(refined, "swing_38", "2026-07-01T09:00:00+09:00")
+        r = c.get("/api/screener/swing_38")
+        levels = r.json()["items"][0]["levels"]
+        # 2026-07-01 포착 → 오늘까지 경과 + 1 (>= 1 보장)
+        assert all(isinstance(lv["d_offset"], int) and lv["d_offset"] >= 1 for lv in levels)
+
+    def test_f_zone_has_no_d_offset(self, client):
+        c, refined = client
+        self._write(refined, "f_zone", "2026-07-01T09:00:00+09:00")
+        r = c.get("/api/screener/f_zone")
+        levels = r.json()["items"][0]["levels"]
+        assert all(lv["d_offset"] is None for lv in levels)
+
+
 # ── ThemeStockOut 하위호환 (gateway 없음 경로) ────────────────────────────────
 
 class TestThemeStockBackwardCompat:

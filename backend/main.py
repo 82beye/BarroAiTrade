@@ -88,6 +88,7 @@ from backend.api.routes.logs import router as logs_router
 from backend.api.routes.themes_calendar_news import router as tcn_router  # BAR-104
 from backend.api.routes.admin import router as admin_router  # BAR-109
 from backend.api.routes.screener import router as screener_router  # tima P0
+from backend.api.routes.alerts import router as alerts_router  # tima P1
 
 app.include_router(signals_router, prefix="/api")
 app.include_router(risk_router, prefix="/api")
@@ -99,6 +100,7 @@ app.include_router(config_router, prefix="/api")
 app.include_router(reports_router, prefix="/api")
 app.include_router(logs_router, prefix="/api")
 app.include_router(screener_router, prefix="/api")  # tima P0: 스크리너 + 차트 기준선
+app.include_router(alerts_router, prefix="/api")  # tima P1: 알림내역 + Push 설정
 # themes/calendar/news 라우트는 경로에 /api/ 포함 — prefix 없이 등록
 app.include_router(tcn_router)
 # admin 라우터는 APIRouter(prefix="/api/admin") 내장 — 추가 prefix 불필요

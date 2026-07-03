@@ -18,6 +18,7 @@ const navLinks: NavLink[] = [
   { href: '/themes', label: '테마', icon: '🔥' },
   { href: '/watchlist', label: '감시 종목', icon: '👁️' },
   { href: '/signals', label: '전략 스크리너', icon: '🔍' },
+  { href: '/alerts', label: '알림내역', icon: '🔔' },
   { href: '/market-info', label: '시장 정보', icon: '📰' },
   { href: '/balance', label: '잔고 추이', icon: '💰' },
   { href: '/reports', label: '리포트', icon: '📋' },

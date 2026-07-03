@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Disclaimer } from '@/components/layout/disclaimer';
-import { api, type ThemeStockItem } from '@/lib/api';
+import { ThemeCardView } from '@/components/themes/theme-card';
+import { api, type ThemeStockItem, type ThemeSnapshot } from '@/lib/api';
 
 interface Theme {
   id: number;
@@ -13,72 +14,11 @@ interface Theme {
 
 const POLL_MS = 30_000;
 
-function fmtNum(n?: number | null): string {
-  return n === null || n === undefined ? '-' : n.toLocaleString('ko-KR');
-}
+// 장중 3개 고정 스냅숏 시점 (PRD §3.2)
+const SNAPSHOT_SLOTS = ['10:00', '12:30', '15:35'];
 
-// 등락률 내림차순 (null 은 score 순으로 뒤쪽)
-function sortStocks(a: ThemeStockItem, b: ThemeStockItem): number {
-  const ca = a.change_pct;
-  const cb = b.change_pct;
-  const aNull = ca === null || ca === undefined;
-  const bNull = cb === null || cb === undefined;
-  if (!aNull && !bNull) return (cb as number) - (ca as number);
-  if (aNull && bNull) return (b.score ?? 0) - (a.score ?? 0);
-  return aNull ? 1 : -1;
-}
-
-// 당일 가격범위 박스플롯 (day_low~day_high 레인지, day_open~price 박스)
-function BoxPlotBar({ s }: { s: ThemeStockItem }) {
-  const { day_low, day_high, day_open, price } = s;
-  if (
-    day_low === null ||
-    day_low === undefined ||
-    day_high === null ||
-    day_high === undefined ||
-    day_high <= day_low
-  ) {
-    return null;
-  }
-  const range = day_high - day_low;
-  const up = (s.change_pct ?? 0) >= 0;
-  const boxColor = up ? '#D00010' : '#2060C0';
-
-  let boxLeft = 0;
-  let boxWidth = 0;
-  if (
-    day_open !== null &&
-    day_open !== undefined &&
-    price !== null &&
-    price !== undefined
-  ) {
-    const lo = Math.min(day_open, price);
-    const hi = Math.max(day_open, price);
-    boxLeft = ((lo - day_low) / range) * 100;
-    boxWidth = Math.max(((hi - lo) / range) * 100, 1.5);
-  }
-  const priceLeft =
-    price !== null && price !== undefined ? ((price - day_low) / range) * 100 : null;
-
-  return (
-    <div className="relative mt-1 h-1.5 w-full rounded-full bg-slate-700">
-      {boxWidth > 0 && (
-        <div
-          className="absolute top-0 h-1.5 rounded-full"
-          style={{ left: `${boxLeft}%`, width: `${boxWidth}%`, backgroundColor: boxColor }}
-        />
-      )}
-      {priceLeft !== null && (
-        <div
-          className="absolute top-1/2 h-2.5 w-0.5 -translate-y-1/2 bg-slate-100"
-          style={{ left: `${Math.min(Math.max(priceLeft, 0), 100)}%` }}
-        />
-      )}
-    </div>
-  );
-}
-
-function ThemeCard({ theme, tick }: { theme: Theme; tick: number }) {
+// 라이브 테마 카드 (자체 종목 조회 + 폴링)
+function LiveThemeCard({ theme, tick }: { theme: Theme; tick: number }) {
   const [stocks, setStocks] = useState<ThemeStockItem[]>([]);
 
   useEffect(() => {
@@ -96,84 +36,125 @@ function ThemeCard({ theme, tick }: { theme: Theme; tick: number }) {
     };
   }, [theme.id, tick]);
 
-  const sorted = useMemo(() => [...stocks].sort(sortStocks).slice(0, 5), [stocks]);
+  return <ThemeCardView name={theme.name} description={theme.description} stocks={stocks} />;
+}
 
-  const totalValue = useMemo(() => {
-    const vals = stocks
-      .map((s) => s.value_traded)
-      .filter((v): v is number => v !== null && v !== undefined);
-    return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) : null;
-  }, [stocks]);
+// 타임라인 스냅숏 모달 (PRD §3.2)
+function TimelineModal({ onClose }: { onClose: () => void }) {
+  const [slot, setSlot] = useState(SNAPSHOT_SLOTS[SNAPSHOT_SLOTS.length - 1]);
+  const [snapshot, setSnapshot] = useState<ThemeSnapshot | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [noData, setNoData] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setNoData(false);
+    api
+      .getThemeSnapshots(undefined, slot)
+      .then((res) => {
+        if (cancelled) return;
+        const data = res.data;
+        if (!data || data.status === 'no_data' || !Array.isArray(data.themes)) {
+          setSnapshot(null);
+          setNoData(true);
+        } else {
+          setSnapshot(data as ThemeSnapshot);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSnapshot(null);
+          setNoData(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slot]);
+
+  const capturedLabel = snapshot?.captured_at
+    ? new Date(snapshot.captured_at).toLocaleTimeString('ko-KR', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : slot;
 
   return (
-    <Card className="overflow-hidden border-slate-700 bg-slate-800">
-      {/* 헤더 (teal) */}
-      <div className="flex items-center justify-between bg-tima-teal px-4 py-2.5">
-        <span className="font-bold text-black">{theme.name}</span>
-        {totalValue !== null && (
-          <span className="rounded-full bg-black/20 px-2 py-0.5 text-xs font-semibold text-black">
-            {fmtNum(totalValue)}억
-          </span>
-        )}
-      </div>
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-black/70 p-4 md:p-8"
+      onClick={onClose}
+    >
+      <div
+        className="mx-auto flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 헤더 */}
+        <div className="flex items-center justify-between border-b border-slate-700 px-5 py-3">
+          <h2 className="flex items-center gap-2 text-lg font-bold text-slate-50">
+            🕐 타임라인 스냅숏
+          </h2>
+          <button
+            onClick={onClose}
+            className="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+            aria-label="닫기"
+          >
+            ✕
+          </button>
+        </div>
 
-      {/* 이슈 1줄 */}
-      {theme.description && (
-        <p className="truncate px-4 pt-2 text-xs text-slate-400">{theme.description}</p>
-      )}
-
-      {/* 대표 종목 */}
-      <div className="px-2 py-2">
-        {sorted.length === 0 ? (
-          <div className="px-2 py-4 text-center text-xs text-slate-500">종목 데이터 없음</div>
-        ) : (
-          sorted.map((s) => {
-            const cp = s.change_pct;
-            const hasCp = cp !== null && cp !== undefined;
-            const up = (cp ?? 0) >= 0;
-            const surge = hasCp && (cp as number) >= 8;
+        {/* slot 탭 */}
+        <div className="flex gap-2 border-b border-slate-700 px-5 py-3">
+          {SNAPSHOT_SLOTS.map((s) => {
+            const on = s === slot;
             return (
-              <div
-                key={s.symbol}
-                className={`rounded px-2 py-1.5 ${surge ? 'bg-tima-surge' : ''}`}
+              <button
+                key={s}
+                onClick={() => setSlot(s)}
+                className={`rounded-md px-4 py-1.5 text-sm font-semibold transition-colors ${
+                  on
+                    ? 'bg-tima-active text-black'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span
-                    className={`truncate text-sm font-medium ${
-                      surge ? 'text-black' : 'text-slate-100'
-                    }`}
-                  >
-                    {s.name ?? s.symbol}
-                  </span>
-                  <span
-                    className={`shrink-0 font-mono text-sm ${
-                      surge
-                        ? 'text-black'
-                        : !hasCp
-                          ? 'text-slate-500'
-                          : up
-                            ? 'text-tima-up'
-                            : 'text-tima-down'
-                    }`}
-                  >
-                    {!hasCp ? '-' : `${up ? '↑' : '↓'} ${Math.abs(cp as number).toFixed(2)}%`}
-                  </span>
-                </div>
-                <div
-                  className={`flex items-center justify-between gap-2 text-xs ${
-                    surge ? 'text-black/70' : 'text-slate-500'
-                  }`}
-                >
-                  <span className="font-mono">{fmtNum(s.price)}</span>
-                  <span className="font-mono">{fmtNum(s.value_traded)}억</span>
-                </div>
-                <BoxPlotBar s={s} />
-              </div>
+                {s}
+              </button>
             );
-          })
-        )}
+          })}
+          {snapshot && (
+            <span className="ml-auto self-center text-xs text-slate-500">
+              동결 시각: {capturedLabel}
+            </span>
+          )}
+        </div>
+
+        {/* 본문 */}
+        <div className="flex-1 overflow-y-auto p-5">
+          {loading ? (
+            <div className="py-12 text-center text-slate-400">스냅숏 불러오는 중…</div>
+          ) : noData || !snapshot ? (
+            <div className="py-12 text-center text-slate-400">
+              해당 시각 스냅숏이 없습니다.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {snapshot.themes.map((t) => (
+                <ThemeCardView
+                  key={t.id}
+                  name={t.name}
+                  description={t.description}
+                  stocks={t.stocks ?? []}
+                  capturedAt={capturedLabel}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -182,6 +163,7 @@ export default function ThemesPage() {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [tick, setTick] = useState(0);
+  const [showTimeline, setShowTimeline] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -219,9 +201,17 @@ export default function ThemesPage() {
           <h1 className="text-4xl font-bold text-slate-50">테마 보드</h1>
           <p className="mt-2 text-slate-400">시장 테마별 대표 종목을 실시간 추적합니다</p>
         </div>
-        <div className="text-right text-xs text-slate-500">
-          {lastUpdated && <div>마지막 갱신: {lastUpdated.toLocaleTimeString('ko-KR')}</div>}
-          <div>30초 자동 갱신</div>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setShowTimeline(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200 transition-colors hover:bg-slate-700"
+          >
+            🕐 타임라인
+          </button>
+          <div className="text-right text-xs text-slate-500">
+            {lastUpdated && <div>마지막 갱신: {lastUpdated.toLocaleTimeString('ko-KR')}</div>}
+            <div>30초 자동 갱신</div>
+          </div>
         </div>
       </div>
 
@@ -236,12 +226,14 @@ export default function ThemesPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {themes.map((t) => (
-            <ThemeCard key={t.id} theme={t} tick={tick} />
+            <LiveThemeCard key={t.id} theme={t} tick={tick} />
           ))}
         </div>
       )}
 
       <Disclaimer />
+
+      {showTimeline && <TimelineModal onClose={() => setShowTimeline(false)} />}
     </div>
   );
 }

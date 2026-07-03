@@ -26,6 +26,11 @@ class LevelOut(BaseModel):
     price: float
     kind: str  # "support" | "target" | "anchor"
     active: bool
+    # tima P1: 하위호환 확장 (기본 None).
+    #   reached_at : 도달 시각 ISO8601 — 현재 산출 근거 없어 None 유지(날조 금지).
+    #   d_offset   : 포착 후 경과일(D+N 표기용, 골드존·38스윙만 부여).
+    reached_at: Optional[str] = None
+    d_offset: Optional[int] = None
 
 
 class ScreenerItemOut(BaseModel):

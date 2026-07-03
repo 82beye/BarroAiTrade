@@ -154,6 +154,24 @@ async def get_order_book(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/market/indices")
+async def get_indices() -> dict:
+    """
+    지수(KOSPI/KOSDAQ) 시세 조회 (티마 앱 벤치마킹 P1, PRD §5 시장종합·하단 지수 바).
+
+    현 MarketGateway 인터페이스는 개별 종목 ticker 만 제공하며 지수 심볼 조회를
+    지원하지 않는다. 지원 전까지는 items:[] + status:"unsupported" 로 정직하게 반환
+    (지수 값 날조 금지). gateway 미초기화 시에도 동일.
+
+    응답:
+    ```json
+    { "items": [], "status": "unsupported" }
+    ```
+    후속: gateway 에 지수 조회(get_index 등) 추가 시 items 채우고 status:"ok".
+    """
+    return {"items": [], "status": "unsupported"}
+
+
 @router.get("/market/universe")
 async def get_universe() -> dict:
     """
