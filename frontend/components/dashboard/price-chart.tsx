@@ -43,6 +43,29 @@ function levelColor(label: string): string {
   return '#94a3b8';
 }
 
+// 일봉 → 주봉/월봉 리샘플 (백엔드는 1d까지만 제공 — PRD §4.4 월/주 주기)
+function resample(daily: OHLCVData[], unit: 'week' | 'month'): OHLCVData[] {
+  const out: OHLCVData[] = [];
+  let key = '';
+  for (const c of daily) {
+    const d = new Date(c.time * 1000);
+    const k =
+      unit === 'month'
+        ? `${d.getFullYear()}-${d.getMonth()}`
+        : `${d.getFullYear()}-${Math.floor((d.getTime() / 86400000 + 4) / 7)}`; // epoch 기준 주(목요일 앵커)
+    if (k !== key) {
+      key = k;
+      out.push({ ...c });
+    } else {
+      const last = out[out.length - 1];
+      last.high = Math.max(last.high, c.high);
+      last.low = Math.min(last.low, c.low);
+      last.close = c.close;
+    }
+  }
+  return out;
+}
+
 function sma(candles: OHLCVData[], period: number): { time: number; value: number }[] {
   const out: { time: number; value: number }[] = [];
   for (let i = period - 1; i < candles.length; i++) {
@@ -163,9 +186,14 @@ export function PriceChart({
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      // 주봉/월봉은 일봉을 받아 클라이언트 리샘플
+      const isResampled = timeframe === '1w' || timeframe === '1M';
+      const fetchTf = isResampled ? '1d' : timeframe;
+      const fetchLimit = isResampled ? 600 : 200;
+
       let candles: OHLCVData[] = [];
       try {
-        const response = await api.getOHLCV(symbol, timeframe, 200);
+        const response = await api.getOHLCV(symbol, fetchTf, fetchLimit);
         const raw: any[] = response.data?.data ?? [];
         candles = raw.map((item: any) => ({
           time: item.timestamp,
@@ -179,7 +207,10 @@ export function PriceChart({
       }
 
       if (candles.length === 0) {
-        candles = generateMockOHLCV(symbol, 200);
+        candles = generateMockOHLCV(symbol, fetchLimit);
+      }
+      if (isResampled) {
+        candles = resample(candles, timeframe === '1M' ? 'month' : 'week');
       }
 
       if (seriesRef.current) {
@@ -291,6 +322,8 @@ export function PriceChart({
               <option value="15m">15분</option>
               <option value="1h">1시간</option>
               <option value="1d">일봉</option>
+              <option value="1w">주봉</option>
+              <option value="1M">월봉</option>
             </Select>
           </div>
         )}
