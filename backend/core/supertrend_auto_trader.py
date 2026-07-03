@@ -438,11 +438,42 @@ class SupertrendAutoTrader:
             return result
 
         universe = await self._universe_provider()
+        # [2026-07-03] 종목당 당일 교차전략 진입 캡 — 다른 전략이 오늘 이미 N회 진입한 종목엔
+        #   신규진입 금지(순차 churn 방지, 예: 7/3 477850 f_zone→supertrend). order_audit 전 전략 매수 집계.
+        #   BARRO_MAX_ENTRIES_PER_SYMBOL_DAY=0(기본)→비활성. supertrend 자기 max_entries 와 별개(교차전략).
+        _sym_cap = int(os.environ.get("BARRO_MAX_ENTRIES_PER_SYMBOL_DAY", "0"))
+        _daily_capped: set[str] = set()
+        if _sym_cap > 0:
+            try:
+                _ap = getattr(self._gate, "_audit_path", None)
+                if _ap is not None and _ap.exists():
+                    import csv as _csv
+                    _kst = timezone(timedelta(hours=9))
+                    _tk = datetime.now(_kst).strftime("%Y-%m-%d")
+                    _cnt: dict[str, int] = {}
+                    with _ap.open(newline="", encoding="utf-8") as _f:
+                        for _row in _csv.DictReader(_f):
+                            if _row.get("side") != "buy" or _row.get("action") not in {"ORDERED", "DRY_RUN"}:
+                                continue
+                            try:
+                                _rts = datetime.fromisoformat(_row["ts"])
+                                if _rts.tzinfo is None:
+                                    _rts = _rts.replace(tzinfo=timezone.utc)
+                            except (ValueError, KeyError):
+                                continue
+                            if _rts.astimezone(_kst).strftime("%Y-%m-%d") == _tk:
+                                _cnt[_row["symbol"]] = _cnt.get(_row["symbol"], 0) + 1
+                    _daily_capped = {s for s, n in _cnt.items() if n >= _sym_cap}
+            except Exception:
+                _daily_capped = set()
         candidates: list[tuple[str, str, Decimal]] = []  # (symbol, name, price)
         atr_pct_by_symbol: dict[str, float] = {}  # BAR-OPS-35 변동성 사이징용
         for symbol, name in universe[: self.config.universe_max]:
             if symbol in held_after:
                 continue  # 이미 보유(전략 무관) — 중복 진입 방지
+            if symbol in _daily_capped:
+                logger.debug("슈퍼트렌드 진입 제외(교차전략 당일캡): %s ≥ %d회", symbol, _sym_cap)
+                continue  # 당일 교차전략 진입 캡 도달 — 순차 churn 방지
             # [P0#1] BAR-OPS-35 재진입 가드 — 당일 횟수상한/cooldown/손절후 차단 (전부 default OFF)
             _rb = self._reentry_blocked(symbol)
             if _rb:

@@ -1017,9 +1017,35 @@ async def _scan_and_buy(
         except Exception:
             pass
 
+    # [2026-07-03] 종목당 당일 교차전략 진입 캡 — 동일종목을 여러 전략이 하루에 반복
+    #   churn(예: 7/3 477850 f_zone→supertrend 순차 진입)하는 것을 방지. order_audit 의
+    #   당일 매수(ORDERED/DRY_RUN, 전 전략) 횟수가 캡 이상이면 신규진입 제외.
+    #   BARRO_MAX_ENTRIES_PER_SYMBOL_DAY=0(기본) → 비활성(기존 동작). DCA(_evaluate_and_sell)는 무관.
+    daily_capped: set[str] = set()
+    _sym_cap = int(os.environ.get("BARRO_MAX_ENTRIES_PER_SYMBOL_DAY", "0"))
+    if _sym_cap > 0 and audit_path and audit_path.exists():
+        _today_kst = _now_kst().strftime("%Y-%m-%d")
+        _sym_cnt: dict[str, int] = {}
+        try:
+            with audit_path.open(newline="", encoding="utf-8") as _f:
+                for _row in _csv.DictReader(_f):
+                    if _row.get("side") != "buy" or _row.get("action") not in {"ORDERED", "DRY_RUN"}:
+                        continue
+                    try:
+                        _rts = datetime.fromisoformat(_row["ts"])
+                        if _rts.tzinfo is None:
+                            _rts = _rts.replace(tzinfo=timezone.utc)
+                    except (ValueError, KeyError):
+                        continue
+                    if _rts.astimezone(KST).strftime("%Y-%m-%d") == _today_kst:
+                        _sym_cnt[_row["symbol"]] = _sym_cnt.get(_row["symbol"], 0) + 1
+            daily_capped = {s for s, n in _sym_cnt.items() if n >= _sym_cap}
+        except Exception:
+            pass
+
     excluded = (
         already_held | active_symbols | today_sold | session_bought
-        | cooldown_buys | audit_buys | closing_bet_held
+        | cooldown_buys | audit_buys | closing_bet_held | daily_capped
     )
     # 급등 추격매수 방지 필터 — 등락률이 _MAX_FLU_RATE 이상인 종목 제외.
     # 2026-06-01: 25.0→30.0 완화. 강세장(코스피 급등)에서 +29%대 주도주(LG전자·
