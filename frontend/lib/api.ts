@@ -184,6 +184,17 @@ export const api = {
 
   getCalendarBySymbol: (symbol: string) =>
     apiClient.get(`/api/calendar/symbol/${symbol}`),
+
+  // 기간 지정 마켓일정 (일/주/월 뷰 공용)
+  getCalendar: (start: string, end: string) =>
+    apiClient.get('/api/calendar', { params: { start, end } }),
+
+  // ── 티마 P2 — 통합검색 / NXT 애프터마켓 / 호가 ──
+  search: (q: string, limit = 10) =>
+    apiClient.get('/api/search', { params: { q, limit } }),
+
+  getNxt: (filter: 'value' | 'gainers' | 'losers' = 'value', limit = 30) =>
+    apiClient.get('/api/market/nxt', { params: { filter, limit } }),
 };
 
 // ── 티마 공용 타입 ──
@@ -314,4 +325,39 @@ export interface NewsItem {
   url: string;
   published_at: string;
   tags?: string[];
+}
+
+// ── 티마 P2 타입 ──
+export interface CalendarEvent {
+  id: number | string;
+  event_type: string; // theme / individual / policy / …
+  symbol?: string | null;
+  event_date: string; // YYYY-MM-DD
+  title: string;
+  source?: string;
+}
+
+export type SearchResult =
+  | { type: 'stock'; symbol: string; name: string }
+  | { type: 'theme'; id: number | string; name: string };
+
+export interface SearchResponse {
+  query: string;
+  results: SearchResult[];
+}
+
+export interface NxtItem {
+  symbol: string;
+  name?: string | null;
+  nxt_price?: number | null; // NXT 현재가
+  vs_close_pct?: number | null; // 종가 대비 %
+  day_close?: number | null; // 당일 종가
+  day_change_pct?: number | null; // 당일 등락률
+  aft_value?: number | null; // 애프터 거래대금 (억)
+  cum_value?: number | null; // 누적 거래대금 (억)
+}
+
+export interface NxtResponse {
+  items: NxtItem[];
+  status: 'ok' | 'unsupported' | 'not_ready' | string;
 }

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
+import { GlobalSearch } from '@/components/layout/global-search';
 
 interface NavLink {
   href: string;
@@ -18,7 +19,9 @@ const navLinks: NavLink[] = [
   { href: '/themes', label: '테마', icon: '🔥' },
   { href: '/watchlist', label: '감시 종목', icon: '👁️' },
   { href: '/signals', label: '전략 스크리너', icon: '🔍' },
+  { href: '/nxt', label: 'NXT', icon: '🌙' },
   { href: '/alerts', label: '알림내역', icon: '🔔' },
+  { href: '/calendar', label: '마켓일정', icon: '📅' },
   { href: '/market-info', label: '시장 정보', icon: '📰' },
   { href: '/balance', label: '잔고 추이', icon: '💰' },
   { href: '/reports', label: '리포트', icon: '📋' },
@@ -61,6 +64,11 @@ export function AppSidebar() {
             )}
           </svg>
         </button>
+      </div>
+
+      {/* 통합검색 (PRD §3.4) */}
+      <div className={collapsed ? 'px-1.5' : 'px-4'}>
+        <GlobalSearch collapsed={collapsed} />
       </div>
 
       {/* Nav */}

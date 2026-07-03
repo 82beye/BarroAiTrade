@@ -6,6 +6,7 @@
   GET  /api/market/ticker/:symbol                               - 종목 시세 조회
   GET  /api/market/order-book/:symbol                          - 호가 조회
   GET  /api/market/universe                                     - 전종목 목록
+  GET  /api/market/nxt?filter=value|gainers|losers&limit=30    - NXT 시세 목록 (스텁)
 """
 from __future__ import annotations
 
@@ -196,3 +197,70 @@ async def get_universe() -> dict:
     except Exception as e:
         logger.error(f"Universe 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── NXT (대체거래소) 시세 목록 ──────────────────────────────────────────────
+#
+# 조사 결론 (2026-07-04):
+#   현행 NXT 게이트웨이(backend/core/gateway/nxt.py 의 INxtGateway/NxtGatewayManager)
+#   는 **스트리밍 subscribe/callback** 인터페이스만 제공한다
+#   (subscribe_ticker/orderbook/trade + on_tick 콜백 — nxt.py:49-67).
+#   거래대금/등락률 기준 '시세 목록(랭킹) 조회' 메서드가 없고, app_state 에 NXT
+#   매니저가 배선돼 있지도 않다(grep: nxt.py 외 참조 0건).
+#   따라서 NXT 애프터마켓 종목 목록 API 는 현재 **미지원**이며, 정직하게
+#   status="unsupported" + 빈 items 를 반환한다.
+#
+# 활성화에 필요한 gateway 확장 (후속 BAR 과제):
+#   1) INxtGateway 에 목록 조회 시그니처 추가, 예:
+#        async def get_ranking(self, filter: str, limit: int) -> list[NxtQuote]
+#      (filter: "value"=거래대금 | "gainers"=상승 | "losers"=하락;
+#       NxtQuote: symbol, name, nxt_price, vs_close_pct, day_close,
+#                 day_change_pct, aft_value, cum_value)
+#      — 키움 자체 OpenAPI ka10032/ka10027 랭킹 TR(kiwoom_native_rank.py 참고)을
+#        stex_tp NXT 옵션으로 조회하거나, NXT/KOSCOM 시세 API 를 연동.
+#   2) 애플리케이션 기동 시 NxtGatewayManager 를 app_state.nxt_gateway 로 주입.
+#   3) 본 핸들러에서 app_state.nxt_gateway.get_ranking(...) 호출로 교체.
+_NXT_FILTERS = ("value", "gainers", "losers")
+
+
+@router.get("/market/nxt")
+async def get_nxt_quotes(
+    filter: str = Query("value", description="정렬 기준: value|gainers|losers"),
+    limit: int = Query(30, ge=1, le=100, description="종목 수"),
+) -> dict:
+    """
+    NXT(대체거래소) 시세/애프터마켓 목록 조회 — 현재 미지원 스텁.
+
+    현행 NxtGateway 는 스트리밍 구독 전용이라 목록 조회를 지원하지 않는다.
+    지수 API 패턴과 동일하게 status 로 가용성을 정직 반환한다:
+      - "unsupported": gateway 인터페이스가 목록 조회를 지원하지 않음(현 상태)
+      - "not_ready"  : 지원하지만 NXT 게이트웨이 미초기화(후속 배선 시)
+
+    응답:
+    ```json
+    {
+      "filter": "value",
+      "limit": 30,
+      "items": [],
+      "status": "unsupported"
+    }
+    ```
+    items 스키마(활성화 시):
+      {symbol, name, nxt_price, vs_close_pct, day_close, day_change_pct,
+       aft_value, cum_value}
+    """
+    if filter not in _NXT_FILTERS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"filter 는 {list(_NXT_FILTERS)} 중 하나여야 합니다",
+        )
+
+    nxt_gateway = getattr(app_state, "nxt_gateway", None)
+    status = "unsupported" if nxt_gateway is None else "not_ready"
+
+    return {
+        "filter": filter,
+        "limit": limit,
+        "items": [],
+        "status": status,
+    }
