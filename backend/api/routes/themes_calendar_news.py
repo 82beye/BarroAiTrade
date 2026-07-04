@@ -179,9 +179,33 @@ async def stock_themes(symbol: str) -> dict:
 
 
 async def _enrich_theme_stocks(stocks: list[ThemeStockOut]) -> None:
-    """theme_stocks 시세 보강 (in-place). gateway 미초기화 시 no-op (하위호환)."""
+    """theme_stocks 시세 보강 (in-place).
+
+    조달 우선순위: market_gateway → ohlcv 캐시(cache_quotes, 지연 시세).
+    종목명은 stock_names 마스터로 항상 시도. 둘 다 없으면 기존 no-op (하위호환).
+    """
+    if not stocks:
+        return
+
+    from backend.core.market_data import cache_quotes, stock_names
+
+    for stock in stocks[:_THEME_QUOTE_CAP]:
+        resolved = stock_names.resolve(stock.symbol)
+        if resolved and resolved != stock.symbol:
+            stock.name = resolved
+
     gateway = app_state.market_gateway
-    if gateway is None or not stocks:
+    if gateway is None:
+        for stock in stocks[:_THEME_QUOTE_CAP]:
+            q = cache_quotes.get_quote(stock.symbol)
+            if not q:
+                continue
+            stock.price = q.get("price")
+            stock.change_pct = q.get("change_pct")
+            stock.day_open = q.get("day_open")
+            stock.day_high = q.get("day_high")
+            stock.day_low = q.get("day_low")
+            stock.value_traded = q.get("value_traded")
         return
 
     async def _fill(stock: ThemeStockOut) -> None:
