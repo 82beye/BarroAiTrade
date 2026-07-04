@@ -27,12 +27,13 @@ function Icon({ d, fill = false }: { d: string; fill?: boolean }) {
   );
 }
 
+// 하단 5탭 (PRD §2.1): 마켓중심 · NXT · 마켓일정 · F존 · 시장종합 (알림은 헤더 🔔 로 이동)
 const TABS: Tab[] = [
   { href: '/themes', label: '마켓중심', icon: <Icon d="M12 3a9 9 0 109 9h-9V3z M12 3v9h9a9 9 0 00-9-9z" /> },
   { href: '/nxt', label: 'NXT', icon: <Icon d="M6 20V4l12 16V4" /> },
   { href: '/calendar', label: '마켓일정', icon: <Icon d="M8 2v3M16 2v3M3.5 9h17M4 5h16a1 1 0 011 1v14a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1z" /> },
   { href: '/signals', label: 'F존', icon: <Icon d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" /> },
-  { href: '/alerts', label: '알림', icon: <Icon d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.66V5a2 2 0 10-4 0v.34A6 6 0 006 11v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /> },
+  { href: '/market-overview', label: '시장종합', icon: <Icon d="M4 19V5m0 14h16M8 15l3-4 3 2 4-6" /> },
 ];
 
 // 햄버거 드로어 항목 (PRD §2.1)
@@ -91,6 +92,22 @@ export function TimaShell({ children }: { children: ReactNode }) {
           </div>
           <div className="mt-2 flex items-center gap-2">
             <TimaSearch />
+            {/* 알림내역 (5탭에서 이동 — PRD §2.1) */}
+            <Link
+              href="/alerts"
+              aria-label="알림내역"
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white ${
+                pathname.startsWith('/alerts') ? 'text-tima-select' : 'text-tima-text'
+              }`}
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.66V5a2 2 0 10-4 0v.34A6 6 0 006 11v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                />
+              </svg>
+            </Link>
             <button
               onClick={() => setDrawer(true)}
               aria-label="메뉴"

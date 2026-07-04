@@ -247,7 +247,7 @@ function DayView({ events }: { events: CalendarEvent[] }) {
   );
 }
 
-// ── 주 뷰 (7일 컬럼) ──
+// ── 주 뷰 (일별 섹션 세로 리스트 — PRD §3.5 티마 주간 뷰) ──
 function WeekView({
   start,
   byDate,
@@ -258,48 +258,66 @@ function WeekView({
   todayStr: string;
 }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  // 이벤트 있는 날만 노출
+  const activeDays = days.filter((d) => (byDate.get(ymd(d)) ?? []).length > 0);
+
+  if (activeDays.length === 0) {
+    return (
+      <div className="rounded-lg border border-tima-line bg-white py-12 text-center text-tima-sub">
+        이번 주 일정이 없습니다.
+      </div>
+    );
+  }
+
   return (
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-      {days.map((d) => {
+    <div className="space-y-4">
+      {activeDays.map((d) => {
         const key = ymd(d);
         const evs = byDate.get(key) ?? [];
         const isToday = key === todayStr;
+        const dow = d.getDay();
         return (
-          <div
-            key={key}
-            className={`rounded-lg border bg-white p-3 ${
-              isToday ? 'border-tima-up ring-1 ring-tima-up' : 'border-tima-line'
-            }`}
-          >
-            <div
-              className={`mb-2 flex items-baseline justify-between ${
-                d.getDay() === 0 || d.getDay() === 6 ? 'text-tima-sub' : 'text-tima-text'
-              }`}
-            >
-              <span className="text-sm font-semibold">
-                {d.getMonth() + 1}.{d.getDate()} ({WEEKDAYS[d.getDay()]})
+          <section key={key}>
+            {/* 날짜 헤더 — 오늘은 분홍 라운드 박스 강조 */}
+            <div className="mb-1.5 flex items-center gap-2">
+              <span
+                className={`rounded-md px-2 py-0.5 text-sm font-bold ${
+                  isToday
+                    ? 'bg-tima-up text-white'
+                    : dow === 0
+                      ? 'text-tima-up'
+                      : dow === 6
+                        ? 'text-tima-down'
+                        : 'text-tima-text'
+                }`}
+              >
+                {String(d.getMonth() + 1).padStart(2, '0')}.{d.getDate()}({WEEKDAYS[dow]})
               </span>
-              {evs.length > 0 && <span className="text-xs text-tima-sub">{evs.length}</span>}
+              <span className="text-xs text-tima-sub">{evs.length}건</span>
             </div>
-            {evs.length === 0 ? (
-              <p className="text-xs text-tima-line">-</p>
-            ) : (
-              <div className="space-y-1.5">
-                {evs.map((ev) => {
-                  const c = categoryStyle(ev.event_type);
-                  return (
-                    <div key={ev.id} className="flex items-start gap-1.5">
-                      <span
-                        className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: c.dot }}
-                      />
-                      <span className="line-clamp-2 text-xs text-tima-text">{ev.title}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+            {/* 그 날짜 이벤트 리스트 */}
+            <div className="space-y-2">
+              {evs.map((ev) => (
+                <div
+                  key={ev.id}
+                  className="flex items-start gap-3 rounded-xl border border-tima-line bg-white px-3 py-2.5 shadow-sm"
+                >
+                  <CategoryBadge ev={ev} />
+                  <div className="flex-1">
+                    <p className="text-sm text-tima-text">{ev.title}</p>
+                    {ev.symbol && (
+                      <Link
+                        href={`/stocks/${ev.symbol}`}
+                        className="mt-1 inline-block font-mono text-xs text-tima-teal hover:underline"
+                      >
+                        {ev.symbol} →
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
         );
       })}
     </div>

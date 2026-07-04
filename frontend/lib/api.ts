@@ -195,6 +195,21 @@ export const api = {
 
   getNxt: (filter: 'value' | 'gainers' | 'losers' = 'value', limit = 30) =>
     apiClient.get('/api/market/nxt', { params: { filter, limit } }),
+
+  // ── 티마 P1(잔여) — 시장종합 / 호가 보조 / 펀더멘탈 ──
+  // 거래원 창구(매도/매수 상위 5)
+  getBrokers: (symbol: string) => apiClient.get(`/api/market/brokers/${symbol}`),
+
+  // 프로그램 순매수 (시간별/일별)
+  getProgram: (symbol: string, mode: 'time' | 'daily' = 'time') =>
+    apiClient.get(`/api/market/program/${symbol}`, { params: { mode } }),
+
+  // 투자자별 매매동향 (코스피/코스닥 × 개인/외국인/기관)
+  getInvestors: () => apiClient.get('/api/market/investors'),
+
+  // 종목 펀더멘탈 (시총·유통비율·PER·PBR)
+  getFundamental: (symbol: string) =>
+    apiClient.get(`/api/stocks/${symbol}/fundamental`),
 };
 
 // ── 티마 공용 타입 ──
@@ -360,4 +375,79 @@ export interface NxtItem {
 export interface NxtResponse {
   items: NxtItem[];
   status: 'ok' | 'unsupported' | 'not_ready' | string;
+}
+
+// ── 티마 P1(잔여) 타입 — 호가 참조가 / 거래원 / 프로그램 / 매매동향 / 펀더멘탈 ──
+export interface OrderBookRef {
+  base_price?: number | null; // 기준가(전일 종가)
+  open?: number | null; // 시가
+  high?: number | null; // 고가
+  low?: number | null; // 저가
+  upper_limit?: number | null; // 상한가
+  lower_limit?: number | null; // 하한가
+  vi_up_expected?: number | null; // 정적 VI 상승 발동 예상가
+  vi_down_expected?: number | null; // 정적 VI 하락 발동 예상가
+}
+
+export interface OrderBookTick {
+  time: string; // HH:MM:SS
+  price: number;
+  qty: number;
+}
+
+export interface OrderBookResponse {
+  symbol: string;
+  asks: [number, number][]; // [가격, 잔량]
+  bids: [number, number][];
+  timestamp?: string;
+  ref?: OrderBookRef | null;
+  strength?: number | null; // 체결강도
+  ticks?: OrderBookTick[] | null; // 최근 체결
+}
+
+export interface BrokerRow {
+  name: string;
+  qty: number;
+}
+
+export interface BrokersResponse {
+  sell: BrokerRow[]; // 매도상위 5
+  buy: BrokerRow[]; // 매수상위 5
+  foreign_sell?: number | null; // 외국계 매도합
+  foreign_buy?: number | null; // 외국계 매수합
+  status: string;
+}
+
+export interface ProgramItem {
+  time_or_date: string; // HH:MM (시간별) / YYYY-MM-DD (일별)
+  price?: number | null;
+  volume?: number | null;
+  net_buy?: number | null; // 순매수 수량
+  net_buy_delta?: number | null; // 순매수 증감
+}
+
+export interface ProgramResponse {
+  items: ProgramItem[];
+  status: string;
+}
+
+export interface InvestorFlow {
+  individual?: number | null; // 개인 (억원)
+  foreign?: number | null; // 외국인
+  institution?: number | null; // 기관
+}
+
+export interface InvestorsResponse {
+  kospi: InvestorFlow;
+  kosdaq: InvestorFlow;
+  status: string;
+}
+
+export interface FundamentalResponse {
+  name?: string | null;
+  market_cap?: number | null; // 억원
+  float_ratio?: number | null; // 유통비율 %
+  per?: number | null;
+  pbr?: number | null;
+  status: string;
 }

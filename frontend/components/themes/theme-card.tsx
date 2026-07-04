@@ -70,6 +70,8 @@ interface ThemeCardViewProps {
   stocks: ThemeStockItem[];
   /** 스냅숏 모달에서 동결 시각 표기 (HH:MM) */
   capturedAt?: string | null;
+  /** 전달 시 헤더 테마명이 /themes/[id] 상세로 링크 */
+  id?: number | string | null;
 }
 
 /**
@@ -77,7 +79,7 @@ interface ThemeCardViewProps {
  * teal 헤더 + 대금 배지 + 이슈 1줄 + 대표종목 4~5행(등락률순, 박스플롯 바).
  * 라이트 모바일 셸 기준 흰 카드 + 검정 텍스트 + 등락 빨강/파랑.
  */
-export function ThemeCardView({ name, description, stocks, capturedAt }: ThemeCardViewProps) {
+export function ThemeCardView({ name, description, stocks, capturedAt, id }: ThemeCardViewProps) {
   const sorted = useMemo(() => [...stocks].sort(sortStocks).slice(0, 5), [stocks]);
 
   const totalValue = useMemo(() => {
@@ -89,9 +91,15 @@ export function ThemeCardView({ name, description, stocks, capturedAt }: ThemeCa
 
   return (
     <div className="overflow-hidden rounded-lg border border-tima-line bg-white shadow-sm">
-      {/* 헤더 (teal) */}
+      {/* 헤더 (teal) — id 전달 시 테마 상세로 링크 */}
       <div className="flex items-center justify-between bg-tima-teal px-3 py-2">
-        <span className="truncate font-bold text-black">{name}</span>
+        {id !== null && id !== undefined ? (
+          <Link href={`/themes/${id}`} className="truncate font-bold text-black hover:underline">
+            {name}
+          </Link>
+        ) : (
+          <span className="truncate font-bold text-black">{name}</span>
+        )}
         <div className="flex items-center gap-1.5">
           {capturedAt && (
             <span className="rounded bg-white/30 px-1.5 py-0.5 text-[10px] font-medium text-black/70">
@@ -99,7 +107,7 @@ export function ThemeCardView({ name, description, stocks, capturedAt }: ThemeCa
             </span>
           )}
           {totalValue !== null && (
-            <span className="shrink-0 rounded bg-white/70 px-1.5 py-0.5 text-xs font-bold text-tima-teal">
+            <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-xs font-bold text-tima-teal shadow-sm">
               {fmtNum(totalValue)}억
             </span>
           )}
@@ -122,26 +130,43 @@ export function ThemeCardView({ name, description, stocks, capturedAt }: ThemeCa
             const up = (cp ?? 0) >= 0;
             const surge = hasCp && (cp as number) >= 8;
             const dirColor = !hasCp ? 'text-tima-sub' : up ? 'text-tima-up' : 'text-tima-down';
+            // 체결시각(HH:MM) — 백엔드가 제공 시에만 노출(타입 미보장, 방어 접근)
+            const tradedAt = (s as { traded_at?: string | null }).traded_at ?? null;
             return (
               <Link
                 key={s.symbol}
                 href={`/stocks/${s.symbol}`}
-                className={`block rounded px-1.5 py-1.5 transition-colors ${
+                className={`relative block rounded px-1.5 py-1.5 transition-colors ${
                   surge ? 'bg-tima-surge' : 'hover:bg-tima-bg/60'
                 }`}
               >
+                {/* 급등(≥8%) 좌상단 빨간 삼각 플래그 */}
+                {surge && (
+                  <span
+                    aria-hidden
+                    className="absolute left-0 top-0 h-0 w-0 rounded-tl border-r-[8px] border-t-[8px] border-r-transparent border-t-tima-up"
+                  />
+                )}
+                {/* 1줄: 종목명(좌) / 등락률%(우, 크게·볼드) */}
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-[13px] font-bold text-tima-text">
                     {s.name ?? s.symbol}
                   </span>
-                  <span className={`shrink-0 font-mono text-[13px] font-semibold ${dirColor}`}>
+                  <span className={`shrink-0 font-mono text-sm font-bold ${dirColor}`}>
                     {!hasCp ? '-' : `${up ? '↑' : '↓'} ${Math.abs(cp as number).toFixed(2)}%`}
                   </span>
                 </div>
+                {/* 2줄: 현재가(좌) · 체결시각(중) · 거래대금 억(우) */}
                 <div className="flex items-center justify-between gap-2 text-[11px]">
                   <span className={`font-mono ${dirColor}`}>{fmtNum(s.price)}</span>
-                  <span className="font-mono text-tima-sub">{fmtNum(s.value_traded)}억</span>
+                  {tradedAt && <span className="font-mono text-tima-sub">{tradedAt}</span>}
+                  <span className="font-mono text-tima-sub">
+                    {s.value_traded === null || s.value_traded === undefined
+                      ? '-'
+                      : `${fmtNum(s.value_traded)}억`}
+                  </span>
                 </div>
+                {/* 3줄: 박스플롯 바 */}
                 <BoxPlotBar s={s} />
               </Link>
             );

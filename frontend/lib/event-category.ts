@@ -14,5 +14,9 @@ export function categoryStyle(eventType: string): CategoryStyle {
     return { label: '개별', dot: '#E08040', chip: 'bg-amber-100 text-amber-700' };
   if (t === 'policy' || t === 'macro' || t === 'holiday')
     return { label: '정책', dot: '#38B068', chip: 'bg-emerald-100 text-emerald-700' };
+  if (t === 'ipo' || t === 'listing')
+    return { label: '공모', dot: '#7B40C8', chip: 'bg-purple-100 text-purple-700' };
+  if (t === 'us' || t === 'macro_us')
+    return { label: '해외', dot: '#3090E0', chip: 'bg-blue-100 text-blue-700' };
   return { label: eventType || '기타', dot: '#94a3b8', chip: 'bg-slate-200 text-slate-600' };
 }

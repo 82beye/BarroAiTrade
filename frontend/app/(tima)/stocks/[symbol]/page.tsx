@@ -7,7 +7,17 @@ import { Disclaimer } from '@/components/layout/disclaimer';
 import { PriceChart } from '@/components/dashboard/price-chart';
 import { categoryStyle } from '@/lib/event-category';
 import { WatchlistStar } from '@/components/watchlist/watchlist-star';
-import { api, type StockTheme, type NewsItem } from '@/lib/api';
+import {
+  api,
+  type StockTheme,
+  type NewsItem,
+  type FundamentalResponse,
+  type OrderBookRef,
+  type OrderBookTick,
+  type BrokersResponse,
+  type ProgramItem,
+  type StrategyLevel,
+} from '@/lib/api';
 
 interface Ticker {
   symbol: string;
@@ -40,6 +50,7 @@ export default function StockDetailPage() {
   const [themes, setThemes] = useState<StockTheme[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [fundamental, setFundamental] = useState<FundamentalResponse | null>(null);
 
   // 시세
   useEffect(() => {
@@ -108,6 +119,25 @@ export default function StockDetailPage() {
       })
       .catch(() => {
         if (!cancelled) setNews([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol]);
+
+  // 펀더멘탈 (시총·유통비율 — null 숨김)
+  useEffect(() => {
+    if (!symbol) return;
+    let cancelled = false;
+    api
+      .getFundamental(symbol)
+      .then((res) => {
+        if (cancelled) return;
+        const d = res.data as FundamentalResponse;
+        setFundamental(d?.status === 'ok' ? d : null);
+      })
+      .catch(() => {
+        if (!cancelled) setFundamental(null);
       });
     return () => {
       cancelled = true;
@@ -192,6 +222,45 @@ export default function StockDetailPage() {
       {/* ── 정보 탭: 관련테마 칩 + 일정 + 뉴스 ── */}
       {tab === 'info' && (
         <>
+          {/* 펀더멘탈 라인 (시가총액·유통비율 — PRD §3.3, null 숨김) */}
+          {fundamental &&
+            (fundamental.market_cap != null || fundamental.float_ratio != null) && (
+              <div className="mb-4 flex flex-wrap gap-x-5 gap-y-1 rounded-lg border border-tima-line bg-white px-3 py-2 text-sm">
+                {fundamental.market_cap != null && (
+                  <span className="text-tima-sub">
+                    시가총액{' '}
+                    <span className="font-mono font-semibold text-tima-text">
+                      {fmtNum(fundamental.market_cap)}억
+                    </span>
+                  </span>
+                )}
+                {fundamental.float_ratio != null && (
+                  <span className="text-tima-sub">
+                    유통비율{' '}
+                    <span className="font-mono font-semibold text-tima-text">
+                      {fundamental.float_ratio.toFixed(2)}%
+                    </span>
+                  </span>
+                )}
+                {fundamental.per != null && (
+                  <span className="text-tima-sub">
+                    PER{' '}
+                    <span className="font-mono font-semibold text-tima-text">
+                      {fundamental.per.toFixed(2)}
+                    </span>
+                  </span>
+                )}
+                {fundamental.pbr != null && (
+                  <span className="text-tima-sub">
+                    PBR{' '}
+                    <span className="font-mono font-semibold text-tima-text">
+                      {fundamental.pbr.toFixed(2)}
+                    </span>
+                  </span>
+                )}
+              </div>
+            )}
+
           {/* 관련테마 칩 (아웃라인, 가로 스크롤 — PRD §3.3) */}
           {themes.length > 0 && (
             <div className="mb-4">
@@ -200,7 +269,7 @@ export default function StockDetailPage() {
                 {themes.map((t) => (
                   <Link
                     key={t.id}
-                    href="/themes"
+                    href={`/themes/${t.id}`}
                     title={t.description ?? undefined}
                     className="shrink-0 rounded-full border border-tima-teal/60 bg-white px-3 py-1 text-sm text-tima-teal transition-colors hover:bg-tima-teal/10"
                   >
@@ -280,10 +349,10 @@ export default function StockDetailPage() {
         </div>
       )}
 
-      {/* ── 호가 탭 ── */}
+      {/* ── 호가 탭 (사다리 + 참조가 + 최근체결 + 4서브탭 — PRD §4.6) ── */}
       {tab === 'orderbook' && (
         <div className="mb-6">
-          <OrderBook symbol={symbol} currentPrice={ticker?.price ?? null} />
+          <OrderBookPanel symbol={symbol} currentPrice={ticker?.price ?? null} />
         </div>
       )}
 
@@ -292,14 +361,44 @@ export default function StockDetailPage() {
   );
 }
 
-// ── 호가 사다리 (PRD §4.6) — 매도(위, 파랑) / 매수(아래, 빨강), 5초 폴링 ──
+// ── 호가 패널 (PRD §4.6) — 상단: 최근체결·사다리·참조가 / 하단: 4서브탭 ──
 type Level = [number, number]; // [price, qty]
+type ObSubTab = 'chart' | 'program' | 'brokers' | 'levels';
 
-function OrderBook({ symbol, currentPrice }: { symbol: string; currentPrice: number | null }) {
+const OB_SUBTABS: { key: ObSubTab; label: string }[] = [
+  { key: 'chart', label: '차트' },
+  { key: 'program', label: '프로그램' },
+  { key: 'brokers', label: '거래원' },
+  { key: 'levels', label: '참고값' },
+];
+
+// 참고값 기준선 색 (PRD §4.3 — price-chart 와 동일 규칙)
+function levelBadgeColor(label: string): string {
+  const u = (label || '').toUpperCase();
+  if (u === 'SF') return '#5820B8';
+  if (u === 'B1') return '#38B068';
+  if (u === 'B2') return '#3090E0';
+  if (u === 'B3') return '#7B40C8';
+  if (u.startsWith('G')) return '#E0A000';
+  if (u.startsWith('J')) return '#C81880';
+  return '#94a3b8';
+}
+
+function OrderBookPanel({
+  symbol,
+  currentPrice,
+}: {
+  symbol: string;
+  currentPrice: number | null;
+}) {
   const [asks, setAsks] = useState<Level[]>([]);
   const [bids, setBids] = useState<Level[]>([]);
+  const [ref, setRef] = useState<OrderBookRef | null>(null);
+  const [strength, setStrength] = useState<number | null>(null);
+  const [ticks, setTicks] = useState<OrderBookTick[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [ok, setOk] = useState(false);
+  const [sub, setSub] = useState<ObSubTab>('chart');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
@@ -310,10 +409,16 @@ function OrderBook({ symbol, currentPrice }: { symbol: string; currentPrice: num
       const b = Array.isArray(data?.bids) ? (data.bids as Level[]) : [];
       setAsks(a);
       setBids(b);
+      setRef(data?.ref ?? null);
+      setStrength(data?.strength ?? null);
+      setTicks(Array.isArray(data?.ticks) ? data.ticks : []);
       setOk(a.length > 0 || b.length > 0);
     } catch {
       setAsks([]);
       setBids([]);
+      setRef(null);
+      setStrength(null);
+      setTicks([]);
       setOk(false);
     } finally {
       setLoaded(true);
@@ -331,16 +436,11 @@ function OrderBook({ symbol, currentPrice }: { symbol: string; currentPrice: num
     };
   }, [symbol, load]);
 
-  // 최대 잔량 (바 스케일)
   const maxQty = useMemo(() => {
     const all = [...asks, ...bids].map(([, q]) => q ?? 0);
     return all.length > 0 ? Math.max(...all, 1) : 1;
   }, [asks, bids]);
 
-  const askSum = useMemo(() => asks.reduce((s, [, q]) => s + (q ?? 0), 0), [asks]);
-  const bidSum = useMemo(() => bids.reduce((s, [, q]) => s + (q ?? 0), 0), [bids]);
-
-  // 매도: 높은 가격이 위 (내림차순), 매수: 높은 가격이 위 (내림차순)
   const asksDesc = useMemo(() => [...asks].sort((x, y) => y[0] - x[0]), [asks]);
   const bidsDesc = useMemo(() => [...bids].sort((x, y) => y[0] - x[0]), [bids]);
 
@@ -350,54 +450,175 @@ function OrderBook({ symbol, currentPrice }: { symbol: string; currentPrice: num
     return `${p >= 0 ? '+' : ''}${p.toFixed(2)}%`;
   }
 
-  if (!loaded) {
-    return (
-      <div className="rounded-lg border border-tima-line bg-white py-12 text-center text-tima-sub">
-        불러오는 중…
-      </div>
-    );
-  }
-
-  if (!ok) {
-    return (
-      <div className="rounded-lg border border-tima-line bg-white py-12 text-center text-tima-sub">
-        호가 데이터를 불러올 수 없습니다 (장중·게이트웨이 연결 시 표시).
-      </div>
-    );
-  }
-
   return (
-    <div className="overflow-hidden rounded-lg border border-tima-line bg-white">
-      {/* 매도호가 (위, 파랑) */}
+    <div className="space-y-3">
+      {/* 상단: 최근체결(좌) · 사다리(중) · 참조가(우) */}
+      {!loaded ? (
+        <div className="rounded-lg border border-tima-line bg-white py-12 text-center text-tima-sub">
+          불러오는 중…
+        </div>
+      ) : !ok ? (
+        <div className="rounded-lg border border-tima-line bg-white py-12 text-center text-tima-sub">
+          호가 데이터를 불러올 수 없습니다 (장중·게이트웨이 연결 시 표시).
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          {/* 최근 체결 (ticks) */}
+          <div className="w-16 shrink-0">
+            <div className="mb-1 text-center text-[10px] font-semibold text-tima-sub">체결</div>
+            <div className="overflow-hidden rounded border border-tima-line bg-white">
+              {ticks.length === 0 ? (
+                <div className="py-4 text-center text-[10px] text-tima-line">-</div>
+              ) : (
+                ticks.slice(0, 12).map((t, i) => (
+                  <div
+                    key={i}
+                    className="border-b border-tima-line/60 px-1 py-0.5 text-right last:border-0"
+                  >
+                    <div className="font-mono text-[10px] text-tima-text">{fmtNum(t.price)}</div>
+                    <div className="font-mono text-[9px] text-tima-sub">{fmtNum(t.qty)}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* 호가 사다리 */}
+          <div className="flex-1 overflow-hidden rounded-lg border border-tima-line bg-white">
+            <div>
+              {asksDesc.map(([price, qty], i) => (
+                <ObRow key={`a-${i}`} price={price} qty={qty} maxQty={maxQty} side="ask" pct={pct(price)} />
+              ))}
+            </div>
+            <div className="flex items-center justify-center border-y border-tima-line bg-tima-bg py-1.5">
+              <span className="font-mono text-base font-bold text-tima-text">{fmtNum(currentPrice)}</span>
+            </div>
+            <div>
+              {bidsDesc.map(([price, qty], i) => (
+                <ObRow key={`b-${i}`} price={price} qty={qty} maxQty={maxQty} side="bid" pct={pct(price)} />
+              ))}
+            </div>
+          </div>
+
+          {/* 참조가 패널 (기준가/시가/…/체결강도 — null 행 숨김) */}
+          <RefPanel refData={ref} strength={strength} />
+        </div>
+      )}
+
+      {/* 하단 서브탭 (밑줄 탭, 활성 teal) */}
+      <div className="flex border-b border-tima-line">
+        {OB_SUBTABS.map((t) => {
+          const on = t.key === sub;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setSub(t.key)}
+              className={`flex-1 border-b-2 py-2 text-sm font-semibold transition-colors ${
+                on
+                  ? 'border-tima-teal text-tima-teal'
+                  : 'border-transparent text-tima-sub hover:text-tima-text'
+              }`}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
       <div>
-        {asksDesc.map(([price, qty], i) => (
-          <Row key={`a-${i}`} price={price} qty={qty} maxQty={maxQty} side="ask" pct={pct(price)} />
-        ))}
-      </div>
-
-      {/* 현재가 강조 */}
-      <div className="flex items-center justify-center border-y border-tima-line bg-tima-bg py-2">
-        <span className="font-mono text-lg font-bold text-tima-text">{fmtNum(currentPrice)}</span>
-        <span className="ml-2 text-xs text-tima-sub">현재가</span>
-      </div>
-
-      {/* 매수호가 (아래, 빨강) */}
-      <div>
-        {bidsDesc.map(([price, qty], i) => (
-          <Row key={`b-${i}`} price={price} qty={qty} maxQty={maxQty} side="bid" pct={pct(price)} />
-        ))}
-      </div>
-
-      {/* 잔량 합계 */}
-      <div className="flex items-center justify-between border-t border-tima-line px-4 py-2 text-xs">
-        <span className="text-tima-down">매도합 {fmtNum(askSum)}</span>
-        <span className="text-tima-up">매수합 {fmtNum(bidSum)}</span>
+        {sub === 'chart' && (
+          <PriceChart key={`ob-${symbol}`} defaultSymbol={symbol} defaultTimeframe="15m" hideControls theme="light" />
+        )}
+        {sub === 'program' && <ProgramTab symbol={symbol} />}
+        {sub === 'brokers' && <BrokersTab symbol={symbol} />}
+        {sub === 'levels' && <LevelsTab symbol={symbol} />}
       </div>
     </div>
   );
 }
 
-function Row({
+// 참조가 패널 (PRD §4.6)
+function RefPanel({ refData, strength }: { refData: OrderBookRef | null; strength: number | null }) {
+  const rows: { label: string; value?: number | null; color?: string }[] = refData
+    ? [
+        { label: '기준가', value: refData.base_price },
+        { label: '시가', value: refData.open },
+        { label: '고가', value: refData.high, color: 'text-tima-up' },
+        { label: '저가', value: refData.low, color: 'text-tima-down' },
+        { label: '상한가', value: refData.upper_limit, color: 'text-tima-up' },
+        { label: '하한가', value: refData.lower_limit, color: 'text-tima-down' },
+      ]
+    : [];
+  const visible = rows.filter((r) => r.value != null);
+  const hasVI = refData && (refData.vi_up_expected != null || refData.vi_down_expected != null);
+
+  if (visible.length === 0 && !hasVI && strength == null) {
+    return (
+      <div className="w-24 shrink-0">
+        <div className="rounded border border-tima-line bg-white px-2 py-3 text-center text-[10px] text-tima-sub">
+          참조가 미연동
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-24 shrink-0 space-y-2">
+      {visible.length > 0 && (
+        <div className="overflow-hidden rounded border border-tima-line bg-white">
+          {visible.map((r) => (
+            <div
+              key={r.label}
+              className="flex items-center justify-between border-b border-tima-line/60 px-1.5 py-1 last:border-0"
+            >
+              <span className="text-[10px] text-tima-sub">{r.label}</span>
+              <span className={`font-mono text-[11px] font-semibold ${r.color ?? 'text-tima-text'}`}>
+                {fmtNum(r.value)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {hasVI && (
+        <div className="overflow-hidden rounded border border-tima-line bg-white">
+          <div className="border-b border-tima-line/60 bg-tima-bg/60 px-1.5 py-0.5 text-center text-[9px] font-semibold text-tima-sub">
+            정적 VI 예상
+          </div>
+          {refData!.vi_up_expected != null && (
+            <div className="flex items-center justify-between px-1.5 py-1">
+              <span className="text-[10px] text-tima-sub">상승VI</span>
+              <span className="font-mono text-[11px] font-semibold text-tima-up">
+                {fmtNum(refData!.vi_up_expected)}
+              </span>
+            </div>
+          )}
+          {refData!.vi_down_expected != null && (
+            <div className="flex items-center justify-between border-t border-tima-line/60 px-1.5 py-1">
+              <span className="text-[10px] text-tima-sub">하락VI</span>
+              <span className="font-mono text-[11px] font-semibold text-tima-down">
+                {fmtNum(refData!.vi_down_expected)}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {strength != null && (
+        <div className="flex items-center justify-between rounded border border-tima-line bg-white px-1.5 py-1">
+          <span className="text-[10px] text-tima-sub">체결강도</span>
+          <span
+            className={`font-mono text-[11px] font-semibold ${strength >= 100 ? 'text-tima-up' : 'text-tima-down'}`}
+          >
+            {strength.toFixed(2)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ObRow({
   price,
   qty,
   maxQty,
@@ -412,30 +633,28 @@ function Row({
 }) {
   const w = Math.max(((qty ?? 0) / maxQty) * 100, 0);
   const isAsk = side === 'ask';
-  // 매도 파랑 / 매수 빨강
   const barColor = isAsk ? 'bg-tima-down/15' : 'bg-tima-up/15';
   const qtyColor = isAsk ? 'text-tima-down' : 'text-tima-up';
   return (
-    <div className="relative flex items-center border-b border-tima-line last:border-0 px-4 py-1.5">
-      {/* 잔량 바 (매도 왼쪽 / 매수 오른쪽 정렬) */}
+    <div className="relative flex items-center border-b border-tima-line last:border-0 px-2 py-1">
       <div
         className={`absolute inset-y-0 ${isAsk ? 'left-0' : 'right-0'} ${barColor}`}
         style={{ width: `${w}%` }}
       />
-      <div className="relative z-10 flex w-full items-center justify-between text-sm">
+      <div className="relative z-10 flex w-full items-center justify-between text-xs">
         {isAsk ? (
           <>
             <span className={`font-mono ${qtyColor}`}>{fmtNum(qty)}</span>
-            <span className="flex items-baseline gap-2">
+            <span className="flex items-baseline gap-1.5">
               <span className="font-mono text-tima-text">{fmtNum(price)}</span>
-              {pct && <span className="w-14 text-right font-mono text-xs text-tima-sub">{pct}</span>}
+              {pct && <span className="w-12 text-right font-mono text-[10px] text-tima-sub">{pct}</span>}
             </span>
           </>
         ) : (
           <>
-            <span className="flex items-baseline gap-2">
+            <span className="flex items-baseline gap-1.5">
               <span className="font-mono text-tima-text">{fmtNum(price)}</span>
-              {pct && <span className="w-14 text-right font-mono text-xs text-tima-sub">{pct}</span>}
+              {pct && <span className="w-12 text-right font-mono text-[10px] text-tima-sub">{pct}</span>}
             </span>
             <span className={`font-mono ${qtyColor}`}>{fmtNum(qty)}</span>
           </>
@@ -443,4 +662,275 @@ function Row({
       </div>
     </div>
   );
+}
+
+// ── 프로그램 서브탭 (시간별/일별 토글 — PRD §4.6) ──
+function ProgramTab({ symbol }: { symbol: string }) {
+  const [mode, setMode] = useState<'time' | 'daily'>('time');
+  const [items, setItems] = useState<ProgramItem[]>([]);
+  const [status, setStatus] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .getProgram(symbol, mode)
+      .then((res) => {
+        if (cancelled) return;
+        const d = res.data;
+        setStatus(d?.status ?? 'unsupported');
+        setItems(d?.status === 'ok' && Array.isArray(d.items) ? d.items : []);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStatus('unsupported');
+          setItems([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol, mode]);
+
+  const isOk = status === 'ok' && items.length > 0;
+
+  return (
+    <div>
+      <div className="mb-2 flex gap-1.5">
+        {(['time', 'daily'] as const).map((m) => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            className={`rounded-full px-3.5 py-1 text-xs font-semibold transition-colors ${
+              m === mode
+                ? 'bg-tima-active text-black'
+                : 'border border-tima-line bg-white text-tima-sub'
+            }`}
+          >
+            {m === 'time' ? '시간별' : '일별'}
+          </button>
+        ))}
+      </div>
+      {loading ? (
+        <div className="rounded-lg border border-tima-line bg-white py-10 text-center text-tima-sub">
+          불러오는 중…
+        </div>
+      ) : isOk ? (
+        <div className="overflow-hidden rounded-lg border border-tima-line bg-white">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-tima-line bg-tima-bg/60 text-tima-sub">
+                  <th className="p-2 text-left text-xs font-semibold">{mode === 'time' ? '시간' : '일자'}</th>
+                  <th className="p-2 text-right text-xs font-semibold">가격</th>
+                  <th className="p-2 text-right text-xs font-semibold">거래량</th>
+                  <th className="p-2 text-right text-xs font-semibold">순매수</th>
+                  <th className="p-2 text-right text-xs font-semibold">증감</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((it, i) => (
+                  <tr key={i} className="border-b border-tima-line last:border-0">
+                    <td className="p-2 font-mono text-xs text-tima-text">{it.time_or_date}</td>
+                    <td className="p-2 text-right font-mono text-tima-text">{fmtNum(it.price)}</td>
+                    <td className="p-2 text-right font-mono text-tima-sub">{fmtNum(it.volume)}</td>
+                    <td className={`p-2 text-right font-mono ${netColor(it.net_buy)}`}>
+                      {fmtSigned(it.net_buy)}
+                    </td>
+                    <td className={`p-2 text-right font-mono ${netColor(it.net_buy_delta)}`}>
+                      {fmtSigned(it.net_buy_delta)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-tima-line bg-white py-10 text-center text-tima-sub">
+          프로그램 데이터 미연동
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 거래원 서브탭 (매도/매수 상위 5 대칭 — PRD §4.6) ──
+function BrokersTab({ symbol }: { symbol: string }) {
+  const [data, setData] = useState<BrokersResponse | null>(null);
+  const [status, setStatus] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .getBrokers(symbol)
+      .then((res) => {
+        if (cancelled) return;
+        const d = res.data as BrokersResponse;
+        setStatus(d?.status ?? 'unsupported');
+        setData(d?.status === 'ok' ? d : null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStatus('unsupported');
+          setData(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol]);
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-tima-line bg-white py-10 text-center text-tima-sub">
+        불러오는 중…
+      </div>
+    );
+  }
+  if (status !== 'ok' || !data) {
+    return (
+      <div className="rounded-lg border border-tima-line bg-white py-10 text-center text-tima-sub">
+        거래원 데이터 미연동
+      </div>
+    );
+  }
+
+  const rows = Math.max(data.sell?.length ?? 0, data.buy?.length ?? 0, 5);
+  return (
+    <div className="overflow-hidden rounded-lg border border-tima-line bg-white">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-tima-line bg-tima-bg/60 text-tima-sub">
+            <th className="p-2 text-left text-xs font-semibold text-tima-down">매도상위</th>
+            <th className="p-2 text-right text-xs font-semibold text-tima-down">수량</th>
+            <th className="p-2 text-left text-xs font-semibold text-tima-up">매수상위</th>
+            <th className="p-2 text-right text-xs font-semibold text-tima-up">수량</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: rows }).map((_, i) => {
+            const s = data.sell?.[i];
+            const b = data.buy?.[i];
+            return (
+              <tr key={i} className="border-b border-tima-line last:border-0">
+                <td className="p-2 text-xs text-tima-text">{s?.name ?? '-'}</td>
+                <td className="p-2 text-right font-mono text-xs text-tima-down">
+                  {s ? fmtNum(s.qty) : '-'}
+                </td>
+                <td className="p-2 text-xs text-tima-text">{b?.name ?? '-'}</td>
+                <td className="p-2 text-right font-mono text-xs text-tima-up">
+                  {b ? fmtNum(b.qty) : '-'}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+        {(data.foreign_sell != null || data.foreign_buy != null) && (
+          <tfoot>
+            <tr className="border-t border-tima-line bg-tima-bg/40">
+              <td className="p-2 text-xs font-semibold text-tima-sub">외국계합</td>
+              <td className="p-2 text-right font-mono text-xs text-tima-down">
+                {fmtNum(data.foreign_sell)}
+              </td>
+              <td className="p-2" />
+              <td className="p-2 text-right font-mono text-xs text-tima-up">
+                {fmtNum(data.foreign_buy)}
+              </td>
+            </tr>
+          </tfoot>
+        )}
+      </table>
+    </div>
+  );
+}
+
+// ── 참고값 서브탭 (기준선 리스트 — 원형 뱃지 + 가격, PRD §4.6) ──
+function LevelsTab({ symbol }: { symbol: string }) {
+  const [levels, setLevels] = useState<StrategyLevel[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .getChartLevels(symbol)
+      .then((res) => {
+        if (cancelled) return;
+        const d = res.data;
+        const lv = Array.isArray(d?.levels) ? d.levels : Array.isArray(d) ? d : [];
+        setLevels(lv);
+      })
+      .catch(() => {
+        if (!cancelled) setLevels([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol]);
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-tima-line bg-white py-10 text-center text-tima-sub">
+        불러오는 중…
+      </div>
+    );
+  }
+  if (levels.length === 0) {
+    return (
+      <div className="rounded-lg border border-tima-line bg-white py-10 text-center text-tima-sub">
+        기준가 데이터가 없습니다.
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-tima-line bg-white">
+      {levels.map((lv, i) => (
+        <div
+          key={`${lv.label}-${i}`}
+          className="flex items-center justify-between border-b border-tima-line px-3 py-2 last:border-0"
+        >
+          <div className="flex items-center gap-2">
+            <span
+              className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white"
+              style={{ backgroundColor: levelBadgeColor(lv.label) }}
+            >
+              {lv.label}
+            </span>
+            {lv.active && (
+              <span className="rounded border border-tima-emph px-1.5 py-0.5 text-[10px] font-semibold text-tima-emph">
+                활성
+              </span>
+            )}
+          </div>
+          <span className="font-mono text-sm font-semibold text-tima-text">{fmtNum(lv.price)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 순매수 부호 색/포맷
+function netColor(n?: number | null): string {
+  if (n === null || n === undefined) return 'text-tima-sub';
+  return n > 0 ? 'text-tima-up' : n < 0 ? 'text-tima-down' : 'text-tima-text';
+}
+
+function fmtSigned(n?: number | null): string {
+  if (n === null || n === undefined) return '-';
+  const s = Math.abs(n).toLocaleString('ko-KR');
+  return n > 0 ? `+${s}` : n < 0 ? `-${s}` : s;
 }

@@ -35,7 +35,7 @@ function LiveThemeCard({ theme, tick }: { theme: Theme; tick: number }) {
     };
   }, [theme.id, tick]);
 
-  return <ThemeCardView name={theme.name} description={theme.description} stocks={stocks} />;
+  return <ThemeCardView id={theme.id} name={theme.name} description={theme.description} stocks={stocks} />;
 }
 
 // 타임라인 스냅숏 모달 (PRD §3.2)
@@ -141,6 +141,7 @@ function TimelineModal({ onClose }: { onClose: () => void }) {
               {snapshot.themes.map((t) => (
                 <ThemeCardView
                   key={t.id}
+                  id={t.id}
                   name={t.name}
                   description={t.description}
                   stocks={t.stocks ?? []}

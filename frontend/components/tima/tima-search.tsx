@@ -65,7 +65,7 @@ export function TimaSearch() {
     setQ('');
     setResults([]);
     if (r.type === 'stock') router.push(`/stocks/${r.symbol}`);
-    else router.push('/themes');
+    else router.push(`/themes/${r.id}`);
   }
 
   return (
