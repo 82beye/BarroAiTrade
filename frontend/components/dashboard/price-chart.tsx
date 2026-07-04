@@ -316,6 +316,9 @@ export function PriceChart({
               onChange={(e) => setSymbol(e.target.value)}
               className={`w-28 ${selectCls}`}
             >
+              {!['005930', '000660', '035720', '051910', '035420'].includes(symbol) && (
+                <option value={symbol}>{symbol}</option>
+              )}
               <option value="005930">삼성전자</option>
               <option value="000660">SK하이닉스</option>
               <option value="035720">카카오</option>

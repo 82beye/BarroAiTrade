@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Disclaimer } from '@/components/layout/disclaimer';
 import { PriceChart } from '@/components/dashboard/price-chart';
+import { categoryStyle } from '@/lib/event-category';
 import { WatchlistStar } from '@/components/watchlist/watchlist-star';
 import { api, type StockTheme, type NewsItem } from '@/lib/api';
 
@@ -224,8 +225,11 @@ export default function StockDetailPage() {
                     key={ev.id}
                     className="flex items-start gap-3 rounded-lg border border-tima-line bg-tima-bg/40 px-3 py-2"
                   >
-                    <span className="mt-0.5 rounded bg-tima-line px-1.5 py-0.5 text-xs font-semibold text-tima-sub">
-                      {ev.event_type}
+                    <span
+                      className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                      style={{ backgroundColor: categoryStyle(ev.event_type).dot }}
+                    >
+                      {categoryStyle(ev.event_type).label}
                     </span>
                     <div className="flex-1">
                       <p className="text-sm text-tima-text">{ev.title}</p>

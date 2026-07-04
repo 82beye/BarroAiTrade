@@ -7,7 +7,7 @@ import { AppSidebar } from '@/components/layout/app-sidebar';
  */
 export default function AdminLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-50">
+    <div className="dark flex h-screen bg-slate-950 text-slate-50">
       <AppSidebar />
       <main className="flex-1 overflow-auto bg-slate-900">{children}</main>
     </div>

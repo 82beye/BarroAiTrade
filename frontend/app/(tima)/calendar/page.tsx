@@ -7,23 +7,7 @@ import { api, type CalendarEvent } from '@/lib/api';
 
 type ViewMode = 'day' | 'week' | 'month';
 
-// ── 카테고리 매핑 (PRD §3.5: 테마 빨강 / 개별 주황 / 정책 초록) ──
-interface CategoryStyle {
-  label: string;
-  dot: string; // 원형 뱃지 배경색
-  chip: string; // 월간 파스텔 칩 클래스
-}
-
-function categoryStyle(eventType: string): CategoryStyle {
-  const t = (eventType || '').toLowerCase();
-  if (t === 'theme' || t === 'earnings')
-    return { label: '테마', dot: '#D00010', chip: 'bg-rose-100 text-rose-700' };
-  if (t === 'individual' || t === 'dividend' || t === 'split')
-    return { label: '개별', dot: '#E08040', chip: 'bg-amber-100 text-amber-700' };
-  if (t === 'policy' || t === 'macro' || t === 'holiday')
-    return { label: '정책', dot: '#38B068', chip: 'bg-emerald-100 text-emerald-700' };
-  return { label: eventType || '기타', dot: '#94a3b8', chip: 'bg-slate-200 text-slate-600' };
-}
+import { categoryStyle } from '@/lib/event-category';
 
 // ── 로컬 날짜 헬퍼 (toISOString UTC 오차 회피) ──
 function ymd(d: Date): string {

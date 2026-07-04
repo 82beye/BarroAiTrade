@@ -1,5 +1,8 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  // 'media' 기본값이면 OS 다크 모드가 티마 라이트 셸의 dark: variant 를 강제 활성화
+  // → class 전략으로 전환, 관리자 셸 루트에만 .dark 명시 ((admin)/layout.tsx)
+  darkMode: 'class',
   content: [
     './app/**/*.{js,ts,jsx,tsx}',
     './components/**/*.{js,ts,jsx,tsx}',
