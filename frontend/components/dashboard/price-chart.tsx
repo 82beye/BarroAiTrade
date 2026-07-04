@@ -383,7 +383,7 @@ export function PriceChart({
 
   // ── MA 범례 (컴팩트 한 줄: 색점+숫자) ──
   const maLegend = (
-    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+    <div className="flex flex-nowrap items-center gap-x-2 whitespace-nowrap">
       {MA_CONFIGS.map(({ period, color, label }) => (
         <span
           key={period}
@@ -501,29 +501,10 @@ export function PriceChart({
   return (
     <Card className={isLight ? 'border-tima-line bg-white' : 'border-slate-800 bg-slate-900'}>
       {isLight ? (
-        /* 라이트: 헤더 타이틀 제거 — 주기 토글 + 범례 한 줄 */
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-2">
-          {lightPeriodToggle}
-          <div className="flex items-center gap-2">
-            {maLegend}
-            {!hideControls && (
-              <Select
-                name="symbol"
-                value={symbol}
-                onChange={(e) => setSymbol(e.target.value)}
-                className={`w-28 ${selectCls}`}
-              >
-                {!['005930', '000660', '035720', '051910', '035420'].includes(symbol) && (
-                  <option value={symbol}>{symbol}</option>
-                )}
-                <option value="005930">삼성전자</option>
-                <option value="000660">SK하이닉스</option>
-                <option value="035720">카카오</option>
-                <option value="051910">LG화학</option>
-                <option value="035420">NAVER</option>
-              </Select>
-            )}
-          </div>
+        /* 라이트: 주기 토글 + 이평 범례 단일 행 (종목은 페이지 컨텍스트가 결정 — 셀렉트 없음) */
+        <CardHeader className="flex flex-row flex-nowrap items-center justify-between gap-x-3 overflow-x-auto pb-2">
+          <div className="shrink-0">{lightPeriodToggle}</div>
+          <div className="flex shrink-0 items-center">{maLegend}</div>
         </CardHeader>
       ) : (
         <CardHeader className="flex flex-row items-center justify-between gap-4">
