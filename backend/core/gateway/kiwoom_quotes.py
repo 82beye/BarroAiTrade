@@ -59,6 +59,8 @@ _TR_PROG_TIME = "ka90008"
 _TR_PROG_DAILY = "ka90013"
 _TR_INVESTOR_INTRADAY = "ka10063"
 _TR_INVESTOR_AFTER = "ka10066"
+_TR_RANK_VALUE = "ka10032"
+_TR_RANK_FLU = "ka10027"
 _TR_INDEX_PRICE = "ka20001"
 _TR_INDEX_DAILY = "ka20006"
 
@@ -492,10 +494,66 @@ class KiwoomQuotes:
             )
         return out
 
+    # ══════════════════════════════════════════════════════
+    # ka10032 거래대금상위 / ka10027 등락률상위 — 랭킹 목록
+    #   stex_tp: 1=KRX, 2=NXT, 3=통합 (NXT 애프터마켓 목록에 stex_tp="2" 사용)
+    # ══════════════════════════════════════════════════════
+    async def ranking(
+        self,
+        filter: str = "value",
+        stex_tp: str = "2",
+        mrkt_tp: str = "000",
+        limit: int = 30,
+    ) -> Optional[list[dict]]:
+        """랭킹 목록. filter: value(거래대금)|gainers(상승률)|losers(하락률).
+
+        반환 항목: {symbol, name, price, change_pct, value_traded(억원)}.
+        실패/키 부재 → None. 문서상 미제공 값(aft_value 등)은 넣지 않는다.
+        """
+        if filter == "value":
+            body = {"mrkt_tp": mrkt_tp, "mang_stk_incls": "0", "stex_tp": stex_tp}
+            data = await self._post(_TR_RANK_VALUE, _PATH_RKINFO, body)
+            rows = (data or {}).get("trde_prica_upper")
+        else:
+            body = {
+                "mrkt_tp": mrkt_tp,
+                "sort_tp": "1" if filter == "gainers" else "3",
+                "trde_qty_cnd": "0000",
+                "stk_cnd": "0",
+                "crd_cnd": "0",
+                "updown_incls": "1",
+                "pric_cnd": "0",
+                "trde_prica_cnd": "0",
+                "stex_tp": stex_tp,
+            }
+            data = await self._post(_TR_RANK_FLU, _PATH_RKINFO, body)
+            rows = (data or {}).get("pred_pre_flu_rt_upper")
+        if data is None:
+            return None
+        return parse_ranking(rows or [], limit)
+
 
 # ══════════════════════════════════════════════════════════
 # 순수 파서 (테스트에서 HTTP 없이 검증)
 # ══════════════════════════════════════════════════════════
+def parse_ranking(rows: list, limit: int = 30) -> list[dict]:
+    """ka10032/ka10027 랭킹 행 → 공통 목록 항목."""
+    out = []
+    for r in rows[:limit]:
+        prica = _opt_num(r.get("trde_prica"))
+        out.append(
+            {
+                "symbol": str(r.get("stk_cd", "")).strip(),
+                "name": str(r.get("stk_nm", "")).strip(),
+                "price": abs(_num(r.get("cur_prc"))),
+                "change_pct": _opt_num(r.get("flu_rt")),
+                # trde_prica 단위: 백만원 → 억원
+                "value_traded": round(abs(prica) / 100.0, 2) if prica is not None else None,
+            }
+        )
+    return out
+
+
 def parse_stock_info(data: dict, symbol: str) -> dict:
     """ka10001 응답 → fundamental dict."""
     return {

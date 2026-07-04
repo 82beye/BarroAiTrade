@@ -345,14 +345,38 @@ async def get_nxt_quotes(
             detail=f"filter 는 {list(_NXT_FILTERS)} 중 하나여야 합니다",
         )
 
-    nxt_gateway = getattr(app_state, "nxt_gateway", None)
-    status = "unsupported" if nxt_gateway is None else "not_ready"
+    # 키움 랭킹 TR(ka10032/ka10027)의 stex_tp="2"(NXT) 로 목록 조회.
+    # 키/토큰 부재 시 unsupported 로 우아 강등 (기존 스텁 동작 유지).
+    quotes = _get_quotes()
+    if quotes:
+        rows = await quotes.ranking(filter=filter, stex_tp="2", limit=limit)
+        if rows is not None:
+            items = [
+                {
+                    "symbol": r["symbol"],
+                    "name": r["name"],
+                    "nxt_price": r["price"],
+                    # 랭킹 TR 은 전일 종가 대비 등락률만 제공 — 미제공 값은 null(날조 금지)
+                    "vs_close_pct": None,
+                    "day_close": None,
+                    "day_change_pct": r["change_pct"],
+                    "aft_value": None,
+                    "cum_value": r["value_traded"],
+                }
+                for r in rows
+            ]
+            return {
+                "filter": filter,
+                "limit": limit,
+                "items": items,
+                "status": "ok" if items else "no_data",
+            }
 
     return {
         "filter": filter,
         "limit": limit,
         "items": [],
-        "status": status,
+        "status": "unsupported",
     }
 
 

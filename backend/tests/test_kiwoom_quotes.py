@@ -311,3 +311,36 @@ async def test_rc_nonzero_returns_none():
     client = _FakeClient({"ka10001": _FakeResp({"return_code": 900, "return_msg": "err"})})
     q = KiwoomQuotes(oauth=_FakeOAuth(), http_client=client)
     assert await q.stock_info("005930") is None
+
+
+# ══════════════════════════════════════════════════════════
+# ka10032/ka10027 랭킹 파서 (NXT 목록용)
+# ══════════════════════════════════════════════════════════
+class TestParseRanking:
+    def test_value_rows(self):
+        from backend.core.gateway.kiwoom_quotes import parse_ranking
+
+        rows = [
+            {
+                "stk_cd": "005930",
+                "stk_nm": "삼성전자",
+                "cur_prc": "-346500",
+                "flu_rt": "-1.25",
+                "trde_prica": "1234567",  # 백만원
+            }
+        ]
+        out = parse_ranking(rows)
+        assert out[0]["symbol"] == "005930"
+        assert out[0]["name"] == "삼성전자"
+        assert out[0]["price"] == 346500.0  # 부호 제거
+        assert out[0]["change_pct"] == -1.25
+        assert out[0]["value_traded"] == 12345.67  # 백만→억
+
+    def test_limit_and_missing_fields(self):
+        from backend.core.gateway.kiwoom_quotes import parse_ranking
+
+        rows = [{"stk_cd": f"{i:06d}", "stk_nm": f"s{i}", "cur_prc": "100"} for i in range(50)]
+        out = parse_ranking(rows, limit=30)
+        assert len(out) == 30
+        assert out[0]["value_traded"] is None
+        assert out[0]["change_pct"] is None
