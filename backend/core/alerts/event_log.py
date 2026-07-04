@@ -22,6 +22,21 @@ logger = logging.getLogger(__name__)
 # 알림 설정에서 지원하는 전략 키 (환경설정 Push 토글 4종 — PRD §4.5)
 ALERT_STRATEGIES = ("f_zone", "sf_zone", "gold_zone", "swing_38")
 
+# 전략 키 → 표시 라벨 (스크리너 탭과 동일 — screener.py _STRATEGY_TABS).
+# 데몬은 supertrend 신호도 낼 수 있어 라벨만 추가로 매핑(미지원 키는 그대로 표기).
+STRATEGY_LABELS = {
+    "f_zone": "F존",
+    "sf_zone": "SF존",
+    "gold_zone": "골드존",
+    "swing_38": "38스윙",
+    "supertrend": "슈퍼트렌드",
+}
+
+
+def strategy_label(strategy: str) -> str:
+    """전략 키 → 표시 라벨 (미등록 키는 원문 그대로)."""
+    return STRATEGY_LABELS.get(strategy, strategy or "")
+
 
 def _data_dir() -> Path:
     """repo_root/data (event_log.py → parents[3] == repo root)."""
@@ -119,6 +134,50 @@ def read_alert_events(
     return events
 
 
+def record_signal_capture_events(
+    signals,
+    occurred_at: Optional[str] = None,
+) -> List[dict]:
+    """정제 시그널 목록에 대해 '포착' 알림 이벤트를 append 한다.
+
+    운영 데몬(scripts/intraday_buy_daemon.py)이 refined_signals.json 저장 직후
+    호출한다. 시그널 1건 → "[전략라벨] 종목명 포착" 메시지로 append_alert_event.
+
+    ⚠️ 기준선(B1/B2/B3 등) '도달' 이벤트는 실시간 가격 감시가 필요해 이번 범위 밖 —
+    여기서는 '포착' 이벤트만 기록한다(level_label=None).
+
+    Args:
+        signals: dict 반복자. 각 항목은 {"strategy", "symbol", "name"} 키 사용
+                 (name 없으면 symbol 로 대체, symbol 없으면 건너뜀).
+        occurred_at: 공통 발생 시각 ISO8601. 미지정 시 각 이벤트가 현재 UTC.
+
+    Returns:
+        append 된 이벤트 dict 리스트. 개별 시그널 실패는 건너뛰고 로깅만 한다
+        (호출측 메인 흐름 무영향).
+    """
+    written: List[dict] = []
+    for sig in signals or []:
+        try:
+            symbol = (sig.get("symbol") or "").strip()
+            if not symbol:
+                continue
+            strategy = sig.get("strategy") or ""
+            name = sig.get("name") or symbol
+            label = strategy_label(strategy)
+            event = append_alert_event(
+                strategy=strategy,
+                symbol=symbol,
+                name=name,
+                message=f"[{label}] {name} 포착",
+                level_label=None,
+                occurred_at=occurred_at,
+            )
+            written.append(event)
+        except Exception:
+            logger.warning("알림 이벤트 기록 실패 (skip): %r", sig, exc_info=True)
+    return written
+
+
 def _parse_dt(value: Optional[str]) -> Optional[datetime]:
     """ISO8601 문자열 → datetime (실패 시 None)."""
     if not value:
@@ -129,4 +188,11 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
-__all__ = ["append_alert_event", "read_alert_events", "ALERT_STRATEGIES"]
+__all__ = [
+    "append_alert_event",
+    "read_alert_events",
+    "record_signal_capture_events",
+    "strategy_label",
+    "ALERT_STRATEGIES",
+    "STRATEGY_LABELS",
+]

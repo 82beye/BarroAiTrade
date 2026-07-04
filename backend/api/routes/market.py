@@ -168,7 +168,21 @@ async def get_indices() -> dict:
     ```json
     { "items": [], "status": "unsupported" }
     ```
-    후속: gateway 에 지수 조회(get_index 등) 추가 시 items 채우고 status:"ok".
+
+    조사 결론 (2026-07-04, 티마 P1 운영 배선):
+      키움 native gateway(backend/core/gateway/kiwoom_native_*.py)에 랩핑된 TR 은
+      랭킹(ka10032/ka10027/ka10030)·차트(ka10080/ka10081)·계좌(kt00001)·주문
+      (kt10001/kt10002)·호가뿐이며, **업종/지수 시세 TR 은 랩핑돼 있지 않다**.
+      따라서 실데이터 활성화는 실거래 gateway 코드에 새 TR 을 추가해야 하므로
+      리스크가 있어 이번 범위에서 구현하지 않고 unsupported 를 유지한다.
+
+    활성화에 필요한 gateway 확장 (후속 BAR 과제):
+      1) 신규 fetcher(예: KiwoomNativeIndexFetcher)를 kiwoom_native_candles.py 패턴으로
+         추가 — 업종지수 TR(키움 OpenAPI 업종 계열: 업종현재가/업종지수 ka20xxx,
+         POST /api/dostk/... , body {inds_cd}) 조회. KOSPI=001, KOSDAQ=101 코드 매핑.
+         ※ 정확한 api-id 는 키움 REST '업종' 문서로 확정 필요(TR 코드 미검증 상태).
+      2) MarketGateway/base.py 에 get_index(code) 시그니처 추가 + app_state 주입.
+      3) 본 핸들러에서 gateway.get_index("001"|"101") 호출로 교체 후 status:"ok".
     """
     return {"items": [], "status": "unsupported"}
 

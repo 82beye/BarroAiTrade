@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Disclaimer } from '@/components/layout/disclaimer';
 import { PriceChart } from '@/components/dashboard/price-chart';
+import { WatchlistStar } from '@/components/watchlist/watchlist-star';
 import { api, type StockTheme, type NewsItem } from '@/lib/api';
 
 interface Ticker {
@@ -139,9 +140,10 @@ export default function StockDetailPage() {
     <div className="min-h-screen bg-slate-900 p-8">
       {/* 헤더 */}
       <div className="mb-6">
-        <div className="flex flex-wrap items-baseline gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-3xl font-bold text-slate-50">{name}</h1>
           <span className="font-mono text-sm text-slate-500">{symbol}</span>
+          {symbol && <WatchlistStar symbol={symbol} />}
         </div>
         <div className="mt-2 flex items-baseline gap-3">
           <span className="font-mono text-2xl font-bold text-slate-100">

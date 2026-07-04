@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Disclaimer } from '@/components/layout/disclaimer';
 import { PriceChart } from '@/components/dashboard/price-chart';
+import { WatchlistStar } from '@/components/watchlist/watchlist-star';
 import {
   api,
   type ScreenerResponse,
@@ -51,7 +52,7 @@ function fmtReached(s?: string | null): string | null {
   });
 }
 
-const POLL_MS = 30_000;
+const POLL_MS = 10_000;
 
 export default function SignalsPage() {
   const [strategies, setStrategies] = useState<StrategyMeta[]>(DEFAULT_STRATEGIES);
@@ -104,7 +105,7 @@ export default function SignalsPage() {
     [],
   );
 
-  // 전략/수동심볼 변경 시 즉시 조회 + 30초 폴링
+  // 전략/수동심볼 변경 시 즉시 조회 + 10초 폴링
   useEffect(() => {
     setSelected(null);
     fetchScreener(active, manualSymbols);
@@ -138,7 +139,7 @@ export default function SignalsPage() {
         </div>
         <div className="text-right text-xs text-slate-500">
           {lastUpdated && <div>마지막 갱신: {lastUpdated.toLocaleTimeString('ko-KR')}</div>}
-          <div>{loading ? '갱신 중…' : '30초 자동 갱신'}</div>
+          <div>{loading ? '갱신 중…' : '10초 자동 갱신'}</div>
         </div>
       </div>
 
@@ -195,16 +196,21 @@ export default function SignalsPage() {
                         }`}
                       >
                         <td className="p-3">
-                          <Link
-                            href={`/stocks/${it.symbol}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="font-medium text-slate-100 hover:text-tima-teal hover:underline"
-                          >
-                            {it.name ?? it.symbol}
-                          </Link>
-                          <div className="text-xs text-slate-500">
-                            {it.symbol}
-                            {detected && <span className="ml-1">· {detected}</span>}
+                          <div className="flex items-start gap-2">
+                            <WatchlistStar symbol={it.symbol} size="sm" className="mt-0.5" />
+                            <div>
+                              <Link
+                                href={`/stocks/${it.symbol}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="font-medium text-slate-100 hover:text-tima-teal hover:underline"
+                              >
+                                {it.name ?? it.symbol}
+                              </Link>
+                              <div className="text-xs text-slate-500">
+                                {it.symbol}
+                                {detected && <span className="ml-1">· {detected}</span>}
+                              </div>
+                            </div>
                           </div>
                         </td>
                         <td className="p-3 text-right">

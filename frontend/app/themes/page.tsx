@@ -12,7 +12,7 @@ interface Theme {
   description: string;
 }
 
-const POLL_MS = 30_000;
+const POLL_MS = 15_000;
 
 // 장중 3개 고정 스냅숏 시점 (PRD §3.2)
 const SNAPSHOT_SLOTS = ['10:00', '12:30', '15:35'];
@@ -210,7 +210,7 @@ export default function ThemesPage() {
           </button>
           <div className="text-right text-xs text-slate-500">
             {lastUpdated && <div>마지막 갱신: {lastUpdated.toLocaleTimeString('ko-KR')}</div>}
-            <div>30초 자동 갱신</div>
+            <div>15초 자동 갱신</div>
           </div>
         </div>
       </div>
