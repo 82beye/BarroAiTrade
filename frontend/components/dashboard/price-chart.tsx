@@ -118,6 +118,8 @@ export function PriceChart({
   const lcRef = useRef<any>(null); // lightweight-charts 모듈 (LineStyle 등)
   const maSeriesRef = useRef<Record<number, any>>({});
   const priceLinesRef = useRef<any[]>([]);
+  // autoscaleInfoProvider 가 읽는 현재 기준선 가격 목록 (렌더 무관 최신값)
+  const levelPricesRef = useRef<number[]>([]);
   const [symbol, setSymbol] = useState(defaultSymbol);
   const [timeframe, setTimeframe] = useState(defaultTimeframe);
   // 라이트 분봉 토글: 마지막 선택한 분 단위 기억(기본 15분)
@@ -127,6 +129,7 @@ export function PriceChart({
   const [minuteOpen, setMinuteOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [autoLevels, setAutoLevels] = useState<StrategyLevel[]>([]);
+  const [fallbackNote, setFallbackNote] = useState<string | null>(null);
 
   // 외부에서 defaultSymbol 변경(스크리너 행 클릭) 시 내부 심볼 동기화
   useEffect(() => {
@@ -176,6 +179,21 @@ export function PriceChart({
         borderDownColor: '#2060C0',
         wickUpColor: '#D00010',
         wickDownColor: '#2060C0',
+        // 전략 기준선(createPriceLine)은 기본 오토스케일에 포함되지 않아
+        // 캔들 범위 밖이면 안 보임 → 근접(±30% 밴드) 기준선을 스케일에 포함 (PRD §4.3)
+        autoscaleInfoProvider: (original: () => any) => {
+          const res = original();
+          if (!res?.priceRange) return res;
+          let { minValue, maxValue } = res.priceRange;
+          const band = 0.3 * Math.max(maxValue - minValue, maxValue * 0.05);
+          for (const p of levelPricesRef.current) {
+            if (p >= minValue - band && p <= maxValue + band) {
+              minValue = Math.min(minValue, p);
+              maxValue = Math.max(maxValue, p);
+            }
+          }
+          return { ...res, priceRange: { minValue, maxValue } };
+        },
       });
 
       // 거래량 히스토그램 (하단 20% 별도 priceScale — PRD §4.4)
@@ -239,21 +257,33 @@ export function PriceChart({
       const fetchTf = isResampled ? '1d' : timeframe;
       const fetchLimit = isResampled ? 600 : 200;
 
-      let candles: OHLCVData[] = [];
-      try {
-        const response = await api.getOHLCV(symbol, fetchTf, fetchLimit);
-        const raw: any[] = response.data?.data ?? [];
-        candles = raw.map((item: any) => ({
-          time: item.timestamp,
-          open: item.open,
-          high: item.high,
-          low: item.low,
-          close: item.close,
-          volume: item.volume ?? 0,
-        }));
-      } catch {
-        candles = [];
+      const fetchCandles = async (tf: string, lim: number): Promise<OHLCVData[]> => {
+        try {
+          const response = await api.getOHLCV(symbol, tf, lim);
+          const raw: any[] = response.data?.data ?? [];
+          return raw.map((item: any) => ({
+            time: item.timestamp,
+            open: item.open,
+            high: item.high,
+            low: item.low,
+            close: item.close,
+            volume: item.volume ?? 0,
+          }));
+        } catch {
+          return [];
+        }
+      };
+
+      let candles = await fetchCandles(fetchTf, fetchLimit);
+
+      // 분/시간봉 미가용(게이트웨이 없음) 시 일봉 캐시로 정직 폴백 —
+      // mock 랜덤 캔들은 전략 기준선과 스케일이 어긋나 오해 소지 (기준선 우선)
+      let note: string | null = null;
+      if (candles.length === 0 && fetchTf !== '1d') {
+        candles = await fetchCandles('1d', 200);
+        if (candles.length > 0) note = '분봉 미연동 — 일봉 표시';
       }
+      setFallbackNote(note);
 
       if (candles.length === 0) {
         candles = generateMockOHLCV(symbol, fetchLimit);
@@ -324,8 +354,10 @@ export function PriceChart({
     });
     priceLinesRef.current = [];
 
+    const prices: number[] = [];
     (effectiveLevels ?? []).forEach((lv) => {
       if (typeof lv.price !== 'number' || !isFinite(lv.price)) return;
+      prices.push(lv.price);
       const pl = series.createPriceLine({
         price: lv.price,
         color: levelColor(lv.label),
@@ -336,6 +368,13 @@ export function PriceChart({
       });
       priceLinesRef.current.push(pl);
     });
+    // autoscaleInfoProvider 가 새 기준선을 반영하도록 오토스케일 재계산 유도
+    levelPricesRef.current = prices;
+    try {
+      series.priceScale().applyOptions({ autoScale: true });
+    } catch {
+      /* noop */
+    }
   }, [effectiveLevels, loading]);
 
   const selectCls = isLight
@@ -359,6 +398,15 @@ export function PriceChart({
           {label}
         </span>
       ))}
+      {fallbackNote && (
+        <span
+          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+            isLight ? 'bg-tima-bg text-tima-sub' : 'bg-slate-800 text-slate-400'
+          }`}
+        >
+          {fallbackNote}
+        </span>
+      )}
     </div>
   );
 
