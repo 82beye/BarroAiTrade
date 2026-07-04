@@ -47,9 +47,9 @@ module.exports = {
         // ── 티마(TIMA) 벤치마크 토큰 (PRD §6.8, 실측 hex) ──
         tima: {
           teal: '#10B8A8',    // 테마 헤더·브랜드 (모드 불변)
-          bg: '#E0E8E8',      // 라이트 배경
+          bg: '#E0E8E8',      // 라이트 배경(민트그레이)
           bgDark: '#202020',  // 다크 배경
-          card: '#F8F8F8',
+          card: '#F8F8F8',    // 카드/행 배경
           cardDark: '#383838',
           up: '#D00010',      // 상승 (한국 관례)
           down: '#2060C0',    // 하락
@@ -57,6 +57,13 @@ module.exports = {
           surge: '#F8F880',   // 급등 하이라이트
           select: '#D83870',  // 선택 탭·뱃지 (분홍)
           emph: '#E08040',    // 기준가 강조 박스
+          tabbar: '#E8F0F0',  // 하단 5탭바
+          tickerNews: '#E8D8C8', // 특징주 뉴스 배너(베이지)
+          tickerIndex: '#D8D0E8', // 지수 바(연보라)
+          brand: '#D8232A',   // BARRO 로고(빨강 계열)
+          text: '#1A1A1A',    // 본문 검정
+          sub: '#777777',     // 보조 회색(면책 대비 확보)
+          line: '#E0E0E0',    // 1px 구분선
         },
         strategyLine: {
           sf: '#5820B8',

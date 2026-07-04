@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useMemo } from 'react';
-import { Card } from '@/components/ui/card';
 import type { ThemeStockItem } from '@/lib/api';
 
 function fmtNum(n?: number | null): string {
@@ -38,12 +37,7 @@ export function BoxPlotBar({ s }: { s: ThemeStockItem }) {
 
   let boxLeft = 0;
   let boxWidth = 0;
-  if (
-    day_open !== null &&
-    day_open !== undefined &&
-    price !== null &&
-    price !== undefined
-  ) {
+  if (day_open !== null && day_open !== undefined && price !== null && price !== undefined) {
     const lo = Math.min(day_open, price);
     const hi = Math.max(day_open, price);
     boxLeft = ((lo - day_low) / range) * 100;
@@ -53,7 +47,7 @@ export function BoxPlotBar({ s }: { s: ThemeStockItem }) {
     price !== null && price !== undefined ? ((price - day_low) / range) * 100 : null;
 
   return (
-    <div className="relative mt-1 h-1.5 w-full rounded-full bg-slate-700">
+    <div className="relative mt-1 h-1.5 w-full rounded-full bg-black/10">
       {boxWidth > 0 && (
         <div
           className="absolute top-0 h-1.5 rounded-full"
@@ -62,7 +56,7 @@ export function BoxPlotBar({ s }: { s: ThemeStockItem }) {
       )}
       {priceLeft !== null && (
         <div
-          className="absolute top-1/2 h-2.5 w-0.5 -translate-y-1/2 bg-slate-100"
+          className="absolute top-1/2 h-2.5 w-0.5 -translate-y-1/2 bg-tima-text"
           style={{ left: `${Math.min(Math.max(priceLeft, 0), 100)}%` }}
         />
       )}
@@ -81,7 +75,7 @@ interface ThemeCardViewProps {
 /**
  * 프레젠테이셔널 테마 카드 (PRD §3.1) — 라이브 보드·타임라인 스냅숏 공용.
  * teal 헤더 + 대금 배지 + 이슈 1줄 + 대표종목 4~5행(등락률순, 박스플롯 바).
- * 종목명은 /stocks/[symbol] 상세 페이지로 연결 (PRD §3.3).
+ * 라이트 모바일 셸 기준 흰 카드 + 검정 텍스트 + 등락 빨강/파랑.
  */
 export function ThemeCardView({ name, description, stocks, capturedAt }: ThemeCardViewProps) {
   const sorted = useMemo(() => [...stocks].sort(sortStocks).slice(0, 5), [stocks]);
@@ -94,18 +88,18 @@ export function ThemeCardView({ name, description, stocks, capturedAt }: ThemeCa
   }, [stocks]);
 
   return (
-    <Card className="overflow-hidden border-slate-700 bg-slate-800">
+    <div className="overflow-hidden rounded-lg border border-tima-line bg-white shadow-sm">
       {/* 헤더 (teal) */}
-      <div className="flex items-center justify-between bg-tima-teal px-4 py-2.5">
-        <span className="font-bold text-black">{name}</span>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between bg-tima-teal px-3 py-2">
+        <span className="truncate font-bold text-black">{name}</span>
+        <div className="flex items-center gap-1.5">
           {capturedAt && (
-            <span className="rounded-full bg-black/10 px-2 py-0.5 text-[10px] font-medium text-black/70">
+            <span className="rounded bg-white/30 px-1.5 py-0.5 text-[10px] font-medium text-black/70">
               {capturedAt}
             </span>
           )}
           {totalValue !== null && (
-            <span className="rounded-full bg-black/20 px-2 py-0.5 text-xs font-semibold text-black">
+            <span className="shrink-0 rounded bg-white/70 px-1.5 py-0.5 text-xs font-bold text-tima-teal">
               {fmtNum(totalValue)}억
             </span>
           )}
@@ -114,56 +108,39 @@ export function ThemeCardView({ name, description, stocks, capturedAt }: ThemeCa
 
       {/* 이슈 1줄 */}
       {description && (
-        <p className="truncate px-4 pt-2 text-xs text-slate-400">{description}</p>
+        <p className="truncate px-3 pt-1.5 text-[11px] text-tima-sub">{description}</p>
       )}
 
       {/* 대표 종목 */}
-      <div className="px-2 py-2">
+      <div className="px-1.5 py-1.5">
         {sorted.length === 0 ? (
-          <div className="px-2 py-4 text-center text-xs text-slate-500">종목 데이터 없음</div>
+          <div className="px-2 py-4 text-center text-xs text-tima-sub">종목 데이터 없음</div>
         ) : (
           sorted.map((s) => {
             const cp = s.change_pct;
             const hasCp = cp !== null && cp !== undefined;
             const up = (cp ?? 0) >= 0;
             const surge = hasCp && (cp as number) >= 8;
+            const dirColor = !hasCp ? 'text-tima-sub' : up ? 'text-tima-up' : 'text-tima-down';
             return (
               <Link
                 key={s.symbol}
                 href={`/stocks/${s.symbol}`}
-                className={`block rounded px-2 py-1.5 transition-colors hover:bg-slate-700/40 ${
-                  surge ? 'bg-tima-surge hover:bg-tima-surge/90' : ''
+                className={`block rounded px-1.5 py-1.5 transition-colors ${
+                  surge ? 'bg-tima-surge' : 'hover:bg-tima-bg/60'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span
-                    className={`truncate text-sm font-medium ${
-                      surge ? 'text-black' : 'text-slate-100'
-                    }`}
-                  >
+                  <span className="truncate text-[13px] font-bold text-tima-text">
                     {s.name ?? s.symbol}
                   </span>
-                  <span
-                    className={`shrink-0 font-mono text-sm ${
-                      surge
-                        ? 'text-black'
-                        : !hasCp
-                          ? 'text-slate-500'
-                          : up
-                            ? 'text-tima-up'
-                            : 'text-tima-down'
-                    }`}
-                  >
+                  <span className={`shrink-0 font-mono text-[13px] font-semibold ${dirColor}`}>
                     {!hasCp ? '-' : `${up ? '↑' : '↓'} ${Math.abs(cp as number).toFixed(2)}%`}
                   </span>
                 </div>
-                <div
-                  className={`flex items-center justify-between gap-2 text-xs ${
-                    surge ? 'text-black/70' : 'text-slate-500'
-                  }`}
-                >
-                  <span className="font-mono">{fmtNum(s.price)}</span>
-                  <span className="font-mono">{fmtNum(s.value_traded)}억</span>
+                <div className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className={`font-mono ${dirColor}`}>{fmtNum(s.price)}</span>
+                  <span className="font-mono text-tima-sub">{fmtNum(s.value_traded)}억</span>
                 </div>
                 <BoxPlotBar s={s} />
               </Link>
@@ -171,6 +148,6 @@ export function ThemeCardView({ name, description, stocks, capturedAt }: ThemeCa
           })
         )}
       </div>
-    </Card>
+    </div>
   );
 }

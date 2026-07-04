@@ -20,6 +20,8 @@ interface PriceChartProps {
   levels?: StrategyLevel[];
   /** 인라인(스크리너) 모드에서 심볼/주기 셀렉트 숨김 */
   hideControls?: boolean;
+  /** 배경 테마. 티마 라이트 셸은 'light', 관리자 대시보드는 기본 'dark'(하위호환) */
+  theme?: 'light' | 'dark';
 }
 
 // ── 이동평균 5종 색 (PRD §4.4) ──
@@ -81,7 +83,9 @@ export function PriceChart({
   defaultTimeframe = '1h',
   levels,
   hideControls = false,
+  theme = 'dark',
 }: PriceChartProps) {
+  const isLight = theme === 'light';
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const seriesRef = useRef<any>(null);
@@ -117,20 +121,20 @@ export function PriceChart({
         width: chartContainerRef.current!.clientWidth,
         height: 400,
         layout: {
-          background: { color: '#0f172a' },
-          textColor: '#94a3b8',
+          background: { color: isLight ? '#FFFFFF' : '#0f172a' },
+          textColor: isLight ? '#333333' : '#94a3b8',
         },
         grid: {
-          vertLines: { color: '#1e293b' },
-          horzLines: { color: '#1e293b' },
+          vertLines: { color: isLight ? '#EEEEEE' : '#1e293b' },
+          horzLines: { color: isLight ? '#EEEEEE' : '#1e293b' },
         },
         crosshair: { mode: 0 },
         timeScale: {
-          borderColor: '#334155',
+          borderColor: isLight ? '#DDDDDD' : '#334155',
           timeVisible: true,
         },
         rightPriceScale: {
-          borderColor: '#334155',
+          borderColor: isLight ? '#DDDDDD' : '#334155',
         },
       });
 
@@ -279,15 +283,22 @@ export function PriceChart({
     });
   }, [effectiveLevels, loading]);
 
+  const selectCls = isLight
+    ? 'border-tima-line bg-white text-sm text-tima-text'
+    : 'border-slate-700 bg-slate-800 text-sm text-slate-50';
+
   return (
-    <Card className="border-slate-800 bg-slate-900">
+    <Card className={isLight ? 'border-tima-line bg-white' : 'border-slate-800 bg-slate-900'}>
       <CardHeader className="flex flex-row items-center justify-between gap-4">
         <div className="flex flex-col gap-2">
-          <CardTitle className="text-lg">가격 차트</CardTitle>
+          <CardTitle className={`text-lg ${isLight ? 'text-tima-text' : ''}`}>가격 차트</CardTitle>
           {/* 이동평균 범례 (PRD §4.4) */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             {MA_CONFIGS.map(({ period, color, label }) => (
-              <span key={period} className="flex items-center gap-1 text-xs text-slate-400">
+              <span
+                key={period}
+                className={`flex items-center gap-1 text-xs ${isLight ? 'text-tima-sub' : 'text-slate-400'}`}
+              >
                 <span
                   className="inline-block h-2 w-2 rounded-full"
                   style={{ backgroundColor: color }}
@@ -303,7 +314,7 @@ export function PriceChart({
               name="symbol"
               value={symbol}
               onChange={(e) => setSymbol(e.target.value)}
-              className="w-28 border-slate-700 bg-slate-800 text-sm text-slate-50"
+              className={`w-28 ${selectCls}`}
             >
               <option value="005930">삼성전자</option>
               <option value="000660">SK하이닉스</option>
@@ -315,7 +326,7 @@ export function PriceChart({
               name="timeframe"
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
-              className="w-20 border-slate-700 bg-slate-800 text-sm text-slate-50"
+              className={`w-20 ${selectCls}`}
             >
               <option value="1m">1분</option>
               <option value="5m">5분</option>
@@ -331,8 +342,12 @@ export function PriceChart({
       <CardContent>
         <div ref={chartContainerRef} className="relative w-full">
           {loading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/50">
-              <p className="text-sm text-slate-400">차트 로딩 중...</p>
+            <div
+              className={`absolute inset-0 z-10 flex items-center justify-center ${
+                isLight ? 'bg-white/60' : 'bg-slate-900/50'
+              }`}
+            >
+              <p className={`text-sm ${isLight ? 'text-tima-sub' : 'text-slate-400'}`}>차트 로딩 중...</p>
             </div>
           )}
         </div>

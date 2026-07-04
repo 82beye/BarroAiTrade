@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Card } from '@/components/ui/card';
 import { Disclaimer } from '@/components/layout/disclaimer';
 import { ThemeCardView } from '@/components/themes/theme-card';
 import { api, type ThemeStockItem, type ThemeSnapshot } from '@/lib/api';
@@ -85,39 +84,39 @@ function TimelineModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-black/70 p-4 md:p-8"
+      className="fixed inset-0 z-50 flex flex-col bg-black/50 p-3"
       onClick={onClose}
     >
       <div
-        className="mx-auto flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900"
+        className="mx-auto flex h-full w-full max-w-[430px] flex-col overflow-hidden rounded-xl border border-tima-line bg-tima-bg"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 헤더 */}
-        <div className="flex items-center justify-between border-b border-slate-700 px-5 py-3">
-          <h2 className="flex items-center gap-2 text-lg font-bold text-slate-50">
-            🕐 타임라인 스냅숏
+        <div className="flex items-center justify-between border-b border-tima-line bg-white px-4 py-3">
+          <h2 className="flex items-center gap-2 text-base font-bold text-tima-text">
+            타임라인
           </h2>
           <button
             onClick={onClose}
-            className="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+            className="rounded p-1.5 text-tima-sub hover:bg-tima-bg hover:text-tima-text"
             aria-label="닫기"
           >
             ✕
           </button>
         </div>
 
-        {/* slot 탭 */}
-        <div className="flex gap-2 border-b border-slate-700 px-5 py-3">
+        {/* slot 탭 (활성 황색 — PRD §3.2) */}
+        <div className="flex items-center gap-2 border-b border-tima-line bg-white px-4 py-2.5">
           {SNAPSHOT_SLOTS.map((s) => {
             const on = s === slot;
             return (
               <button
                 key={s}
                 onClick={() => setSlot(s)}
-                className={`rounded-md px-4 py-1.5 text-sm font-semibold transition-colors ${
+                className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
                   on
                     ? 'bg-tima-active text-black'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    : 'bg-tima-bg text-tima-sub hover:bg-tima-line'
                 }`}
               >
                 {s}
@@ -125,22 +124,20 @@ function TimelineModal({ onClose }: { onClose: () => void }) {
             );
           })}
           {snapshot && (
-            <span className="ml-auto self-center text-xs text-slate-500">
-              동결 시각: {capturedLabel}
+            <span className="ml-auto self-center text-[11px] text-tima-sub">
+              동결 {capturedLabel}
             </span>
           )}
         </div>
 
         {/* 본문 */}
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex-1 overflow-y-auto p-3">
           {loading ? (
-            <div className="py-12 text-center text-slate-400">스냅숏 불러오는 중…</div>
+            <div className="py-12 text-center text-tima-sub">스냅숏 불러오는 중…</div>
           ) : noData || !snapshot ? (
-            <div className="py-12 text-center text-slate-400">
-              해당 시각 스냅숏이 없습니다.
-            </div>
+            <div className="py-12 text-center text-tima-sub">해당 시각 스냅숏이 없습니다.</div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-2 gap-3">
               {snapshot.themes.map((t) => (
                 <ThemeCardView
                   key={t.id}
@@ -195,36 +192,27 @@ export default function ThemesPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-900 p-8">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-4xl font-bold text-slate-50">테마 보드</h1>
-          <p className="mt-2 text-slate-400">시장 테마별 대표 종목을 실시간 추적합니다</p>
-        </div>
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => setShowTimeline(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200 transition-colors hover:bg-slate-700"
-          >
-            🕐 타임라인
-          </button>
-          <div className="text-right text-xs text-slate-500">
-            {lastUpdated && <div>마지막 갱신: {lastUpdated.toLocaleTimeString('ko-KR')}</div>}
-            <div>15초 자동 갱신</div>
-          </div>
-        </div>
+    <div className="p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <button
+          onClick={() => setShowTimeline(true)}
+          className="flex items-center gap-1 rounded-full border border-tima-line bg-white px-3 py-1 text-xs font-semibold text-tima-text"
+        >
+          🕐 타임라인
+        </button>
+        <span className="text-[11px] text-tima-sub">
+          {lastUpdated ? `${lastUpdated.toLocaleTimeString('ko-KR')} · 15초 갱신` : '15초 자동 갱신'}
+        </span>
       </div>
 
       {loading ? (
-        <div className="py-12 text-center text-slate-400">테마 불러오는 중…</div>
+        <div className="py-12 text-center text-tima-sub">테마 불러오는 중…</div>
       ) : themes.length === 0 ? (
-        <Card className="border-slate-700 bg-slate-800">
-          <div className="py-12 text-center text-slate-400">
-            표시할 테마가 없습니다. 데이터 대기 중.
-          </div>
-        </Card>
+        <div className="rounded-lg border border-tima-line bg-white py-12 text-center text-tima-sub">
+          표시할 테마가 없습니다. 데이터 대기 중.
+        </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-2 gap-3">
           {themes.map((t) => (
             <LiveThemeCard key={t.id} theme={t} tick={tick} />
           ))}

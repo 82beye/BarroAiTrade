@@ -41,7 +41,7 @@ export function WatchlistStar({
         toggle(sym);
       }}
       className={`leading-none transition-colors disabled:opacity-50 ${dim} ${
-        watched ? 'text-tima-active' : 'text-slate-500 hover:text-slate-300'
+        watched ? 'text-tima-active' : 'text-tima-sub hover:text-tima-text'
       } ${className}`}
     >
       {watched ? '★' : '☆'}

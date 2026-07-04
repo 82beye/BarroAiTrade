@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Card, CardContent } from '@/components/ui/card';
 import { Disclaimer } from '@/components/layout/disclaimer';
 import { PriceChart } from '@/components/dashboard/price-chart';
 import { WatchlistStar } from '@/components/watchlist/watchlist-star';
@@ -137,122 +136,135 @@ export default function StockDetailPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-900 p-8">
-      {/* 헤더 */}
-      <div className="mb-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-3xl font-bold text-slate-50">{name}</h1>
-          <span className="font-mono text-sm text-slate-500">{symbol}</span>
-          {symbol && <WatchlistStar symbol={symbol} />}
-        </div>
-        <div className="mt-2 flex items-baseline gap-3">
-          <span className="font-mono text-2xl font-bold text-slate-100">
-            {fmtNum(ticker?.price)}
-          </span>
-          <span
-            className={`font-mono text-sm ${
-              !hasCp ? 'text-slate-500' : up ? 'text-tima-up' : 'text-tima-down'
-            }`}
-          >
-            {!hasCp ? '-' : `${up ? '↑' : '↓'} ${Math.abs(cp as number).toFixed(2)}%`}
-          </span>
+    <div className="p-3">
+      {/* 뒤로 + 서브탭 (정보 | 차트 | 호가 — 활성 tima.select 분홍, PRD §3.3) */}
+      <div className="mb-3 flex items-center gap-2">
+        <button
+          onClick={() => history.back()}
+          aria-label="뒤로"
+          className="shrink-0 text-lg text-tima-text"
+        >
+          ‹
+        </button>
+        <div className="flex flex-1 gap-1.5">
+          {TABS.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`flex-1 rounded-full border py-1.5 text-sm font-semibold transition-colors ${
+                tab === key
+                  ? 'border-tima-select bg-tima-select text-white'
+                  : 'border-tima-line bg-white text-tima-sub'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* 서브탭 (정보 | 차트 | 호가 — 활성 tima.select 분홍, PRD §3.3) */}
-      <div className="mb-6 flex gap-1 rounded-lg border border-slate-700 bg-slate-800 p-1 w-fit">
-        {TABS.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`rounded-md px-6 py-2 text-sm font-semibold transition-colors ${
-              tab === key
-                ? 'bg-tima-select text-white'
-                : 'text-slate-400 hover:text-slate-200'
+      {/* 종목 헤더 */}
+      <div className="mb-4 rounded-lg border border-tima-line bg-white px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          {symbol && <WatchlistStar symbol={symbol} size="sm" />}
+          <span className="text-lg font-bold text-tima-text">{name}</span>
+          <span className="font-mono text-xs text-tima-sub">{symbol}</span>
+        </div>
+        <div className="mt-1 flex items-baseline gap-2">
+          <span
+            className={`font-mono text-2xl font-bold ${
+              !hasCp ? 'text-tima-text' : up ? 'text-tima-up' : 'text-tima-down'
             }`}
           >
-            {label}
-          </button>
-        ))}
+            {fmtNum(ticker?.price)}
+          </span>
+          <span
+            className={`font-mono text-sm font-semibold ${
+              !hasCp ? 'text-tima-sub' : up ? 'text-tima-up' : 'text-tima-down'
+            }`}
+          >
+            {!hasCp ? '-' : `${up ? '▲' : '▼'} ${Math.abs(cp as number).toFixed(2)}%`}
+          </span>
+        </div>
       </div>
 
       {/* ── 정보 탭: 관련테마 칩 + 일정 + 뉴스 ── */}
       {tab === 'info' && (
         <>
+          {/* 관련테마 칩 (아웃라인, 가로 스크롤 — PRD §3.3) */}
           {themes.length > 0 && (
-            <div className="mb-6 flex gap-2 overflow-x-auto pb-1">
-              {themes.map((t) => (
-                <Link
-                  key={t.id}
-                  href="/themes"
-                  title={t.description ?? undefined}
-                  className="shrink-0 rounded-full border border-tima-teal/60 px-3 py-1 text-sm text-tima-teal transition-colors hover:bg-tima-teal/10"
-                >
-                  {t.name}
-                  {t.score !== null && t.score !== undefined && (
-                    <span className="ml-1 text-xs text-slate-500">{t.score.toFixed(1)}</span>
-                  )}
-                </Link>
-              ))}
+            <div className="mb-4">
+              <span className="mb-1.5 block text-sm font-bold text-tima-teal">관련테마</span>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {themes.map((t) => (
+                  <Link
+                    key={t.id}
+                    href="/themes"
+                    title={t.description ?? undefined}
+                    className="shrink-0 rounded-full border border-tima-teal/60 bg-white px-3 py-1 text-sm text-tima-teal transition-colors hover:bg-tima-teal/10"
+                  >
+                    {t.name}
+                    {t.score !== null && t.score !== undefined && (
+                      <span className="ml-1 text-xs text-tima-sub">{t.score.toFixed(1)}</span>
+                    )}
+                  </Link>
+                ))}
+              </div>
             </div>
           )}
 
-          <Card className="mb-6 border-slate-700 bg-slate-800">
-            <CardContent className="pt-4">
-              <h2 className="mb-3 text-sm font-semibold text-slate-300">관련 일정</h2>
-              {events.length === 0 ? (
-                <p className="text-sm text-slate-500">최근 특별한 일정이 없습니다.</p>
-              ) : (
-                <div className="space-y-2">
-                  {events.map((ev) => (
-                    <div
-                      key={ev.id}
-                      className="flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2"
-                    >
-                      <span className="mt-0.5 rounded bg-slate-700 px-1.5 py-0.5 text-xs font-semibold text-slate-300">
-                        {ev.event_type}
-                      </span>
-                      <div className="flex-1">
-                        <p className="text-sm text-slate-200">{ev.title}</p>
-                        <p className="mt-0.5 font-mono text-xs text-slate-500">{ev.event_date}</p>
-                      </div>
+          <div className="mb-4 rounded-lg border border-tima-line bg-white p-3">
+            <h2 className="mb-2 text-sm font-bold text-tima-teal">관련 일정</h2>
+            {events.length === 0 ? (
+              <p className="text-sm text-tima-sub">최근 특별한 일정이 없습니다.</p>
+            ) : (
+              <div className="space-y-2">
+                {events.map((ev) => (
+                  <div
+                    key={ev.id}
+                    className="flex items-start gap-3 rounded-lg border border-tima-line bg-tima-bg/40 px-3 py-2"
+                  >
+                    <span className="mt-0.5 rounded bg-tima-line px-1.5 py-0.5 text-xs font-semibold text-tima-sub">
+                      {ev.event_type}
+                    </span>
+                    <div className="flex-1">
+                      <p className="text-sm text-tima-text">{ev.title}</p>
+                      <p className="mt-0.5 font-mono text-xs text-tima-sub">{ev.event_date}</p>
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {relatedNews.length > 0 && (
-            <Card className="mb-6 border-slate-700 bg-slate-800">
-              <CardContent className="pt-4">
-                <h2 className="mb-3 text-sm font-semibold text-slate-300">관련 뉴스</h2>
-                <div className="space-y-2">
-                  {relatedNews.map((n) => (
-                    <a
-                      key={n.id}
-                      href={n.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 hover:border-slate-500 hover:bg-slate-800"
-                    >
-                      <p className="text-sm text-slate-200">{n.title}</p>
-                      <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
-                        <span>{n.source}</span>
-                        <span>
-                          {new Date(n.published_at).toLocaleDateString('ko-KR', {
-                            month: 'short',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                      </div>
-                    </a>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+            <div className="mb-4 rounded-lg border border-tima-line bg-white p-3">
+              <h2 className="mb-2 text-sm font-bold text-tima-teal">관련 뉴스</h2>
+              <div className="space-y-2">
+                {relatedNews.map((n) => (
+                  <a
+                    key={n.id}
+                    href={n.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block rounded-lg border border-tima-line bg-tima-bg/40 px-3 py-2 hover:border-tima-teal/50"
+                  >
+                    <p className="text-sm text-tima-text">{n.title}</p>
+                    <div className="mt-1 flex items-center gap-2 text-xs text-tima-sub">
+                      <span>{n.source}</span>
+                      <span>
+                        {new Date(n.published_at).toLocaleDateString('ko-KR', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
           )}
         </>
       )}
@@ -260,7 +272,7 @@ export default function StockDetailPage() {
       {/* ── 차트 탭 ── */}
       {tab === 'chart' && (
         <div className="mb-6">
-          <PriceChart key={symbol} defaultSymbol={symbol} defaultTimeframe="15m" />
+          <PriceChart key={symbol} defaultSymbol={symbol} defaultTimeframe="15m" theme="light" />
         </div>
       )}
 
@@ -336,68 +348,48 @@ function OrderBook({ symbol, currentPrice }: { symbol: string; currentPrice: num
 
   if (!loaded) {
     return (
-      <Card className="border-slate-700 bg-slate-800">
-        <CardContent className="py-12 text-center text-slate-400">불러오는 중…</CardContent>
-      </Card>
+      <div className="rounded-lg border border-tima-line bg-white py-12 text-center text-tima-sub">
+        불러오는 중…
+      </div>
     );
   }
 
   if (!ok) {
     return (
-      <Card className="border-slate-700 bg-slate-800">
-        <CardContent className="py-12 text-center text-slate-400">
-          호가 데이터를 불러올 수 없습니다 (장중·게이트웨이 연결 시 표시).
-        </CardContent>
-      </Card>
+      <div className="rounded-lg border border-tima-line bg-white py-12 text-center text-tima-sub">
+        호가 데이터를 불러올 수 없습니다 (장중·게이트웨이 연결 시 표시).
+      </div>
     );
   }
 
   return (
-    <Card className="border-slate-700 bg-slate-800">
-      <CardContent className="p-0">
-        {/* 매도호가 (위, 파랑) */}
-        <div>
-          {asksDesc.map(([price, qty], i) => (
-            <Row
-              key={`a-${i}`}
-              price={price}
-              qty={qty}
-              maxQty={maxQty}
-              side="ask"
-              pct={pct(price)}
-            />
-          ))}
-        </div>
+    <div className="overflow-hidden rounded-lg border border-tima-line bg-white">
+      {/* 매도호가 (위, 파랑) */}
+      <div>
+        {asksDesc.map(([price, qty], i) => (
+          <Row key={`a-${i}`} price={price} qty={qty} maxQty={maxQty} side="ask" pct={pct(price)} />
+        ))}
+      </div>
 
-        {/* 현재가 강조 */}
-        <div className="flex items-center justify-center border-y border-slate-600 bg-slate-900 py-2">
-          <span className="font-mono text-lg font-bold text-slate-100">
-            {fmtNum(currentPrice)}
-          </span>
-          <span className="ml-2 text-xs text-slate-500">현재가</span>
-        </div>
+      {/* 현재가 강조 */}
+      <div className="flex items-center justify-center border-y border-tima-line bg-tima-bg py-2">
+        <span className="font-mono text-lg font-bold text-tima-text">{fmtNum(currentPrice)}</span>
+        <span className="ml-2 text-xs text-tima-sub">현재가</span>
+      </div>
 
-        {/* 매수호가 (아래, 빨강) */}
-        <div>
-          {bidsDesc.map(([price, qty], i) => (
-            <Row
-              key={`b-${i}`}
-              price={price}
-              qty={qty}
-              maxQty={maxQty}
-              side="bid"
-              pct={pct(price)}
-            />
-          ))}
-        </div>
+      {/* 매수호가 (아래, 빨강) */}
+      <div>
+        {bidsDesc.map(([price, qty], i) => (
+          <Row key={`b-${i}`} price={price} qty={qty} maxQty={maxQty} side="bid" pct={pct(price)} />
+        ))}
+      </div>
 
-        {/* 잔량 합계 */}
-        <div className="flex items-center justify-between border-t border-slate-700 px-4 py-2 text-xs">
-          <span className="text-tima-down">매도합 {fmtNum(askSum)}</span>
-          <span className="text-tima-up">매수합 {fmtNum(bidSum)}</span>
-        </div>
-      </CardContent>
-    </Card>
+      {/* 잔량 합계 */}
+      <div className="flex items-center justify-between border-t border-tima-line px-4 py-2 text-xs">
+        <span className="text-tima-down">매도합 {fmtNum(askSum)}</span>
+        <span className="text-tima-up">매수합 {fmtNum(bidSum)}</span>
+      </div>
+    </div>
   );
 }
 
@@ -417,10 +409,10 @@ function Row({
   const w = Math.max(((qty ?? 0) / maxQty) * 100, 0);
   const isAsk = side === 'ask';
   // 매도 파랑 / 매수 빨강
-  const barColor = isAsk ? 'bg-tima-down/25' : 'bg-tima-up/25';
+  const barColor = isAsk ? 'bg-tima-down/15' : 'bg-tima-up/15';
   const qtyColor = isAsk ? 'text-tima-down' : 'text-tima-up';
   return (
-    <div className="relative flex items-center border-b border-slate-700/50 last:border-0 px-4 py-1.5">
+    <div className="relative flex items-center border-b border-tima-line last:border-0 px-4 py-1.5">
       {/* 잔량 바 (매도 왼쪽 / 매수 오른쪽 정렬) */}
       <div
         className={`absolute inset-y-0 ${isAsk ? 'left-0' : 'right-0'} ${barColor}`}
@@ -431,15 +423,15 @@ function Row({
           <>
             <span className={`font-mono ${qtyColor}`}>{fmtNum(qty)}</span>
             <span className="flex items-baseline gap-2">
-              <span className="font-mono text-slate-100">{fmtNum(price)}</span>
-              {pct && <span className="w-14 text-right font-mono text-xs text-slate-500">{pct}</span>}
+              <span className="font-mono text-tima-text">{fmtNum(price)}</span>
+              {pct && <span className="w-14 text-right font-mono text-xs text-tima-sub">{pct}</span>}
             </span>
           </>
         ) : (
           <>
             <span className="flex items-baseline gap-2">
-              <span className="font-mono text-slate-100">{fmtNum(price)}</span>
-              {pct && <span className="w-14 text-right font-mono text-xs text-slate-500">{pct}</span>}
+              <span className="font-mono text-tima-text">{fmtNum(price)}</span>
+              {pct && <span className="w-14 text-right font-mono text-xs text-tima-sub">{pct}</span>}
             </span>
             <span className={`font-mono ${qtyColor}`}>{fmtNum(qty)}</span>
           </>
