@@ -90,6 +90,7 @@ from backend.api.routes.admin import router as admin_router  # BAR-109
 from backend.api.routes.screener import router as screener_router  # tima P0
 from backend.api.routes.alerts import router as alerts_router  # tima P1
 from backend.api.routes.search import router as search_router  # tima P2
+from backend.api.routes.stocks import router as stocks_router  # 티마 종목상세
 
 app.include_router(signals_router, prefix="/api")
 app.include_router(risk_router, prefix="/api")
@@ -107,6 +108,8 @@ app.include_router(search_router, prefix="/api")  # tima P2: 통합검색 (종�
 app.include_router(tcn_router)
 # admin 라우터는 APIRouter(prefix="/api/admin") 내장 — 추가 prefix 불필요
 app.include_router(admin_router)
+# stocks 라우트는 경로에 /api/ 포함 — prefix 없이 등록
+app.include_router(stocks_router)
 # BAR-43: /metrics (Prometheus exposition) — 단, prefix 없음 (Prometheus 표준 경로)
 app.include_router(metrics_router)
 

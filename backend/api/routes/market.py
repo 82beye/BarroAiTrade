@@ -4,210 +4,286 @@
 엔드포인트:
   GET  /api/market/ohlcv?symbol=005930&timeframe=5m&limit=100  - OHLCV 차트 데이터
   GET  /api/market/ticker/:symbol                               - 종목 시세 조회
-  GET  /api/market/order-book/:symbol                          - 호가 조회
+  GET  /api/market/order-book/:symbol                          - 호가 조회(+ref/strength/ticks)
   GET  /api/market/universe                                     - 전종목 목록
   GET  /api/market/nxt?filter=value|gainers|losers&limit=30    - NXT 시세 목록 (스텁)
+  GET  /api/market/indices                                     - 코스피/코스닥 지수
+  GET  /api/market/brokers/:symbol                             - 당일 주요 거래원
+  GET  /api/market/program/:symbol?mode=time|daily             - 프로그램 매매 추이
+  GET  /api/market/investors                                   - 시장별 투자자 순매수
+
+시세 조달 우선순위(읽기 전용): market_gateway → kiwoom_quotes(키움 REST) → ohlcv 캐시.
+게이트웨이/키가 없으면 우아하게 캐시 또는 unsupported 로 degrade 한다(주문 경로 무관).
 """
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+import os
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Path, Query, HTTPException
+from pydantic import SecretStr
 
-from backend.core.gateway.base import MarketGateway
-from backend.models.market import OHLCV, Ticker, OrderBook
 from backend.core.state import app_state
+from backend.core.market_data import cache_quotes, stock_names
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+_KST = timezone(timedelta(hours=9))
 
-def _get_gateway() -> MarketGateway:
-    """마켓 게이트웨이 인스턴스 반환"""
-    gateway = app_state.market_gateway
-    if not gateway:
-        raise HTTPException(
-            status_code=503,
-            detail="마켓 게이트웨이 미초기화"
+
+def _today_kst() -> str:
+    return datetime.now(_KST).strftime("%Y%m%d")
+
+
+# ── kiwoom_quotes lazy 싱글턴 (키 부재 시 None) ─────────────
+_quotes = None
+_quotes_tried = False
+
+
+def _get_quotes():
+    """KiwoomQuotes 인스턴스 반환. 키 없으면 None(조회는 캐시로 degrade)."""
+    global _quotes, _quotes_tried
+    if _quotes_tried:
+        return _quotes
+    _quotes_tried = True
+    app_key = os.environ.get("KIWOOM_APP_KEY", "").strip()
+    app_secret = os.environ.get("KIWOOM_APP_SECRET", "").strip()
+    if not app_key or not app_secret:
+        logger.info("KIWOOM 키 부재 — kiwoom_quotes 비활성(캐시 폴백)")
+        _quotes = None
+        return None
+    try:
+        from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
+        from backend.core.gateway.kiwoom_quotes import KiwoomQuotes
+
+        oauth = KiwoomNativeOAuth(
+            app_key=SecretStr(app_key),
+            app_secret=SecretStr(app_secret),
+            base_url=os.environ.get("KIWOOM_BASE_URL", "https://mockapi.kiwoom.com"),
         )
-    return gateway
+        _quotes = KiwoomQuotes(oauth=oauth)
+    except Exception as exc:
+        logger.warning("kiwoom_quotes 초기화 실패: %s", type(exc).__name__)
+        _quotes = None
+    return _quotes
 
 
+def _yyyymmdd_to_iso(d: str) -> str:
+    """'20260618' → '2026-06-18T00:00:00'. 실패 시 원본."""
+    if d and len(d) == 8 and d.isdigit():
+        return f"{d[0:4]}-{d[4:6]}-{d[6:8]}T00:00:00"
+    return d
+
+
+# ══════════════════════════════════════════════════════════
+# OHLCV
+# ══════════════════════════════════════════════════════════
 @router.get("/market/ohlcv")
 async def get_ohlcv(
     symbol: str = Query(..., description="종목 코드"),
     timeframe: str = Query("5m", description="봉 주기: 1m, 5m, 15m, 1h, 1d"),
     limit: int = Query(300, ge=1, le=1000, description="캔들 수"),
 ) -> dict:
-    """
-    OHLCV 차트 데이터 조회
+    """OHLCV 차트 데이터 조회. 게이트웨이 우선, 일봉은 캐시 폴백."""
+    gateway = app_state.market_gateway
+    if gateway:
+        try:
+            candles = await gateway.get_ohlcv(symbol, timeframe, limit)
+            return {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "limit": len(candles),
+                "source": "gateway",
+                "data": [
+                    {
+                        "timestamp": c.timestamp.isoformat(),
+                        "open": c.open,
+                        "high": c.high,
+                        "low": c.low,
+                        "close": c.close,
+                        "volume": c.volume,
+                    }
+                    for c in candles
+                ],
+            }
+        except Exception as e:
+            logger.error(f"OHLCV 게이트웨이 조회 실패: {symbol}, {e}")
+            if timeframe != "1d":
+                raise HTTPException(status_code=500, detail=str(e))
+            # 일봉이면 캐시로 폴백
 
-    응답:
-    ```json
-    {
-      "symbol": "005930",
-      "timeframe": "5m",
-      "limit": 300,
-      "data": [
-        {
-          "timestamp": "2026-04-11T10:00:00Z",
-          "open": 75000,
-          "high": 75500,
-          "low": 74500,
-          "close": 75250,
-          "volume": 1000000
-        }
-      ]
-    }
-    ```
-    """
-    try:
-        gateway = _get_gateway()
-        candles = await gateway.get_ohlcv(symbol, timeframe, limit)
+    # 폴백: 일봉 캐시 (지연 시세, source=cache)
+    if timeframe == "1d":
+        rows = cache_quotes.get_daily_candles(symbol, limit)
+        if rows:
+            return {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "limit": len(rows),
+                "source": "cache",
+                "as_of": rows[-1]["date"],
+                "data": [
+                    {
+                        "timestamp": _yyyymmdd_to_iso(r["date"]),
+                        "open": r["open"],
+                        "high": r["high"],
+                        "low": r["low"],
+                        "close": r["close"],
+                        "volume": r["volume"],
+                    }
+                    for r in rows
+                ],
+            }
+        raise HTTPException(status_code=404, detail=f"캐시 없음: {symbol}")
 
-        return {
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "limit": len(candles),
-            "data": [
-                {
-                    "timestamp": c.timestamp.isoformat(),
-                    "open": c.open,
-                    "high": c.high,
-                    "low": c.low,
-                    "close": c.close,
-                    "volume": c.volume,
-                }
-                for c in candles
-            ]
-        }
-    except Exception as e:
-        logger.error(f"OHLCV 조회 실패: {symbol}, {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    raise HTTPException(status_code=503, detail="마켓 게이트웨이 미초기화")
 
 
+# ══════════════════════════════════════════════════════════
+# Ticker
+# ══════════════════════════════════════════════════════════
 @router.get("/market/ticker/{symbol}")
-async def get_ticker(
-    symbol: str = Path(..., description="종목 코드"),
-) -> dict:
-    """
-    종목 시세 조회
+async def get_ticker(symbol: str = Path(..., description="종목 코드")) -> dict:
+    """종목 시세 조회. gateway → kiwoom_quotes → 캐시 폴백."""
+    gateway = app_state.market_gateway
+    if gateway:
+        try:
+            ticker = await gateway.get_ticker(symbol)
+            return {
+                "symbol": ticker.symbol,
+                "name": ticker.name or stock_names.resolve(symbol),
+                "price": ticker.price,
+                "volume": ticker.volume,
+                "change_pct": ticker.change_pct,
+                "timestamp": ticker.timestamp.isoformat(),
+                "source": "gateway",
+            }
+        except Exception as e:
+            logger.warning(f"Ticker 게이트웨이 실패, 폴백: {symbol}, {e}")
 
-    응답:
-    ```json
-    {
-      "symbol": "005930",
-      "name": "삼성전자",
-      "price": 75000,
-      "volume": 1000000,
-      "change_pct": 0.5,
-      "timestamp": "2026-04-11T10:00:00Z"
-    }
-    ```
-    """
-    try:
-        gateway = _get_gateway()
-        ticker = await gateway.get_ticker(symbol)
+    # kiwoom_quotes (ka10001)
+    quotes = _get_quotes()
+    if quotes:
+        info = await quotes.stock_info(symbol)
+        if info and info.get("price") is not None:
+            return {
+                "symbol": info["symbol"],
+                "name": info.get("name") or stock_names.resolve(symbol),
+                "price": info.get("price"),
+                "volume": None,
+                "change_pct": info.get("change_pct"),
+                "timestamp": datetime.now(_KST).isoformat(),
+                "source": "kiwoom",
+            }
 
+    # 캐시 폴백 (지연 시세)
+    q = cache_quotes.get_quote(symbol)
+    if q:
         return {
-            "symbol": ticker.symbol,
-            "name": ticker.name,
-            "price": ticker.price,
-            "volume": ticker.volume,
-            "change_pct": ticker.change_pct,
-            "timestamp": ticker.timestamp.isoformat(),
+            "symbol": q["symbol"],
+            "name": stock_names.resolve(symbol),
+            "price": q["price"],
+            "volume": q["volume"],
+            "change_pct": q["change_pct"],
+            "timestamp": _yyyymmdd_to_iso(q["date"]),
+            "as_of": q["as_of"],
+            "source": "cache",
         }
-    except Exception as e:
-        logger.error(f"Ticker 조회 실패: {symbol}, {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    raise HTTPException(status_code=404, detail=f"시세 없음: {symbol}")
 
 
+# ══════════════════════════════════════════════════════════
+# Order Book (+ ref / strength / ticks)
+# ══════════════════════════════════════════════════════════
 @router.get("/market/order-book/{symbol}")
-async def get_order_book(
-    symbol: str = Path(..., description="종목 코드"),
-) -> dict:
-    """
-    호가 조회
+async def get_order_book(symbol: str = Path(..., description="종목 코드")) -> dict:
+    """호가 조회. gateway 우선, 실패 시 kiwoom_quotes(ka10004).
 
-    응답:
-    ```json
-    {
-      "symbol": "005930",
-      "asks": [[75500, 1000], [75600, 2000]],
-      "bids": [[75000, 1000], [74900, 2000]],
-      "timestamp": "2026-04-11T10:00:00Z"
+    확장(옵션, 하위호환): ref(기준가/시가/고저/상하한/VI), strength(체결강도),
+    ticks(최근 체결). 조달 불가 항목은 null.
+    """
+    base = {
+        "symbol": symbol,
+        "asks": [],
+        "bids": [],
+        "timestamp": datetime.now(_KST).isoformat(),
+        "ref": None,
+        "strength": None,
+        "ticks": None,
     }
-    ```
-    """
-    try:
-        gateway = _get_gateway()
-        order_book = await gateway.get_order_book(symbol)
 
-        return {
-            "symbol": order_book.symbol,
-            "asks": order_book.asks,
-            "bids": order_book.bids,
-            "timestamp": order_book.timestamp.isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Order book 조회 실패: {symbol}, {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    gateway = app_state.market_gateway
+    if gateway:
+        try:
+            ob = await gateway.get_order_book(symbol)
+            base.update(
+                {
+                    "symbol": ob.symbol,
+                    "asks": ob.asks,
+                    "bids": ob.bids,
+                    "timestamp": ob.timestamp.isoformat(),
+                    "source": "gateway",
+                }
+            )
+        except Exception as e:
+            logger.warning(f"Order book 게이트웨이 실패, 폴백: {symbol}, {e}")
+
+    quotes = _get_quotes()
+    if not base["asks"] and not base["bids"] and quotes:
+        ob = await quotes.orderbook(symbol)
+        if ob:
+            base.update(
+                {
+                    "asks": ob["asks"],
+                    "bids": ob["bids"],
+                    "total_ask_qty": ob.get("total_ask_qty"),
+                    "total_bid_qty": ob.get("total_bid_qty"),
+                    "source": "kiwoom",
+                }
+            )
+
+    # ref / strength / ticks (kiwoom_quotes 있을 때만)
+    if quotes:
+        info = await quotes.stock_info(symbol)
+        if info:
+            base["ref"] = {
+                "base_price": info.get("base_price"),
+                "open": info.get("open"),
+                "high": info.get("high"),
+                "low": info.get("low"),
+                "upper_limit": info.get("upper_limit"),
+                "lower_limit": info.get("lower_limit"),
+                # ka10004/ka10001 응답에 예상 VI 발동가 필드가 없어 미제공
+                "vi_up_expected": None,
+                "vi_down_expected": None,
+            }
+        strength = await quotes.strength(symbol)
+        if strength:
+            base["strength"] = strength.get("value")
+        ticks = await quotes.ticks(symbol, limit=10)
+        if ticks:
+            base["ticks"] = [
+                {"time": t["time"], "price": t["price"], "qty": t["qty"]}
+                for t in ticks
+            ]
+
+    return base
 
 
-@router.get("/market/indices")
-async def get_indices() -> dict:
-    """
-    지수(KOSPI/KOSDAQ) 시세 조회 (티마 앱 벤치마킹 P1, PRD §5 시장종합·하단 지수 바).
-
-    현 MarketGateway 인터페이스는 개별 종목 ticker 만 제공하며 지수 심볼 조회를
-    지원하지 않는다. 지원 전까지는 items:[] + status:"unsupported" 로 정직하게 반환
-    (지수 값 날조 금지). gateway 미초기화 시에도 동일.
-
-    응답:
-    ```json
-    { "items": [], "status": "unsupported" }
-    ```
-
-    조사 결론 (2026-07-04, 티마 P1 운영 배선):
-      키움 native gateway(backend/core/gateway/kiwoom_native_*.py)에 랩핑된 TR 은
-      랭킹(ka10032/ka10027/ka10030)·차트(ka10080/ka10081)·계좌(kt00001)·주문
-      (kt10001/kt10002)·호가뿐이며, **업종/지수 시세 TR 은 랩핑돼 있지 않다**.
-      따라서 실데이터 활성화는 실거래 gateway 코드에 새 TR 을 추가해야 하므로
-      리스크가 있어 이번 범위에서 구현하지 않고 unsupported 를 유지한다.
-
-    활성화에 필요한 gateway 확장 (후속 BAR 과제):
-      1) 신규 fetcher(예: KiwoomNativeIndexFetcher)를 kiwoom_native_candles.py 패턴으로
-         추가 — 업종지수 TR(키움 OpenAPI 업종 계열: 업종현재가/업종지수 ka20xxx,
-         POST /api/dostk/... , body {inds_cd}) 조회. KOSPI=001, KOSDAQ=101 코드 매핑.
-         ※ 정확한 api-id 는 키움 REST '업종' 문서로 확정 필요(TR 코드 미검증 상태).
-      2) MarketGateway/base.py 에 get_index(code) 시그니처 추가 + app_state 주입.
-      3) 본 핸들러에서 gateway.get_index("001"|"101") 호출로 교체 후 status:"ok".
-    """
-    return {"items": [], "status": "unsupported"}
-
-
+# ══════════════════════════════════════════════════════════
+# Universe
+# ══════════════════════════════════════════════════════════
 @router.get("/market/universe")
 async def get_universe() -> dict:
-    """
-    전종목 목록 조회
-
-    응답:
-    ```json
-    {
-      "symbols": ["005930", "000660", "051910", ...],
-      "count": 100
-    }
-    ```
-    """
+    """전종목 목록 조회."""
+    gateway = app_state.market_gateway
+    if not gateway:
+        raise HTTPException(status_code=503, detail="마켓 게이트웨이 미초기화")
     try:
-        gateway = _get_gateway()
         universe = await gateway.get_universe()
-
-        return {
-            "symbols": universe,
-            "count": len(universe),
-        }
+        return {"symbols": universe, "count": len(universe)}
     except Exception as e:
         logger.error(f"Universe 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -277,4 +353,120 @@ async def get_nxt_quotes(
         "limit": limit,
         "items": [],
         "status": status,
+    }
+
+
+# ══════════════════════════════════════════════════════════
+# Indices — 코스피/코스닥 지수 (ka20001)
+# ══════════════════════════════════════════════════════════
+@router.get("/market/indices")
+async def get_indices() -> dict:
+    """코스피(0/001)·코스닥(1/101) 지수. 키/실패 시 unsupported."""
+    quotes = _get_quotes()
+    if not quotes:
+        return {"items": [], "status": "unsupported"}
+    targets = [
+        ("KOSPI", "코스피", "0", "001"),
+        ("KOSDAQ", "코스닥", "1", "101"),
+    ]
+    items = []
+    for code, name, mrkt_tp, inds_cd in targets:
+        idx = await quotes.index_price(mrkt_tp, inds_cd)
+        if idx and idx.get("value") is not None:
+            items.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "value": idx.get("value"),
+                    "change": idx.get("change"),
+                    "change_pct": idx.get("change_pct"),
+                }
+            )
+    if not items:
+        return {"items": [], "status": "unsupported"}
+    return {"items": items, "status": "ok"}
+
+
+# ══════════════════════════════════════════════════════════
+# Brokers — 당일 주요 거래원 (ka10040, 폴백 ka10002)
+# ══════════════════════════════════════════════════════════
+@router.get("/market/brokers/{symbol}")
+async def get_brokers(symbol: str = Path(..., description="종목 코드")) -> dict:
+    quotes = _get_quotes()
+    if not quotes:
+        return {"sell": [], "buy": [], "foreign_sell": None,
+                "foreign_buy": None, "status": "unsupported"}
+    data = await quotes.brokers(symbol)
+    if not data:
+        data = await quotes.brokers_basic(symbol)
+    if not data:
+        return {"sell": [], "buy": [], "foreign_sell": None,
+                "foreign_buy": None, "status": "no_data"}
+    return {
+        "sell": data.get("sell", []),
+        "buy": data.get("buy", []),
+        "foreign_sell": data.get("foreign_sell"),
+        "foreign_buy": data.get("foreign_buy"),
+        "status": "ok",
+    }
+
+
+# ══════════════════════════════════════════════════════════
+# Program — 프로그램 매매 추이 (ka90008 시간별 / ka90013 일별)
+# ══════════════════════════════════════════════════════════
+@router.get("/market/program/{symbol}")
+async def get_program(
+    symbol: str = Path(..., description="종목 코드"),
+    mode: str = Query("time", description="time|daily"),
+    date: str = Query("", description="YYYYMMDD (미지정 시 오늘)"),
+) -> dict:
+    quotes = _get_quotes()
+    if not quotes:
+        return {"items": [], "status": "unsupported"}
+    d = date.strip() or _today_kst()
+    if mode == "daily":
+        rows = await quotes.program_daily(symbol, date=date.strip())
+    else:
+        rows = await quotes.program_time(symbol, date=d)
+    if rows is None:
+        return {"items": [], "status": "no_data"}
+    return {"items": rows, "mode": mode, "status": "ok"}
+
+
+# ══════════════════════════════════════════════════════════
+# Investors — 시장별 투자자 순매수 (ka10066 마감후 / ka10063 장중)
+# 종목별 리스트를 시장 단위로 합산하여 개인/외국인/기관 순매수(억원) 산출.
+# ══════════════════════════════════════════════════════════
+def _sum_after_market(rows: list) -> dict:
+    """ka10066 종목별 리스트 → 개인/외국인/기관 순매수 합(백만원)."""
+    from backend.core.gateway.kiwoom_quotes import _num
+
+    ind = frgn = orgn = 0.0
+    for r in rows:
+        ind += _num(r.get("ind_invsr"))
+        frgn += _num(r.get("frgnr_invsr"))
+        orgn += _num(r.get("orgn"))
+    # 백만원 → 억원 (1억 = 100백만)
+    return {
+        "individual": round(ind / 100.0, 1),
+        "foreign": round(frgn / 100.0, 1),
+        "institution": round(orgn / 100.0, 1),
+    }
+
+
+@router.get("/market/investors")
+async def get_investors() -> dict:
+    """코스피/코스닥 투자자별 순매수(억원). 마감후 ka10066 종목합산."""
+    quotes = _get_quotes()
+    if not quotes:
+        return {"kospi": None, "kosdaq": None, "status": "unsupported"}
+    kospi_rows = await quotes.investors_after("001")
+    kosdaq_rows = await quotes.investors_after("101")
+    if kospi_rows is None and kosdaq_rows is None:
+        return {"kospi": None, "kosdaq": None, "status": "no_data"}
+    return {
+        "kospi": _sum_after_market(kospi_rows) if kospi_rows else None,
+        "kosdaq": _sum_after_market(kosdaq_rows) if kosdaq_rows else None,
+        "unit": "억원",
+        "status": "ok",
     }
