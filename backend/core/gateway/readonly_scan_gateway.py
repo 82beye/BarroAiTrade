@@ -170,9 +170,15 @@ class ReadOnlyScanGateway(MarketGateway):
         q = cache_quotes.get_quote(symbol)
         if q is None:
             raise ValueError(f"시세 조회 불가(키 없음·캐시 없음): {symbol}")
+        try:
+            from backend.core.market_data import stock_names
+
+            name = stock_names.resolve(symbol)
+        except Exception:
+            name = symbol
         return Ticker(
             symbol=symbol,
-            name=symbol,
+            name=name,
             price=float(q["price"]),
             volume=float(q.get("volume") or 0.0),
             change_pct=float(q.get("change_pct") or 0.0),
