@@ -87,6 +87,21 @@ async def get_theme_stocks(theme_id: int) -> list[ThemeStockOut]:
     return stocks
 
 
+@router.post("/api/themes/refresh")
+async def refresh_themes() -> dict:
+    """큐레이션 시드(theme_map.json) → themes/theme_stocks 재적재 + 시세 스코어 갱신.
+
+    테마 그룹 자체는 시드 고정, 종목별 스코어(등락률)만 캐시/거래소 시세로 갱신한다
+    (뉴스 실시간 재분류 아님 — theme_refresher 참조). 읽기 전용 시세 조회 + 테마 테이블
+    쓰기만 수행하므로 주문 경로와 무관, 게이트 불필요(상시 호출 가능).
+
+    반환: {theme_count, symbol_count, status("ok"|"no_seed"), refreshed_at(ISO8601)}.
+    """
+    from backend.core.themes.theme_refresher import refresh_themes_from_seed
+
+    return await refresh_themes_from_seed()
+
+
 # ── tima P1: 시간대별 테마 스냅숏(타임라인) ──────────────────────────────────
 
 

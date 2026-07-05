@@ -95,6 +95,19 @@ def start_scheduler() -> AsyncIOScheduler:
     except Exception as e:
         logger.warning("OHLCV 동기화 잡 등록 실패 (선택적 기능): %s", e)
 
+    # 테마 라이브 갱신 잡 (5분, 09~15시 KST 평일) — BARRO_THEME_LIVE_REFRESH_ENABLED=1
+    # 일 때만 등록(기본 OFF). 캐시/거래소 시세만 조회하는 데이터 갱신이라 실거래 경로 무영향.
+    try:
+        from backend.core.scheduler.theme_live_refresh_jobs import (
+            register_theme_live_refresh_jobs,
+        )
+
+        _theme_live_ids = register_theme_live_refresh_jobs(_scheduler)
+        if _theme_live_ids:
+            logger.info("테마 라이브 갱신 잡 등록: %s", _theme_live_ids)
+    except Exception as e:
+        logger.warning("테마 라이브 갱신 잡 등록 실패 (선택적 기능): %s", e)
+
     _scheduler.start()
     logger.info("스케줄러 시작: 매일 18:00 KST 일일 리포트 전송")
     return _scheduler

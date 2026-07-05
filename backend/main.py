@@ -36,6 +36,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         _log.warning("DB 초기화 실패 (인메모리 모드로 동작): %s", e)
 
+    # 테마 보드 초기 시드 (themes 가 비어있을 때 1회) — 큐레이션 시드 기반.
+    # 읽기 전용 시세 + 테마 테이블 쓰기만 수행(주문 무관). 실패해도 기동을 막지 않는다.
+    try:
+        from sqlalchemy import text
+        from backend.db.database import get_db
+
+        async with get_db() as db:
+            if db is not None:
+                res = await db.execute(text("SELECT COUNT(*) AS c FROM themes"))
+                if (res.mappings().first() or {}).get("c", 0) == 0:
+                    from backend.core.themes.theme_refresher import refresh_themes_from_seed
+
+                    result = await refresh_themes_from_seed()
+                    _log.info("테마 초기 시드 완료: %s", result)
+    except Exception as e:
+        _log.warning("테마 초기 시드 실패 (선택적 기능): %s", e)
+
     # RiskEngine 및 ComplianceService 초기화
     app_state.risk_engine = RiskEngine(limits=RiskLimits())
     app_state.compliance = ComplianceService()
