@@ -50,7 +50,10 @@ def _get_gateway():
 
 @router.get("/accounts/balance")
 async def get_balance() -> dict:
-    """계좌 잔고 조회 (키움 REST API 실시간)."""
+    """계좌 잔고 조회 (키움 REST API 실시간). BARRO_ACCOUNT_DEMO=1 시 샘플 반환."""
+    from backend.api.routes._account_demo import account_demo_on, sample_balance
+    if account_demo_on():
+        return sample_balance()
     try:
         fetcher = _build_kiwoom_fetcher()
         balance = await fetcher.fetch_balance()
@@ -119,6 +122,10 @@ async def get_positions(
     }
     ```
     """
+    from backend.api.routes._account_demo import account_demo_on, sample_positions
+    if account_demo_on():
+        return sample_positions()
+
     from backend.core.journal.active_positions import ActivePositionStore
     active = ActivePositionStore(_DATA_DIR / "active_positions.json").load_all()
 

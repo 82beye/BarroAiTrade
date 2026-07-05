@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/api/themes", response_model=list[ThemeOut])
-async def list_themes() -> list[ThemeOut]:
+async def fetch_themes() -> list[ThemeOut]:
+    """전체 테마 목록 (DB 미가용 시 빈 리스트). 스냅숏·라우트 공용."""
     async with get_db() as db:
         if db is None:
             return []
@@ -34,18 +34,22 @@ async def list_themes() -> list[ThemeOut]:
         ]
 
 
-@router.get("/api/themes/{theme_id}/stocks", response_model=list[ThemeStockOut])
-async def get_theme_stocks(theme_id: int) -> list[ThemeStockOut]:
+async def fetch_theme_stocks(
+    theme_id: int, *, enrich: bool = True
+) -> Optional[list[ThemeStockOut]]:
+    """테마 종목 리스트 (score desc). 테마 없으면 None, DB 미가용 시 빈 리스트.
+
+    스냅숏·라우트 공용. enrich=True 시 gateway 시세 보강(개별 실패는 None 유지).
+    """
     async with get_db() as db:
         if db is None:
             return []
-        # theme 존재 확인
         res = await db.execute(
             text("SELECT id, name FROM themes WHERE id = :id"), {"id": theme_id}
         )
         theme = res.mappings().first()
         if not theme:
-            raise HTTPException(status_code=404, detail="theme not found")
+            return None
         res2 = await db.execute(
             text(
                 "SELECT symbol, score FROM theme_stocks WHERE theme_id = :id "
@@ -64,16 +68,159 @@ async def get_theme_stocks(theme_id: int) -> list[ThemeStockOut]:
         )
         for r in rows
     ]
-
-    # tima P0: gateway 가용 시 ticker 시세 보강 (동시성, 개별 실패는 None 유지).
-    await _enrich_theme_stocks(stocks)
+    if enrich:
+        await _enrich_theme_stocks(stocks)
     return stocks
 
 
+@router.get("/api/themes", response_model=list[ThemeOut])
+async def list_themes() -> list[ThemeOut]:
+    return await fetch_themes()
+
+
+@router.get("/api/themes/{theme_id}/stocks", response_model=list[ThemeStockOut])
+async def get_theme_stocks(theme_id: int) -> list[ThemeStockOut]:
+    # tima P0: gateway 가용 시 ticker 시세 보강 (동시성, 개별 실패는 None 유지).
+    stocks = await fetch_theme_stocks(theme_id, enrich=True)
+    if stocks is None:
+        raise HTTPException(status_code=404, detail="theme not found")
+    return stocks
+
+
+@router.post("/api/themes/refresh")
+async def refresh_themes() -> dict:
+    """큐레이션 시드(theme_map.json) → themes/theme_stocks 재적재 + 시세 스코어 갱신.
+
+    테마 그룹 자체는 시드 고정, 종목별 스코어(등락률)만 캐시/거래소 시세로 갱신한다
+    (뉴스 실시간 재분류 아님 — theme_refresher 참조). 읽기 전용 시세 조회 + 테마 테이블
+    쓰기만 수행하므로 주문 경로와 무관, 게이트 불필요(상시 호출 가능).
+
+    반환: {theme_count, symbol_count, status("ok"|"no_seed"), refreshed_at(ISO8601)}.
+    """
+    from backend.core.themes.theme_refresher import refresh_themes_from_seed
+
+    return await refresh_themes_from_seed()
+
+
+# ── tima P1: 시간대별 테마 스냅숏(타임라인) ──────────────────────────────────
+
+
+@router.get("/api/themes/snapshots")
+async def theme_snapshots(
+    date: Optional[str] = Query(None, description="YYYY-MM-DD (기본 오늘 UTC)"),
+    slot: Optional[str] = Query(None, description="10:00 | 12:30 | 15:35"),
+) -> dict:
+    """테마 스냅숏 조회.
+
+    - slot 미지정: 해당 날짜의 가용 slot 목록 {date, slots:[...]}.
+    - slot 지정  : 해당 스냅숏 {date, slot, captured_at, themes:[...]}.
+                   slot 이 유효범위 밖이면 422, 파일 없으면 status=no_data.
+    """
+    from backend.core.themes.snapshot import (
+        VALID_SLOTS,
+        is_valid_slot,
+        list_available_slots,
+        load_theme_snapshot,
+    )
+
+    date_str = date or datetime.now(timezone.utc).date().isoformat()
+
+    if slot is None:
+        return {"date": date_str, "slots": list_available_slots(date_str)}
+
+    if not is_valid_slot(slot):
+        raise HTTPException(
+            status_code=422, detail=f"invalid slot: {slot} (허용: {list(VALID_SLOTS)})"
+        )
+
+    snap = load_theme_snapshot(date_str, slot)
+    if snap is None:
+        return {"date": date_str, "slot": slot, "status": "no_data"}
+    return snap
+
+
+@router.post("/api/themes/snapshots/capture")
+async def capture_snapshot(
+    slot: str = Query(..., description="10:00 | 12:30 | 15:35"),
+) -> dict:
+    """현재 테마 보드를 지정 slot 으로 동결 저장.
+
+    gateway 미초기화 시 시세 null 인 채 저장(날조 금지). 운영 데몬의 10:00/12:30/15:35
+    스케줄 배선은 후속 — 현재는 수동/관리 트리거용.
+    """
+    from backend.core.themes.snapshot import capture_theme_snapshot
+
+    try:
+        snap = await capture_theme_snapshot(slot)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {
+        "date": snap["date"],
+        "slot": snap["slot"],
+        "captured_at": snap["captured_at"],
+        "theme_count": len(snap["themes"]),
+        "status": "ok",
+    }
+
+
+# ── tima P1: 종목 → 테마 역조회 ──────────────────────────────────────────────
+
+
+@router.get("/api/stocks/{symbol}/themes")
+async def stock_themes(symbol: str) -> dict:
+    """종목이 속한 테마 목록 (score desc). theme_stocks JOIN themes."""
+    async with get_db() as db:
+        if db is None:
+            return {"symbol": symbol, "themes": []}
+        res = await db.execute(
+            text(
+                "SELECT t.id, t.name, t.description, ts.score "
+                "FROM themes t JOIN theme_stocks ts ON ts.theme_id = t.id "
+                "WHERE ts.symbol = :symbol "
+                "ORDER BY ts.score DESC"
+            ),
+            {"symbol": symbol},
+        )
+        themes = [
+            {
+                "id": int(r["id"]),
+                "name": r["name"],
+                "description": r["description"] or "",
+                "score": float(r["score"]),
+            }
+            for r in res.mappings().all()
+        ]
+    return {"symbol": symbol, "themes": themes}
+
+
 async def _enrich_theme_stocks(stocks: list[ThemeStockOut]) -> None:
-    """theme_stocks 시세 보강 (in-place). gateway 미초기화 시 no-op (하위호환)."""
+    """theme_stocks 시세 보강 (in-place).
+
+    조달 우선순위: market_gateway → ohlcv 캐시(cache_quotes, 지연 시세).
+    종목명은 stock_names 마스터로 항상 시도. 둘 다 없으면 기존 no-op (하위호환).
+    """
+    if not stocks:
+        return
+
+    from backend.core.market_data import cache_quotes, stock_names
+
+    for stock in stocks[:_THEME_QUOTE_CAP]:
+        resolved = stock_names.resolve(stock.symbol)
+        if resolved and resolved != stock.symbol:
+            stock.name = resolved
+
     gateway = app_state.market_gateway
-    if gateway is None or not stocks:
+    if gateway is None:
+        for stock in stocks[:_THEME_QUOTE_CAP]:
+            q = cache_quotes.get_quote(stock.symbol)
+            if not q:
+                continue
+            stock.price = q.get("price")
+            stock.change_pct = q.get("change_pct")
+            stock.day_open = q.get("day_open")
+            stock.day_high = q.get("day_high")
+            stock.day_low = q.get("day_low")
+            stock.value_traded = q.get("value_traded")
         return
 
     async def _fill(stock: ThemeStockOut) -> None:

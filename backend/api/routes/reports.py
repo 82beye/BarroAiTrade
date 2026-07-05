@@ -187,7 +187,10 @@ def _enrich_from_report(trades: list[dict], report_path: Path) -> None:
 async def get_realized_pnl(
     days: int = Query(30, ge=1, le=90, description="조회 일수"),
 ) -> dict:
-    """키움 REST API ka10074 일자별 실현손익 합산 조회."""
+    """키움 REST API ka10074 일자별 실현손익 합산 조회. BARRO_ACCOUNT_DEMO=1 시 샘플."""
+    from backend.api.routes._account_demo import account_demo_on, sample_realized_pnl
+    if account_demo_on():
+        return sample_realized_pnl(days)
     import os
     from pydantic import SecretStr
     try:
@@ -241,7 +244,10 @@ async def get_realized_pnl(
 async def get_balance_history(
     days: int = Query(30, ge=1, le=365, description="조회 일수"),
 ) -> dict:
-    """잔고(예수금+평가금) 추이 조회."""
+    """잔고(예수금+평가금) 추이 조회. BARRO_ACCOUNT_DEMO=1 시 샘플."""
+    from backend.api.routes._account_demo import account_demo_on, sample_balance_history
+    if account_demo_on():
+        return sample_balance_history(days)
     history_path = _DATA_DIR / "balance_history.json"
     if not history_path.exists():
         return {"points": [], "days": days}

@@ -238,6 +238,53 @@ class TestChartLevels:
         assert [lv["label"] for lv in data["levels"]] == ["J1", "J2", "J3"]
 
 
+# ── tima P1: (D+N) d_offset 부여 ──────────────────────────────────────────────
+
+class TestDOffset:
+    def _write(self, refined, signal_type, detected_at):
+        refined.write_text(
+            json.dumps(
+                {
+                    "signals": [
+                        {
+                            "symbol": "005930", "name": "삼성전자", "price": 70000,
+                            "signal_type": signal_type, "score": 7.0, "reason": "x",
+                            "timestamp": detected_at,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_gold_zone_levels_get_d_offset(self, client):
+        c, refined = client
+        # 포착일 = 오늘 → d_offset == 1 (당일 D+1)
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).date().isoformat() + "T09:00:00+09:00"
+        self._write(refined, "gold_zone", today)
+        r = c.get("/api/screener/gold_zone")
+        levels = r.json()["items"][0]["levels"]
+        assert all(lv["d_offset"] == 1 for lv in levels)
+        # reached_at 은 산출 근거 없어 None 유지
+        assert all(lv["reached_at"] is None for lv in levels)
+
+    def test_swing_38_gets_d_offset(self, client):
+        c, refined = client
+        self._write(refined, "swing_38", "2026-07-01T09:00:00+09:00")
+        r = c.get("/api/screener/swing_38")
+        levels = r.json()["items"][0]["levels"]
+        # 2026-07-01 포착 → 오늘까지 경과 + 1 (>= 1 보장)
+        assert all(isinstance(lv["d_offset"], int) and lv["d_offset"] >= 1 for lv in levels)
+
+    def test_f_zone_has_no_d_offset(self, client):
+        c, refined = client
+        self._write(refined, "f_zone", "2026-07-01T09:00:00+09:00")
+        r = c.get("/api/screener/f_zone")
+        levels = r.json()["items"][0]["levels"]
+        assert all(lv["d_offset"] is None for lv in levels)
+
+
 # ── ThemeStockOut 하위호환 (gateway 없음 경로) ────────────────────────────────
 
 class TestThemeStockBackwardCompat:
@@ -260,3 +307,80 @@ class TestThemeStockBackwardCompat:
         stocks = [ThemeStockOut(symbol="005930", score=0.9, theme_id=1)]
         await tcn._enrich_theme_stocks(stocks)
         assert stocks[0].price is None
+
+
+class TestLiveScanFallback:
+    """refined_signals.json 부재 시 온디맨드 라이브 스캔(ReadOnlyScanGateway) 폴백.
+
+    API 서버 프로세스는 app_state.market_gateway 가 항상 None 이라(오케스트레이터는
+    별도 라이브 데몬) 예전에는 symbols 미지정 + 파일 없음 → 무조건 no_data 였다.
+    지금은 기본 유니버스(theme_map.json)로 온디맨드 스캔을 1차 시도한다.
+    """
+
+    def test_falls_back_to_universe_scan_when_file_missing(self, client, monkeypatch):
+        c, _ = client
+
+        async def fake_get_universe():
+            return ["005930", "000660"]
+
+        async def fake_scan_symbols(strategy, symbols):
+            assert symbols == ["005930", "000660"]
+            return [
+                {
+                    "symbol": "005930", "name": "삼성전자", "price": 71900.0,
+                    "signal_type": strategy, "score": 8.0, "reason": "live scan",
+                    "timestamp": "2026-07-06T09:00:00+09:00",
+                }
+            ]
+
+        fake_gw = type("FakeGW", (), {"get_universe": staticmethod(fake_get_universe)})()
+        monkeypatch.setattr(screener_module, "_get_readonly_gateway", lambda: fake_gw)
+        monkeypatch.setattr(screener_module, "_scan_symbols", fake_scan_symbols)
+
+        r = c.get("/api/screener/f_zone")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "ok"
+        assert data["count"] == 1
+        assert data["items"][0]["symbol"] == "005930"
+
+    def test_no_data_when_universe_scan_also_empty(self, client, monkeypatch):
+        c, _ = client
+
+        async def fake_get_universe():
+            return ["005930"]
+
+        async def fake_scan_symbols(strategy, symbols):
+            return []
+
+        fake_gw = type("FakeGW", (), {"get_universe": staticmethod(fake_get_universe)})()
+        monkeypatch.setattr(screener_module, "_get_readonly_gateway", lambda: fake_gw)
+        monkeypatch.setattr(screener_module, "_scan_symbols", fake_scan_symbols)
+
+        r = c.get("/api/screener/f_zone")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "no_data"
+        assert data["count"] == 0
+
+    def test_refined_file_present_skips_universe_scan(self, client, monkeypatch):
+        """refined_signals.json 에 해당 전략 신호가 있으면 유니버스 스캔을 타지 않는다."""
+        c, refined = client
+        refined.write_text(
+            json.dumps({"signals": [
+                {"symbol": "005930", "name": "삼성전자", "price": 71900.0,
+                 "signal_type": "f_zone", "score": 8.0, "reason": "daemon",
+                 "timestamp": "2026-07-06T09:00:00+09:00"},
+            ]}),
+            encoding="utf-8",
+        )
+
+        async def boom(strategy, symbols):
+            raise AssertionError("refined 데이터 있으면 유니버스 스캔(_scan_symbols) 호출 안 해야 함")
+
+        monkeypatch.setattr(screener_module, "_scan_symbols", boom)
+
+        r = c.get("/api/screener/f_zone")
+        assert r.status_code == 200
+        assert r.json()["status"] == "ok"
+        assert r.json()["count"] == 1

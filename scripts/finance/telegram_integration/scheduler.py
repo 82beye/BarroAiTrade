@@ -73,6 +73,41 @@ def start_scheduler() -> AsyncIOScheduler:
         misfire_grace_time=300,  # 5분 내 실행 지연 허용
     )
 
+    # 테마 스냅숏 잡 (10:00/12:30/15:35 KST) — BARRO_THEME_SNAPSHOT_ENABLED=1 일 때만
+    # 등록(기본 OFF). 관측용 add-on 이며 실패해도 라이브 경로 무영향(선택적 기능).
+    try:
+        from backend.core.scheduler.theme_snapshot_jobs import register_theme_snapshot_jobs
+
+        _theme_ids = register_theme_snapshot_jobs(_scheduler)
+        if _theme_ids:
+            logger.info("테마 스냅숏 잡 등록: %s", _theme_ids)
+    except Exception as e:
+        logger.warning("테마 스냅숏 잡 등록 실패 (선택적 기능): %s", e)
+
+    # OHLCV 일봉 캐시 동기화 잡 (15:40 KST) — BARRO_OHLCV_SYNC_ENABLED=1 일 때만
+    # 등록(기본 OFF). 키움 키 필요, 읽기 전용 캔들 갱신이라 실거래 경로 무영향.
+    try:
+        from backend.core.scheduler.ohlcv_sync_jobs import register_ohlcv_sync_jobs
+
+        _ohlcv_ids = register_ohlcv_sync_jobs(_scheduler)
+        if _ohlcv_ids:
+            logger.info("OHLCV 동기화 잡 등록: %s", _ohlcv_ids)
+    except Exception as e:
+        logger.warning("OHLCV 동기화 잡 등록 실패 (선택적 기능): %s", e)
+
+    # 테마 라이브 갱신 잡 (5분, 09~15시 KST 평일) — BARRO_THEME_LIVE_REFRESH_ENABLED=1
+    # 일 때만 등록(기본 OFF). 캐시/거래소 시세만 조회하는 데이터 갱신이라 실거래 경로 무영향.
+    try:
+        from backend.core.scheduler.theme_live_refresh_jobs import (
+            register_theme_live_refresh_jobs,
+        )
+
+        _theme_live_ids = register_theme_live_refresh_jobs(_scheduler)
+        if _theme_live_ids:
+            logger.info("테마 라이브 갱신 잡 등록: %s", _theme_live_ids)
+    except Exception as e:
+        logger.warning("테마 라이브 갱신 잡 등록 실패 (선택적 기능): %s", e)
+
     _scheduler.start()
     logger.info("스케줄러 시작: 매일 18:00 KST 일일 리포트 전송")
     return _scheduler

@@ -36,6 +36,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         _log.warning("DB 초기화 실패 (인메모리 모드로 동작): %s", e)
 
+    # 테마 보드 초기 시드 (themes 가 비어있을 때 1회) — 큐레이션 시드 기반.
+    # 읽기 전용 시세 + 테마 테이블 쓰기만 수행(주문 무관). 실패해도 기동을 막지 않는다.
+    try:
+        from sqlalchemy import text
+        from backend.db.database import get_db
+
+        async with get_db() as db:
+            if db is not None:
+                res = await db.execute(text("SELECT COUNT(*) AS c FROM themes"))
+                if (res.mappings().first() or {}).get("c", 0) == 0:
+                    from backend.core.themes.theme_refresher import refresh_themes_from_seed
+
+                    result = await refresh_themes_from_seed()
+                    _log.info("테마 초기 시드 완료: %s", result)
+    except Exception as e:
+        _log.warning("테마 초기 시드 실패 (선택적 기능): %s", e)
+
     # RiskEngine 및 ComplianceService 초기화
     app_state.risk_engine = RiskEngine(limits=RiskLimits())
     app_state.compliance = ComplianceService()
@@ -88,6 +105,9 @@ from backend.api.routes.logs import router as logs_router
 from backend.api.routes.themes_calendar_news import router as tcn_router  # BAR-104
 from backend.api.routes.admin import router as admin_router  # BAR-109
 from backend.api.routes.screener import router as screener_router  # tima P0
+from backend.api.routes.alerts import router as alerts_router  # tima P1
+from backend.api.routes.search import router as search_router  # tima P2
+from backend.api.routes.stocks import router as stocks_router  # 티마 종목상세
 
 app.include_router(signals_router, prefix="/api")
 app.include_router(risk_router, prefix="/api")
@@ -99,10 +119,14 @@ app.include_router(config_router, prefix="/api")
 app.include_router(reports_router, prefix="/api")
 app.include_router(logs_router, prefix="/api")
 app.include_router(screener_router, prefix="/api")  # tima P0: 스크리너 + 차트 기준선
+app.include_router(alerts_router, prefix="/api")  # tima P1: 알림내역 + Push 설정
+app.include_router(search_router, prefix="/api")  # tima P2: 통합검색 (종목/테마)
 # themes/calendar/news 라우트는 경로에 /api/ 포함 — prefix 없이 등록
 app.include_router(tcn_router)
 # admin 라우터는 APIRouter(prefix="/api/admin") 내장 — 추가 prefix 불필요
 app.include_router(admin_router)
+# stocks 라우트는 경로에 /api/ 포함 — prefix 없이 등록
+app.include_router(stocks_router)
 # BAR-43: /metrics (Prometheus exposition) — 단, prefix 없음 (Prometheus 표준 경로)
 app.include_router(metrics_router)
 
