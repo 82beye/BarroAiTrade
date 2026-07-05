@@ -39,6 +39,24 @@ router = APIRouter()
 # (D+N) 상대일 표기 대상 전략 (골드존·38스윙 — PRD §4.2)
 _D_OFFSET_STRATEGIES = ("gold_zone", "swing_38")
 
+# 온디맨드 스캔 시 심볼 미지정(기본 유니버스) 시 상한 — 동시 요청 폭주 방지(읽기전용,
+# kiwoom REST 429 백오프는 KiwoomQuotes 내부에서 별도 처리하나 상한으로 1차 방어).
+_DEFAULT_SCAN_LIMIT = 30
+
+# app_state.market_gateway 가 None(API 서버 프로세스는 항상 그렇다 — 오케스트레이터는
+# 별도 라이브 데몬)일 때의 읽기전용 폴백 게이트웨이. 지연 생성(모듈 임포트 시점에
+# 키움 키를 요구하지 않는다).
+_readonly_gateway = None
+
+
+def _get_readonly_gateway():
+    global _readonly_gateway
+    if _readonly_gateway is None:
+        from backend.core.gateway.readonly_scan_gateway import ReadOnlyScanGateway
+
+        _readonly_gateway = ReadOnlyScanGateway()
+    return _readonly_gateway
+
 
 def _parse_detected_date(detected_at: Optional[str]) -> Optional[date]:
     """detected_at(ISO8601)의 날짜 부분만 추출 (파싱 실패 시 None)."""
@@ -99,13 +117,13 @@ def _load_refined() -> Optional[dict]:
 async def _scan_symbols(strategy: str, symbols: List[str]) -> List[dict]:
     """SignalScanner 온디맨드 스캔 → 해당 strategy signal dict 리스트.
 
-    gateway 미초기화 시 빈 리스트. 실패는 상위에서 처리.
+    gateway(오케스트레이터 라이브 데몬) 가 있으면 그것을, 없으면(API 서버는 항상
+    없다) 읽기 전용 ReadOnlyScanGateway(실거래소 kiwoom_quotes → OHLCV 캐시) 로
+    폴백해 실제로 스캔이 동작하게 한다. 두 경우 모두 조회 전용 — 주문 경로 무관.
     """
     from backend.core.scanner.signal_scanner import SignalScanner
 
-    gateway = app_state.market_gateway
-    if gateway is None:
-        return []
+    gateway = app_state.market_gateway or _get_readonly_gateway()
 
     # 요청 전략만 활성 (나머지 4종 비활성) — 온디맨드 비용 최소화.
     enabled = {k: (k == strategy) for k in SUPPORTED_STRATEGIES}
@@ -126,11 +144,10 @@ async def _scan_symbols(strategy: str, symbols: List[str]) -> List[dict]:
 async def _ticker_enrich(symbol: str) -> dict:
     """gateway ticker 조회로 change_pct / value_traded / price 보강.
 
-    실패 시 빈 dict (전체 요청이 죽지 않게 개별 try/except).
+    실패 시 빈 dict (전체 요청이 죽지 않게 개별 try/except). gateway 없으면
+    읽기 전용 폴백(ReadOnlyScanGateway)으로 시도.
     """
-    gateway = app_state.market_gateway
-    if gateway is None:
-        return {}
+    gateway = app_state.market_gateway or _get_readonly_gateway()
     try:
         ticker = await gateway.get_ticker(symbol)
         value_traded = None
@@ -192,8 +209,10 @@ async def screen_strategy(
 ) -> ScreenerResponse:
     """전략별 종목 스크리닝 — 기준가 사다리 부착.
 
-    - symbols 지정: SignalScanner 온디맨드 스캔
-    - symbols 미지정: refined_signals.json 필터 (파일 없으면 status=no_data)
+    조회 순서(symbols 미지정 시): refined_signals.json(운영 데몬, 있으면 최우선) →
+    온디맨드 라이브 스캔(기본 유니버스 = theme_map.json 큐레이션 종목, 상한
+    `_DEFAULT_SCAN_LIMIT`) → 그래도 없으면 status=no_data.
+    symbols 지정 시: 항상 온디맨드 스캔(지정 종목만).
     """
     if strategy not in SUPPORTED_STRATEGIES:
         raise HTTPException(status_code=404, detail=f"지원하지 않는 전략: {strategy}")
@@ -209,22 +228,30 @@ async def screen_strategy(
         except Exception as e:
             logger.error("스크리너 온디맨드 스캔 실패 (%s): %s", strategy, e)
             raise HTTPException(status_code=500, detail=str(e))
-        if app_state.market_gateway is None:
-            status = "not_ready"
     else:
         data = _load_refined()
-        if data is None:
-            return ScreenerResponse(
-                strategy=strategy,
-                generated_at=generated_at,
-                count=0,
-                items=[],
-                status="no_data",
-            )
-        raw_signals = [
-            s for s in data.get("signals", [])
-            if s.get("signal_type") == strategy
-        ]
+        if data is not None:
+            raw_signals = [
+                s for s in data.get("signals", [])
+                if s.get("signal_type") == strategy
+            ]
+        if not raw_signals:
+            # 운영 데몬 산출물이 없거나(개발 환경) 해당 전략 신호가 0건 —
+            # 기본 유니버스(theme_map 큐레이션) 온디맨드 라이브 스캔으로 폴백.
+            try:
+                universe = await _get_readonly_gateway().get_universe()
+                raw_signals = await _scan_symbols(strategy, universe[:_DEFAULT_SCAN_LIMIT])
+            except Exception as e:
+                logger.warning("스크리너 기본유니버스 스캔 실패 (%s): %s", strategy, e)
+                raw_signals = []
+            if not raw_signals:
+                return ScreenerResponse(
+                    strategy=strategy,
+                    generated_at=generated_at,
+                    count=0,
+                    items=[],
+                    status="no_data",
+                )
 
     raw_signals = raw_signals[:limit]
     items = [await _build_item(strategy, s) for s in raw_signals]
@@ -257,8 +284,8 @@ async def chart_levels(
                 sig = s
                 break
 
-    # 2. 없으면 온디맨드 스캔 1회 (4종 전부)
-    if sig is None and app_state.market_gateway is not None:
+    # 2. 없으면 온디맨드 스캔 1회 (4종 전부) — gateway 없어도 읽기전용 폴백으로 동작.
+    if sig is None:
         for strat in SUPPORTED_STRATEGIES:
             try:
                 found = await _scan_symbols(strat, [symbol])

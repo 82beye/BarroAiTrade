@@ -307,3 +307,80 @@ class TestThemeStockBackwardCompat:
         stocks = [ThemeStockOut(symbol="005930", score=0.9, theme_id=1)]
         await tcn._enrich_theme_stocks(stocks)
         assert stocks[0].price is None
+
+
+class TestLiveScanFallback:
+    """refined_signals.json 부재 시 온디맨드 라이브 스캔(ReadOnlyScanGateway) 폴백.
+
+    API 서버 프로세스는 app_state.market_gateway 가 항상 None 이라(오케스트레이터는
+    별도 라이브 데몬) 예전에는 symbols 미지정 + 파일 없음 → 무조건 no_data 였다.
+    지금은 기본 유니버스(theme_map.json)로 온디맨드 스캔을 1차 시도한다.
+    """
+
+    def test_falls_back_to_universe_scan_when_file_missing(self, client, monkeypatch):
+        c, _ = client
+
+        async def fake_get_universe():
+            return ["005930", "000660"]
+
+        async def fake_scan_symbols(strategy, symbols):
+            assert symbols == ["005930", "000660"]
+            return [
+                {
+                    "symbol": "005930", "name": "삼성전자", "price": 71900.0,
+                    "signal_type": strategy, "score": 8.0, "reason": "live scan",
+                    "timestamp": "2026-07-06T09:00:00+09:00",
+                }
+            ]
+
+        fake_gw = type("FakeGW", (), {"get_universe": staticmethod(fake_get_universe)})()
+        monkeypatch.setattr(screener_module, "_get_readonly_gateway", lambda: fake_gw)
+        monkeypatch.setattr(screener_module, "_scan_symbols", fake_scan_symbols)
+
+        r = c.get("/api/screener/f_zone")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "ok"
+        assert data["count"] == 1
+        assert data["items"][0]["symbol"] == "005930"
+
+    def test_no_data_when_universe_scan_also_empty(self, client, monkeypatch):
+        c, _ = client
+
+        async def fake_get_universe():
+            return ["005930"]
+
+        async def fake_scan_symbols(strategy, symbols):
+            return []
+
+        fake_gw = type("FakeGW", (), {"get_universe": staticmethod(fake_get_universe)})()
+        monkeypatch.setattr(screener_module, "_get_readonly_gateway", lambda: fake_gw)
+        monkeypatch.setattr(screener_module, "_scan_symbols", fake_scan_symbols)
+
+        r = c.get("/api/screener/f_zone")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "no_data"
+        assert data["count"] == 0
+
+    def test_refined_file_present_skips_universe_scan(self, client, monkeypatch):
+        """refined_signals.json 에 해당 전략 신호가 있으면 유니버스 스캔을 타지 않는다."""
+        c, refined = client
+        refined.write_text(
+            json.dumps({"signals": [
+                {"symbol": "005930", "name": "삼성전자", "price": 71900.0,
+                 "signal_type": "f_zone", "score": 8.0, "reason": "daemon",
+                 "timestamp": "2026-07-06T09:00:00+09:00"},
+            ]}),
+            encoding="utf-8",
+        )
+
+        async def boom(strategy, symbols):
+            raise AssertionError("refined 데이터 있으면 유니버스 스캔(_scan_symbols) 호출 안 해야 함")
+
+        monkeypatch.setattr(screener_module, "_scan_symbols", boom)
+
+        r = c.get("/api/screener/f_zone")
+        assert r.status_code == 200
+        assert r.json()["status"] == "ok"
+        assert r.json()["count"] == 1
