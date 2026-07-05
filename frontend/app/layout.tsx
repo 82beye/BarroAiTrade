@@ -3,7 +3,7 @@ import { RealtimeProvider } from '@/components/layout/realtime-provider';
 import './globals.css';
 
 export const metadata = {
-  title: 'BARRO',
+  title: 'BarroTrade',
   description: 'AI 기반 멀티마켓 자동매매 플랫폼',
 };
 

@@ -133,6 +133,14 @@ export const api = {
   // 계좌 정보
   getBalance: () => apiClient.get('/api/accounts/balance'),
 
+  // 실현손익 리포트 (일자별 points + summary)
+  getRealizedPnl: (days = 30) =>
+    apiClient.get('/api/reports/realized-pnl', { params: { days } }),
+
+  // 자산 추이 (일자별 잔고 스냅숏)
+  getBalanceHistory: (days = 30) =>
+    apiClient.get('/api/reports/balance-history', { params: { days } }),
+
   // 주문
   placeOrder: (order: any) => apiClient.post('/api/trading/order', order),
 
@@ -450,4 +458,60 @@ export interface FundamentalResponse {
   per?: number | null;
   pbr?: number | null;
   status: string;
+}
+
+// ── 티마 계좌(account) 타입 — 잔고 / 보유종목 / 실현손익 / 자산추이 ──
+export interface AccountHolding {
+  symbol: string;
+  name?: string | null;
+  qty: number;
+  avg_buy_price: number;
+  cur_price: number;
+  eval_amount: number;
+  pnl: number;
+  pnl_rate: number;
+}
+
+export interface AccountBalance {
+  total_value: number; // 총 자산 (예수금+평가)
+  available_cash: number; // 예수금(=주문가능)
+  invested_value: number; // 총 매입금
+  eval_value: number; // 총 평가금
+  total_pnl: number; // 평가손익 (원)
+  total_pnl_pct: number; // 평가손익 (%)
+  position_count: number;
+  timestamp?: string | null;
+  holdings: AccountHolding[];
+}
+
+export interface BalanceHistoryPoint {
+  date: string; // YYYY-MM-DD
+  cash: number;
+  eval_total: number;
+  total: number;
+  position_count: number;
+}
+
+export interface BalanceHistoryResponse {
+  points: BalanceHistoryPoint[];
+  days: number;
+}
+
+export interface RealizedPnlPoint {
+  date: string; // YYYY-MM-DD
+  pnl: number; // 실현손익 (세전)
+  commission: number; // 수수료
+  tax: number; // 세금
+  net_pnl: number; // 순손익
+}
+
+export interface RealizedPnlResponse {
+  days: number;
+  points: RealizedPnlPoint[];
+  summary: {
+    total_pnl: number;
+    total_commission: number;
+    total_tax: number;
+    trading_days: number;
+  };
 }

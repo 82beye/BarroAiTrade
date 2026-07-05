@@ -27,10 +27,12 @@ function Icon({ d, fill = false }: { d: string; fill?: boolean }) {
   );
 }
 
-// 하단 5탭 (PRD §2.1): 마켓중심 · NXT · 마켓일정 · F존 · 시장종합 (알림은 헤더 🔔 로 이동)
+// 하단 5탭: 마켓중심 · 계좌 · 마켓일정 · F존 · 시장종합 (알림은 헤더 🔔 로 이동)
+// NXT 탭은 애프터마켓 게이트웨이 미연동으로 임시 비활성 — 계좌 탭으로 대체.
 const TABS: Tab[] = [
   { href: '/themes', label: '마켓중심', icon: <Icon d="M12 3a9 9 0 109 9h-9V3z M12 3v9h9a9 9 0 00-9-9z" /> },
-  { href: '/nxt', label: 'NXT', icon: <Icon d="M6 20V4l12 16V4" /> },
+  // { href: '/nxt', label: 'NXT', icon: <Icon d="M6 20V4l12 16V4" /> },  // TODO: NXT 게이트웨이 연동 후 복원
+  { href: '/account', label: '계좌', icon: <Icon d="M3 6h18v12H3z M3 10h18 M7 15h4" /> },
   { href: '/calendar', label: '마켓일정', icon: <Icon d="M8 2v3M16 2v3M3.5 9h17M4 5h16a1 1 0 011 1v14a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1z" /> },
   { href: '/signals', label: 'F존', icon: <Icon d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" /> },
   { href: '/market-overview', label: '시장종합', icon: <Icon d="M4 19V5m0 14h16M8 15l3-4 3 2 4-6" /> },
@@ -85,7 +87,7 @@ export function TimaShell({ children }: { children: ReactNode }) {
           <div className="flex items-center justify-between">
             <div className="flex items-baseline gap-2">
               <Link href="/themes" className="text-xl font-black tracking-tight text-tima-brand">
-                BARRO
+                BarroTrade
               </Link>
               <span className="font-mono text-xs text-tima-sub">{clock}</span>
             </div>
@@ -154,7 +156,7 @@ export function TimaShell({ children }: { children: ReactNode }) {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between border-b border-tima-line px-4 py-3">
-                <span className="text-lg font-black text-tima-brand">BARRO</span>
+                <span className="text-lg font-black text-tima-brand">BarroTrade</span>
                 <button
                   onClick={() => setDrawer(false)}
                   aria-label="닫기"

@@ -84,6 +84,17 @@ def start_scheduler() -> AsyncIOScheduler:
     except Exception as e:
         logger.warning("테마 스냅숏 잡 등록 실패 (선택적 기능): %s", e)
 
+    # OHLCV 일봉 캐시 동기화 잡 (15:40 KST) — BARRO_OHLCV_SYNC_ENABLED=1 일 때만
+    # 등록(기본 OFF). 키움 키 필요, 읽기 전용 캔들 갱신이라 실거래 경로 무영향.
+    try:
+        from backend.core.scheduler.ohlcv_sync_jobs import register_ohlcv_sync_jobs
+
+        _ohlcv_ids = register_ohlcv_sync_jobs(_scheduler)
+        if _ohlcv_ids:
+            logger.info("OHLCV 동기화 잡 등록: %s", _ohlcv_ids)
+    except Exception as e:
+        logger.warning("OHLCV 동기화 잡 등록 실패 (선택적 기능): %s", e)
+
     _scheduler.start()
     logger.info("스케줄러 시작: 매일 18:00 KST 일일 리포트 전송")
     return _scheduler

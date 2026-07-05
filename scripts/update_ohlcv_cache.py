@@ -5,8 +5,8 @@
     set -a; . ./.env.local; set +a
     python scripts/update_ohlcv_cache.py
 
-    # 캐시 경로 지정
-    python scripts/update_ohlcv_cache.py --cache-dir /Users/beye82/Workspace/ai-trade/data/ohlcv_cache
+    # 캐시 경로 지정 (기본: BARRO_OHLCV_CACHE_DIR 또는 <repo_root>/data/ohlcv_cache)
+    python scripts/update_ohlcv_cache.py --cache-dir /path/to/ohlcv_cache
 """
 from __future__ import annotations
 
@@ -32,6 +32,19 @@ from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger(__name__)
+
+# repo_root/data/ohlcv_cache — 이 파일: <repo_root>/scripts/update_ohlcv_cache.py
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _default_cache_dir() -> str:
+    """일봉 캐시 기본 경로. BARRO_OHLCV_CACHE_DIR 우선, 없으면 repo 상대 경로.
+
+    cache_quotes.cache_dir() / 백엔드 조회 경로와 동일 규칙(BARRO_OHLCV_CACHE_DIR
+    → <repo_root>/data/ohlcv_cache)으로 정렬한다.
+    """
+    env = os.environ.get("BARRO_OHLCV_CACHE_DIR", "").strip()
+    return env if env else str(_REPO_ROOT / "data" / "ohlcv_cache")
 
 
 def _build_oauth() -> KiwoomNativeOAuth:
@@ -177,8 +190,8 @@ def main():
     ap = argparse.ArgumentParser(description="OHLCV 캐시 증분 업데이트")
     ap.add_argument(
         "--cache-dir",
-        default="/Users/beye82/Workspace/ai-trade/data/ohlcv_cache",
-        help="OHLCV 캐시 디렉토리",
+        default=_default_cache_dir(),
+        help="OHLCV 캐시 디렉토리 (기본: BARRO_OHLCV_CACHE_DIR 또는 <repo_root>/data/ohlcv_cache)",
     )
     args = ap.parse_args()
 

@@ -70,6 +70,62 @@ def _get_quotes():
     return _quotes
 
 
+# ── candle_fetcher lazy 싱글턴 (실거래소 KRX 캔들, 키 부재 시 None) ─────
+_candle_fetcher = None
+_candle_fetcher_tried = False
+
+
+def _get_candle_fetcher():
+    """KiwoomNativeCandleFetcher 인스턴스 반환. 키 없으면 None(조회는 캐시로 degrade).
+
+    ka10081(일봉)·ka10080(분봉) 을 거래소(키움 KRX) 기준으로 실조달한다.
+    _get_quotes 와 동일한 lazy 싱글턴 패턴 — 키/초기화 실패 시 조용히 None.
+    """
+    global _candle_fetcher, _candle_fetcher_tried
+    if _candle_fetcher_tried:
+        return _candle_fetcher
+    _candle_fetcher_tried = True
+    app_key = os.environ.get("KIWOOM_APP_KEY", "").strip()
+    app_secret = os.environ.get("KIWOOM_APP_SECRET", "").strip()
+    if not app_key or not app_secret:
+        logger.info("KIWOOM 키 부재 — candle_fetcher 비활성(캐시 폴백)")
+        _candle_fetcher = None
+        return None
+    try:
+        from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
+        from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
+
+        oauth = KiwoomNativeOAuth(
+            app_key=SecretStr(app_key),
+            app_secret=SecretStr(app_secret),
+            base_url=os.environ.get("KIWOOM_BASE_URL", "https://mockapi.kiwoom.com"),
+        )
+        _candle_fetcher = KiwoomNativeCandleFetcher(oauth=oauth)
+    except Exception as exc:
+        logger.warning("candle_fetcher 초기화 실패: %s", type(exc).__name__)
+        _candle_fetcher = None
+    return _candle_fetcher
+
+
+# 프론트 timeframe → 키움 ka10080 tic_scope(분). '1h'/'60m' = 60분봉.
+# 매핑에 없는 tf(주봉/월봉 등)는 분봉 미지원 → 일봉 캐시 폴백으로 강등한다.
+_TF_TO_TIC = {
+    "1m": "1",
+    "3m": "3",
+    "5m": "5",
+    "10m": "10",
+    "15m": "15",
+    "30m": "30",
+    "1h": "60",
+    "60m": "60",
+}
+
+
+def timeframe_to_tic_scope(timeframe: str) -> str | None:
+    """프론트 timeframe 문자열 → ka10080 tic_scope. 미지원이면 None."""
+    return _TF_TO_TIC.get(timeframe)
+
+
 def _yyyymmdd_to_iso(d: str) -> str:
     """'20260618' → '2026-06-18T00:00:00'. 실패 시 원본."""
     if d and len(d) == 8 and d.isdigit():
@@ -80,13 +136,70 @@ def _yyyymmdd_to_iso(d: str) -> str:
 # ══════════════════════════════════════════════════════════
 # OHLCV
 # ══════════════════════════════════════════════════════════
+def _pack_exchange(symbol: str, timeframe: str, candles: list) -> dict:
+    """실거래소(candle_fetcher) OHLCV → 응답 dict. source='exchange'."""
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "limit": len(candles),
+        "source": "exchange",
+        "data": [
+            {
+                "timestamp": c.timestamp.isoformat(),
+                "open": c.open,
+                "high": c.high,
+                "low": c.low,
+                "close": c.close,
+                "volume": c.volume,
+            }
+            for c in candles
+        ],
+    }
+
+
+def _pack_cache(symbol: str, timeframe: str, rows: list, note: str | None = None) -> dict:
+    """OHLCV 일봉 캐시(cache_quotes) → 응답 dict. source='cache', as_of 표기."""
+    out = {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "limit": len(rows),
+        "source": "cache",
+        "as_of": rows[-1]["date"] if rows else None,
+        "data": [
+            {
+                "timestamp": _yyyymmdd_to_iso(r["date"]),
+                "open": r["open"],
+                "high": r["high"],
+                "low": r["low"],
+                "close": r["close"],
+                "volume": r["volume"],
+            }
+            for r in rows
+        ],
+    }
+    if note:
+        out["note"] = note
+    return out
+
+
 @router.get("/market/ohlcv")
 async def get_ohlcv(
     symbol: str = Query(..., description="종목 코드"),
-    timeframe: str = Query("5m", description="봉 주기: 1m, 5m, 15m, 1h, 1d"),
+    timeframe: str = Query("5m", description="봉 주기: 1m, 3m, 5m, 10m, 15m, 30m, 1h, 1d"),
     limit: int = Query(300, ge=1, le=1000, description="캔들 수"),
 ) -> dict:
-    """OHLCV 차트 데이터 조회. 게이트웨이 우선, 일봉은 캐시 폴백."""
+    """OHLCV 차트 데이터 조회 (읽기 전용).
+
+    조달 순서:
+      gateway(오케스트레이터, 있을 때) → candle_fetcher(키움 KRX 실거래소) →
+      OHLCV 일봉 캐시(지연) → 빈 데이터(우아 강등).
+
+    - 1d: 실거래소 일봉 → 캐시 폴백 → 캐시도 없으면 404.
+    - 분봉/시간봉(1m/3m/5m/10m/15m/30m/1h): 실거래소 분봉 → 실패 시 503 대신
+      일봉 캐시로 정직 폴백(note="분봉 미연동 — 일봉 대체") → 그마저 없으면 빈 data+status.
+      프론트 price-chart 가 tf≠1d 0개 응답 시 1d 를 재요청하므로 계약상 안전하다.
+    - 키/게이트웨이 부재 시 500 을 던지지 않고 캐시/빈 데이터로 강등한다.
+    """
     gateway = app_state.market_gateway
     if gateway:
         try:
@@ -109,36 +222,54 @@ async def get_ohlcv(
                 ],
             }
         except Exception as e:
-            logger.error(f"OHLCV 게이트웨이 조회 실패: {symbol}, {e}")
-            if timeframe != "1d":
-                raise HTTPException(status_code=500, detail=str(e))
-            # 일봉이면 캐시로 폴백
+            # 게이트웨이 실패도 500 대신 실거래소/캐시 폴백으로 강등한다.
+            logger.warning(f"OHLCV 게이트웨이 조회 실패, 폴백: {symbol}, {e}")
 
-    # 폴백: 일봉 캐시 (지연 시세, source=cache)
+    fetcher = _get_candle_fetcher()
+
+    # ── 1d: 실거래소 일봉 → 캐시 폴백 → 404 ─────────────────────
     if timeframe == "1d":
+        if fetcher:
+            try:
+                candles = await fetcher.fetch_daily(symbol)
+                if candles:
+                    return _pack_exchange(symbol, timeframe, candles[-limit:])
+            except Exception as e:
+                logger.warning(
+                    "OHLCV 실거래소 일봉 실패, 캐시 폴백: %s %s", symbol, type(e).__name__
+                )
         rows = cache_quotes.get_daily_candles(symbol, limit)
         if rows:
-            return {
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "limit": len(rows),
-                "source": "cache",
-                "as_of": rows[-1]["date"],
-                "data": [
-                    {
-                        "timestamp": _yyyymmdd_to_iso(r["date"]),
-                        "open": r["open"],
-                        "high": r["high"],
-                        "low": r["low"],
-                        "close": r["close"],
-                        "volume": r["volume"],
-                    }
-                    for r in rows
-                ],
-            }
+            return _pack_cache(symbol, timeframe, rows)
         raise HTTPException(status_code=404, detail=f"캐시 없음: {symbol}")
 
-    raise HTTPException(status_code=503, detail="마켓 게이트웨이 미초기화")
+    # ── 분봉/시간봉: 실거래소 분봉 → 일봉 캐시 폴백 → 빈 데이터 ──────
+    tic = timeframe_to_tic_scope(timeframe)
+    if fetcher and tic:
+        try:
+            candles = await fetcher.fetch_minute_history(symbol, tic_scope=tic)
+            if candles:
+                return _pack_exchange(symbol, timeframe, candles[-limit:])
+        except Exception as e:
+            logger.warning(
+                "OHLCV 실거래소 분봉 실패, 캐시 폴백: %s %s %s",
+                symbol, timeframe, type(e).__name__,
+            )
+
+    # 503 대신 일봉 캐시로 정직 강등 (분봉 미연동 표기)
+    rows = cache_quotes.get_daily_candles(symbol, limit)
+    if rows:
+        return _pack_cache(symbol, timeframe, rows, note="분봉 미연동 — 일봉 대체")
+
+    # 최종 강등: 빈 데이터 + status (프론트가 1d 재요청). 500 금지.
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "limit": 0,
+        "source": "none",
+        "data": [],
+        "status": "no_data" if tic else "unsupported",
+    }
 
 
 # ══════════════════════════════════════════════════════════

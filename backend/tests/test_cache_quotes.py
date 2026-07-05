@@ -83,11 +83,17 @@ def test_stock_names_empty(tmp_path, monkeypatch):
 
 @pytest.fixture
 def market_client(monkeypatch, tmp_path):
+    import backend.api.routes.market as m
     from backend.api.routes.market import router
     from backend.core.state import app_state
 
     monkeypatch.setattr(app_state, "market_gateway", None, raising=False)
     monkeypatch.setenv("BARRO_OHLCV_CACHE_DIR", str(tmp_path))
+    # 키움 키·candle_fetcher 싱글턴 리셋 → 실거래소 미가용(네트워크 호출 없이 캐시 폴백)
+    monkeypatch.delenv("KIWOOM_APP_KEY", raising=False)
+    monkeypatch.delenv("KIWOOM_APP_SECRET", raising=False)
+    m._candle_fetcher = None
+    m._candle_fetcher_tried = False
     _write_cache(tmp_path, "005930", _ROWS)
     app = FastAPI()
     app.include_router(router, prefix="/api")
@@ -105,10 +111,21 @@ def test_ohlcv_route_cache_fallback_200(market_client):
     assert body["data"][-1]["timestamp"] == "2026-06-18T00:00:00"
 
 
-def test_ohlcv_route_intraday_no_gateway_503(market_client):
-    # 게이트웨이 없고 일봉 아님 → 503(기존 동작 유지)
+def test_ohlcv_route_intraday_no_gateway_cache_fallback(market_client, monkeypatch):
+    # 게이트웨이·키움 키 부재로 실거래소 분봉 미가용 → 503 대신 일봉 캐시로 정직 강등.
+    # (프론트가 tf≠1d 0개 시 1d 재요청하므로 200+cache 가 계약상 안전)
+    monkeypatch.delenv("KIWOOM_APP_KEY", raising=False)
+    monkeypatch.delenv("KIWOOM_APP_SECRET", raising=False)
+    import backend.api.routes.market as m
+
+    m._candle_fetcher = None
+    m._candle_fetcher_tried = False  # 싱글턴 리셋(키 부재 → None 재평가)
     r = market_client.get("/api/market/ohlcv?symbol=005930&timeframe=5m")
-    assert r.status_code == 503
+    assert r.status_code == 200
+    body = r.json()
+    assert body["source"] == "cache"
+    assert "분봉" in body.get("note", "")
+    assert body["data"][-1]["close"] == 357000
 
 
 def test_ticker_route_cache_fallback(market_client, monkeypatch):
