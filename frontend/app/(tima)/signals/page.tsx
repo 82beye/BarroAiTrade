@@ -288,7 +288,7 @@ export default function SignalsPage() {
           <PriceChart
             key={selected.symbol}
             defaultSymbol={selected.symbol}
-            defaultTimeframe="15m"
+            defaultTimeframe="1m"
             levels={selected.levels ?? []}
             theme="light"
           />

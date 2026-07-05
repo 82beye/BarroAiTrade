@@ -171,7 +171,7 @@ export default function AlertsPage() {
                   <PriceChart
                     key={selected.symbol}
                     defaultSymbol={selected.symbol}
-                    defaultTimeframe="15m"
+                    defaultTimeframe="1m"
                     theme="light"
                   />
                 </div>
