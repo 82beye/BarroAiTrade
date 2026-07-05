@@ -25,6 +25,7 @@ const navLinks: NavLink[] = [
   { href: '/market-info', label: '시장 정보', icon: '📰' },
   { href: '/balance', label: '잔고 추이', icon: '💰' },
   { href: '/reports', label: '리포트', icon: '📋' },
+  { href: '/chart-lab', label: '차트 랩', icon: '🧪' },
   { href: '/settings', label: '설정', icon: '⚙️' },
   { href: '/monitor', label: '모니터', icon: '🖥️' },
 ];
