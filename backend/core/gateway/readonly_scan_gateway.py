@@ -154,11 +154,14 @@ class ReadOnlyScanGateway(MarketGateway):
         if quotes is not None:
             try:
                 info = await quotes.stock_info(symbol)
-                if info and info.get("cur_price") is not None:
+                # parse_stock_info(ka10001) 반환 필드는 "price"(구 "cur_price" 아님) —
+                # 이전 키명은 항상 None 이라 캐시로 조용히 강등되던 버그. volume 은
+                # ka10001 에 없음(기본정보 TR) — 0.0 유지, value_traded 는 캐시로 보강.
+                if info and info.get("price") is not None:
                     return Ticker(
                         symbol=symbol,
                         name=info.get("name") or symbol,
-                        price=float(info["cur_price"]),
+                        price=float(info["price"]),
                         volume=float(info.get("volume") or 0.0),
                         change_pct=float(info.get("change_pct") or 0.0),
                         timestamp=datetime.now(timezone.utc),

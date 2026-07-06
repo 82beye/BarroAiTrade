@@ -247,6 +247,11 @@ async def _enrich_theme_stocks(stocks: list[ThemeStockOut]) -> None:
         stock.change_pct = ticker.change_pct
         if ticker.price and ticker.volume:
             stock.value_traded = round(ticker.price * ticker.volume / 1e8, 2)
+        else:
+            # ka10001(기본정보) 라이브 조회는 거래량 미포함 — 거래대금은 캐시로 보강
+            q = cache_quotes.get_quote(stock.symbol)
+            if q:
+                stock.value_traded = q.get("value_traded")
 
     await asyncio.gather(*(_fill(s) for s in stocks[:_THEME_QUOTE_CAP]))
 
