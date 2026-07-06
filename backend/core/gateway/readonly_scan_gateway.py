@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time as _time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -27,6 +28,11 @@ from backend.models.position import Balance, Order, OrderResult
 logger = logging.getLogger(__name__)
 
 _REFUSAL = "ReadOnlyScanGateway 는 시세 조회 전용이며 주문·계좌 변경을 지원하지 않는다"
+
+# 테마보드 등 다중 종목 동시 조회 시 mockapi 429/과부하 방지용 짧은 TTL 캐시
+# (읽기전용 시세, 주문 경로 무관 — 안전 리스크 없음). 0=off.
+_TICKER_CACHE_TTL = float(os.environ.get("BARRO_READONLY_TICKER_CACHE_SEC", "20") or 0)
+_TICKER_CACHE: Dict[str, tuple] = {}  # symbol -> (monotonic_ts, Ticker)
 
 # 프론트/전략 timeframe 문자열 → ka10080 tic_scope(분). backend.api.routes.market
 # 의 동일 매핑과 값이 같다(계층 역전을 피하려 여기서 자체 보유 — 값 변경 시 함께 갱신).
@@ -150,15 +156,19 @@ class ReadOnlyScanGateway(MarketGateway):
         ]
 
     async def get_ticker(self, symbol: str) -> Ticker:
+        if _TICKER_CACHE_TTL > 0:
+            ent = _TICKER_CACHE.get(symbol)
+            if ent and (_time.monotonic() - ent[0]) <= _TICKER_CACHE_TTL:
+                return ent[1]
+
         quotes = self._get_quotes()
         if quotes is not None:
             try:
                 info = await quotes.stock_info(symbol)
                 # parse_stock_info(ka10001) 반환 필드는 "price"(구 "cur_price" 아님) —
-                # 이전 키명은 항상 None 이라 캐시로 조용히 강등되던 버그. volume 은
-                # ka10001 에 없음(기본정보 TR) — 0.0 유지, value_traded 는 캐시로 보강.
+                # 이전 키명은 항상 None 이라 캐시로 조용히 강등되던 버그.
                 if info and info.get("price") is not None:
-                    return Ticker(
+                    ticker = Ticker(
                         symbol=symbol,
                         name=info.get("name") or symbol,
                         price=float(info["price"]),
@@ -167,6 +177,9 @@ class ReadOnlyScanGateway(MarketGateway):
                         timestamp=datetime.now(timezone.utc),
                         market_type=MarketType.STOCK,
                     )
+                    if _TICKER_CACHE_TTL > 0:
+                        _TICKER_CACHE[symbol] = (_time.monotonic(), ticker)
+                    return ticker
             except Exception as exc:
                 logger.debug("ReadOnlyScanGateway 실거래소 ticker 실패 %s: %s", symbol, type(exc).__name__)
 

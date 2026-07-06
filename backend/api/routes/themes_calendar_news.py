@@ -17,6 +17,11 @@ from backend.db.database import get_db
 # tima P0: 테마 종목 시세 보강 종목 수 상한 (gateway 부하 방지)
 _THEME_QUOTE_CAP = 20
 
+# 테마보드 전체 로딩 시 여러 테마가 동시에 각자 최대 _THEME_QUOTE_CAP 종목을
+# 동시조회하면 mockapi 429/커넥션 과부하로 이어짐(socket hang up 관측) — 동시
+# 실거래소 조회 수를 프로세스 전역으로 제한(락은 순서 무관, 부하 완화 목적).
+_THEME_QUOTE_SEMAPHORE = asyncio.Semaphore(5)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -228,7 +233,8 @@ async def _enrich_theme_stocks(stocks: list[ThemeStockOut]) -> None:
 
     async def _fill(stock: ThemeStockOut) -> None:
         try:
-            ticker = await gateway.get_ticker(stock.symbol)
+            async with _THEME_QUOTE_SEMAPHORE:
+                ticker = await gateway.get_ticker(stock.symbol)
         except Exception as e:  # 개별 실패는 캐시 폴백 (None 유지 아님)
             logger.debug("theme stock ticker 보강 실패 %s: %s", stock.symbol, e)
             q = cache_quotes.get_quote(stock.symbol)
