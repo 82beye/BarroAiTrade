@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 
 _FLAG_ENV = "BARRO_THEME_BOARD_CACHE_ENABLED"
 _INTERVAL_ENV = "BARRO_THEME_BOARD_CACHE_INTERVAL_SEC"
-_DEFAULT_INTERVAL_SEC = 15
+# 실측: 21테마 전체갱신 1사이클=18~28s(동시조회 상한5+429백오프 영향) — 15s는
+# 매번 겹쳐 max_instances=1 로 스킵됨(무해하나 로그 노이즈). 20s로 스킵 최소화.
+_DEFAULT_INTERVAL_SEC = 20
 
 
 def _flag_enabled() -> bool:
