@@ -108,6 +108,19 @@ def start_scheduler() -> AsyncIOScheduler:
     except Exception as e:
         logger.warning("테마 라이브 갱신 잡 등록 실패 (선택적 기능): %s", e)
 
+    # 테마보드 화면표시 캐시 갱신 잡 (기본 15s) — BARRO_THEME_BOARD_CACHE_ENABLED=0
+    # 아니면 기본 등록(데이터 작업을 백엔드 자체 주기로 분리, 프론트는 순수 표시).
+    try:
+        from backend.core.scheduler.theme_board_cache_jobs import (
+            register_theme_board_cache_jobs,
+        )
+
+        _theme_board_ids = register_theme_board_cache_jobs(_scheduler)
+        if _theme_board_ids:
+            logger.info("테마보드 캐시 갱신 잡 등록: %s", _theme_board_ids)
+    except Exception as e:
+        logger.warning("테마보드 캐시 갱신 잡 등록 실패 (선택적 기능): %s", e)
+
     _scheduler.start()
     logger.info("스케줄러 시작: 매일 18:00 KST 일일 리포트 전송")
     return _scheduler
