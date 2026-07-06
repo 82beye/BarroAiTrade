@@ -31,9 +31,20 @@ logger = logging.getLogger(__name__)
 
 _KIWI = None  # lazy 싱글턴 — Kiwi() 생성 비용 회피
 
+# [실측 2026-07-06] 실뉴스로 1차 검증 시 일반 금융 상용어가 테마명으로 잘못
+# 승격되는 문제 확인("설정액"·"운용"·"자산"·"펀드" 등) — 업종/산업 특정성이
+# 없는 보일러플레이트 명사를 사전 제외. 회사명 자체(예: 삼성전자)는 별도로
+# extract_theme_groups 에서 후보 종목명 목록과 대조해 제외한다.
+_STOPWORD_NOUNS: frozenset[str] = frozenset({
+    "펀드", "운용", "자산", "설정액", "투자", "증권", "거래소", "코스피", "코스닥",
+    "전일", "종목", "상승", "하락", "마감", "오늘", "이날", "기자", "특징주",
+    "시장", "주가", "종가", "거래", "매매", "매수", "매도", "기업", "회사",
+    "발표", "공시", "실적", "전망", "분석", "관계자", "지난해", "올해", "최근",
+})
+
 
 def _tokenize_nouns(text: str) -> list[str]:
-    """명사(NNG/NNP)만 추출, 2자 이상 — 테마명 후보로서 의미 있는 토큰만."""
+    """명사(NNG/NNP)만 추출, 2자 이상 + 상용어 제외 — 테마명 후보로서 의미 있는 토큰만."""
     global _KIWI
     if _KIWI is None:
         from kiwipiepy import Kiwi
@@ -43,7 +54,10 @@ def _tokenize_nouns(text: str) -> list[str]:
         tokens = _KIWI.tokenize(text)
     except Exception:
         return []
-    return [t.form for t in tokens if t.tag in ("NNG", "NNP") and len(t.form) >= 2]
+    return [
+        t.form for t in tokens
+        if t.tag in ("NNG", "NNP") and len(t.form) >= 2 and t.form not in _STOPWORD_NOUNS
+    ]
 
 
 def _get_quotes():
@@ -145,13 +159,18 @@ def extract_theme_groups(
     *,
     keywords_per_symbol: int = 5,
     min_symbols_per_theme: int = 2,
+    exclude_names: Optional[set[str]] = None,
 ) -> dict[str, list[tuple[str, float]]]:
     """종목별 매칭기사에서 TF-IDF 상위 키워드 추출 → 공통 키워드로 테마 후보군 구성.
+
+    exclude_names: 회사명 자체(예: 삼성전자) — 다른 종목 기사에 우연히 언급돼
+    테마처럼 승격되는 것을 방지(회사명은 테마가 아님, [실측 2026-07-06] 발견).
 
     반환: {키워드(테마명 후보): [(symbol, tfidf_score), ...]}. min_symbols_per_theme
     미달 키워드(=한 종목에만 등장)는 테마로 승격하지 않고 제외 — 최소 2종목 이상
     공유해야 "그룹"으로서 의미가 있다는 전제.
     """
+    exclude_names = exclude_names or set()
     symbols = list(symbol_articles.keys())
     if len(symbols) < min_symbols_per_theme:
         return {}
@@ -175,9 +194,10 @@ def extract_theme_groups(
         top_idx = row.argsort()[::-1][:keywords_per_symbol]
         for idx in top_idx:
             score = float(row[idx])
-            if score <= 0:
+            kw = feature_names[idx]
+            if score <= 0 or kw in exclude_names:
                 continue
-            keyword_symbols.setdefault(feature_names[idx], []).append((sym, score))
+            keyword_symbols.setdefault(kw, []).append((sym, score))
 
     return {
         kw: syms for kw, syms in keyword_symbols.items()
@@ -207,10 +227,12 @@ async def discover_dynamic_themes(
         quotes, top_n=top_n, min_value_traded_eok=min_value_traded_eok
     )
     symbol_articles = await match_articles_to_symbols(candidates, lookback_days=lookback_days)
+    company_names = {c["name"] for c in candidates if c.get("name")}
     groups = extract_theme_groups(
         symbol_articles,
         keywords_per_symbol=keywords_per_symbol,
         min_symbols_per_theme=min_symbols_per_theme,
+        exclude_names=company_names,
     )
 
     from backend.db.repositories.theme_repo import theme_repo
