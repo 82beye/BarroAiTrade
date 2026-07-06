@@ -24,10 +24,11 @@ _THEME_QUOTE_CAP = 20
 # 실거래소 조회 수를 프로세스 전역으로 제한(락은 순서 무관, 부하 완화 목적).
 _THEME_QUOTE_SEMAPHORE = asyncio.Semaphore(5)
 
-# 테마 화면 재진입 시 로딩 지연 완화용 응답 캐시(테마별 독립 TTL) — 프론트 30초
-# 폴링보다 짧게 잡아 화면 이탈→재진입처럼 짧은 재요청만 캐시로 즉시 응답,
-# 폴링 주기 이상 지나면 자연 갱신(변경분 반영). 0=off.
-_THEME_STOCKS_CACHE_TTL = float(os.environ.get("BARRO_THEME_STOCKS_CACHE_SEC", "20") or 0)
+# [되돌림] 테마 응답 자체는 실시간 표시가 원칙 — 초기기준(캐시 없음)으로 복귀.
+# 로딩 속도는 하위 종목별 시세 캐시(readonly_scan_gateway 20s)+동시조회 상한이
+# 담당(각 종목 조회가 캐시 히트면 즉시 반환되므로 집계 단계는 캐시하지 않아도
+# 대부분 빠르다). 필요 시 env 로만 재활성. 0=off(기본).
+_THEME_STOCKS_CACHE_TTL = float(os.environ.get("BARRO_THEME_STOCKS_CACHE_SEC", "0") or 0)
 _THEME_STOCKS_CACHE: dict[int, tuple] = {}  # theme_id -> (monotonic_ts, list[ThemeStockOut])
 
 logger = logging.getLogger(__name__)
