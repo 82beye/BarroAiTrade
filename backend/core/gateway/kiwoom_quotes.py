@@ -578,6 +578,7 @@ def parse_stock_info(data: dict, symbol: str) -> dict:
         "bps": _opt_num(data.get("bps")),
         "price": _abs_opt_num(data.get("cur_prc")),
         "change_pct": _opt_num(data.get("flu_rt")),
+        "volume": _abs_opt_num(data.get("trde_qty")),     # 거래량(주) — 거래대금 산출용
         # ref 블록 재료 — 가격류는 부호(등락방향 표기) 제거, change_pct 만 방향 유지
         "base_price": _abs_opt_num(data.get("base_pric")),
         "open": _abs_opt_num(data.get("open_pric")),
