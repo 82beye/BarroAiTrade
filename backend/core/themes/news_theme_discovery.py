@@ -56,7 +56,10 @@ def _tokenize_nouns(text: str) -> list[str]:
         return []
     return [
         t.form for t in tokens
-        if t.tag in ("NNG", "NNP") and len(t.form) >= 2 and t.form not in _STOPWORD_NOUNS
+        if t.tag in ("NNG", "NNP")
+        and len(t.form) >= 2
+        and t.form not in _STOPWORD_NOUNS
+        and not any(ch.isdigit() for ch in t.form)  # [실측] 토큰화 잡음(예: "삼전닉스50") 제외
     ]
 
 
