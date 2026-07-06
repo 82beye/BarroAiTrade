@@ -172,7 +172,7 @@ function CalendarTab() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <span className="text-sm text-slate-400">기간:</span>
         {[7, 14, 30].map((d) => (
           <button
@@ -183,6 +183,12 @@ function CalendarTab() {
             {d}일
           </button>
         ))}
+        <a
+          href="/calendar"
+          className="ml-auto text-sm font-medium text-tima-teal hover:underline"
+        >
+          전체 캘린더 보기 →
+        </a>
       </div>
 
       {loading ? (

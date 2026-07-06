@@ -31,6 +31,21 @@ logger = logging.getLogger(__name__)
 
 TIC_SCOPE = "5"
 
+# repo_root — 이 파일: <repo_root>/scripts/update_ohlcv_cache_5m.py
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _default_daily_cache_dir() -> str:
+    """일봉 캐시(종목 목록 추출용) 기본 경로. BARRO_OHLCV_CACHE_DIR 우선."""
+    env = os.environ.get("BARRO_OHLCV_CACHE_DIR", "").strip()
+    return env if env else str(_REPO_ROOT / "data" / "ohlcv_cache")
+
+
+def _default_5m_cache_dir() -> str:
+    """5분봉 캐시 출력 기본 경로. BARRO_OHLCV_CACHE_DIR_5M 우선."""
+    env = os.environ.get("BARRO_OHLCV_CACHE_DIR_5M", "").strip()
+    return env if env else str(_REPO_ROOT / "data" / "ohlcv_cache_5m")
+
 
 def _build_oauth() -> KiwoomNativeOAuth:
     app_key = os.environ.get("KIWOOM_APP_KEY", "")
@@ -182,13 +197,15 @@ def main():
     ap = argparse.ArgumentParser(description="OHLCV 5분봉 캐시 증분 업데이트")
     ap.add_argument(
         "--daily-cache-dir",
-        default="/Users/beye82/Workspace/ai-trade/data/ohlcv_cache",
-        help="일봉 캐시 디렉토리 (종목 목록 추출용)",
+        default=_default_daily_cache_dir(),
+        help="일봉 캐시 디렉토리 (종목 목록 추출용; 기본: BARRO_OHLCV_CACHE_DIR "
+             "또는 <repo_root>/data/ohlcv_cache)",
     )
     ap.add_argument(
         "--cache-dir",
-        default="/Users/beye82/Workspace/ai-trade/data/ohlcv_cache_5m",
-        help="5분봉 캐시 출력 디렉토리",
+        default=_default_5m_cache_dir(),
+        help="5분봉 캐시 출력 디렉토리 (기본: BARRO_OHLCV_CACHE_DIR_5M "
+             "또는 <repo_root>/data/ohlcv_cache_5m)",
     )
     ap.add_argument("--days", type=int, default=15, help="수집 대상 영업일 수 (기본 15)")
     ap.add_argument("--keep-days", type=int, default=45, help="캐시 보관 일수 (기본 45)")

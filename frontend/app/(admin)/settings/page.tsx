@@ -8,6 +8,127 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { api, type AlertSettings } from '@/lib/api';
+
+// ── 전략 알림 (Push) 섹션 — GET/PUT /api/alerts/settings 연동 (PRD §4.5 / FR-S-06) ──
+const STRATEGY_ALERT_KEYS: { key: keyof AlertSettings; label: string }[] = [
+  { key: 'f_zone', label: 'F존' },
+  { key: 'sf_zone', label: 'SF존' },
+  { key: 'gold_zone', label: '골드존' },
+  { key: 'swing_38', label: '38스윙' },
+];
+
+const DEFAULT_ALERT_SETTINGS: AlertSettings = {
+  f_zone: false,
+  sf_zone: false,
+  gold_zone: false,
+  swing_38: false,
+};
+
+function StrategyAlertsSection() {
+  const [settings, setSettings] = useState<AlertSettings>(DEFAULT_ALERT_SETTINGS);
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getAlertSettings()
+      .then((res) => {
+        if (cancelled) return;
+        const d = res.data ?? {};
+        setSettings({
+          f_zone: !!d.f_zone,
+          sf_zone: !!d.sf_zone,
+          gold_zone: !!d.gold_zone,
+          swing_38: !!d.swing_38,
+        });
+      })
+      .catch(() => {
+        /* 기본값 유지 */
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function toggle(key: keyof AlertSettings) {
+    const next = !settings[key];
+    const prev = settings;
+    setSettings({ ...settings, [key]: next }); // 낙관적 업데이트
+    setStatus('saving');
+    setMessage('');
+    try {
+      await api.updateAlertSettings({ [key]: next } as Partial<AlertSettings>);
+      setStatus('success');
+      setMessage('전략 알림 설정이 저장되었습니다.');
+      setTimeout(() => setStatus('idle'), 3000);
+    } catch {
+      setSettings(prev); // 롤백
+      setStatus('error');
+      setMessage('전략 알림 설정 저장에 실패했습니다. 백엔드 연결을 확인하세요.');
+    }
+  }
+
+  return (
+    <Card className="border-slate-700 bg-slate-800">
+      <CardHeader>
+        <CardTitle className="text-slate-200">전략 알림</CardTitle>
+        <CardDescription className="text-slate-500">
+          전략별 Push 알림 (도달 시그널) 독립 설정
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {loading ? (
+          <Skeleton className="h-32 w-full rounded-lg" />
+        ) : (
+          <>
+            {STRATEGY_ALERT_KEYS.map(({ key, label }) => (
+              <label
+                key={key}
+                className="flex cursor-pointer items-center justify-between rounded-lg border border-slate-700 p-3 hover:bg-slate-700 hover:bg-opacity-50"
+              >
+                <span className="text-sm font-medium text-slate-200">{label} 알림</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={settings[key]}
+                  onClick={() => toggle(key)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    settings[key] ? 'bg-tima-select' : 'bg-slate-600'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      settings[key] ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+            ))}
+            {status !== 'idle' && (
+              <div
+                className={`rounded-lg border p-3 text-sm ${
+                  status === 'success'
+                    ? 'border-green-700 bg-green-900 bg-opacity-30 text-green-300'
+                    : status === 'error'
+                      ? 'border-red-700 bg-red-900 bg-opacity-30 text-red-300'
+                      : 'border-blue-700 bg-blue-900 bg-opacity-30 text-blue-300'
+                }`}
+              >
+                {message || '저장 중...'}
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 const SettingsSchema = z.object({
   stopLoss: z.number().min(0.1, '0.1 이상이어야 합니다').max(50, '50 이하여야 합니다'),
@@ -315,6 +436,11 @@ export default function SettingsPage() {
           </Button>
         </div>
       </form>
+
+      {/* 전략 알림 (Push) — 독립 저장 섹션 */}
+      <div className="mt-6">
+        <StrategyAlertsSection />
+      </div>
     </div>
   );
 }

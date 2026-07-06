@@ -94,6 +94,10 @@ _CHASE_FLU_PCT = float(os.environ.get("BARRO_CHASE_FLU_PCT", "0") or 0)      # �
 _MIN_ENTRY_PRICE = float(os.environ.get("BARRO_MIN_ENTRY_PRICE", "0") or 0)  # 동전주 진입 하한가(0=off)
 _DEGRADED_BLOCK = _env_truthy("BARRO_DEGRADED_BLOCK", "0")                   # 랭킹 degraded(trade_value 전부0) 진입 차단
 
+# [티마 P1] 정제 시그널 포착을 data/alert_events.jsonl 에 기록(대시보드 알림내역용).
+#   기본 OFF(관측용 add-on) — 운영에서 BARRO_ALERT_EVENTS_ENABLED=1 로 켠다.
+_ALERT_EVENTS_ENABLED = _env_truthy("BARRO_ALERT_EVENTS_ENABLED", "0")
+
 # [6/24] 종가러시 throttle — 종베 API 우선권. 15:00~15:20 데몬 신규진입 스캔 양보(429 경합 완화).
 _CLOSE_RUSH_THROTTLE = _env_truthy("BARRO_CLOSE_RUSH_THROTTLE", "0")
 _CLOSE_RUSH_START = os.environ.get("BARRO_CLOSE_RUSH_START", "1500").strip()
@@ -659,6 +663,28 @@ def _save_refined_signals(signals: list, regime) -> None:
     }
     path = _DATA_DIR / "refined_signals.json"
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _record_alert_events(signals: list) -> None:
+    """정제 시그널 '포착'을 data/alert_events.jsonl 에 기록 (대시보드 알림내역용).
+
+    BARRO_ALERT_EVENTS_ENABLED=1 일 때만 동작(기본 OFF). append-only 관측 로그로
+    라이브 매매/주문 경로와 무관하며, 실패는 삼켜 로깅만 한다(메인 흐름 무영향).
+    기준선 '도달' 이벤트는 실시간 감시 필요 → 범위 밖, '포착'만 기록.
+    """
+    if not _ALERT_EVENTS_ENABLED:
+        return
+    try:
+        from backend.core.alerts.event_log import record_signal_capture_events
+
+        now_iso = _now_kst().isoformat()
+        rows = [
+            {"strategy": strategy, "symbol": c.symbol, "name": c.name}
+            for c, strategy, _pnl in signals
+        ]
+        record_signal_capture_events(rows, occurred_at=now_iso)
+    except Exception as e:
+        print(f"  [ALERT-EVT-ERR] {e}")
 
 
 def _save_market_snapshot(leaders: list, balance, regime) -> None:
@@ -1249,6 +1275,8 @@ async def _scan_and_buy(
 
     # 정제된 시그널을 파일에 저장 (대시보드 노출용) — advisory 필터 이전의 전체 탐지 신호.
     _save_refined_signals(signals, regime)
+    # 정제 시그널 포착 알림 이벤트 기록(대시보드 알림내역) — default-OFF, 라이브 무영향.
+    _record_alert_events(signals)
     # 결정적 시장 스냅샷(관측) — writer 가 add-on 신호 생산에 사용. 라이브 무영향.
     _save_market_snapshot(leaders, balance, regime)
 
