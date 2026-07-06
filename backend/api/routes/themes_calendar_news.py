@@ -21,6 +21,20 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# app_state.market_gateway 가 None(API 서버 프로세스는 항상 그렇다 — 오케스트레이터는
+# 별도 라이브 데몬)일 때의 읽기전용 폴백 게이트웨이. screener.py 와 동일 패턴 —
+# 캐시에 없는 종목(예: 대형주)도 키움 REST 온디맨드 조회로 이름·시세를 채운다.
+_readonly_gateway = None
+
+
+def _get_readonly_gateway():
+    global _readonly_gateway
+    if _readonly_gateway is None:
+        from backend.core.gateway.readonly_scan_gateway import ReadOnlyScanGateway
+
+        _readonly_gateway = ReadOnlyScanGateway()
+    return _readonly_gateway
+
 
 async def fetch_themes() -> list[ThemeOut]:
     """전체 테마 목록 (DB 미가용 시 빈 리스트). 스냅숏·라우트 공용."""
@@ -196,8 +210,9 @@ async def stock_themes(symbol: str) -> dict:
 async def _enrich_theme_stocks(stocks: list[ThemeStockOut]) -> None:
     """theme_stocks 시세 보강 (in-place).
 
-    조달 우선순위: market_gateway → ohlcv 캐시(cache_quotes, 지연 시세).
-    종목명은 stock_names 마스터로 항상 시도. 둘 다 없으면 기존 no-op (하위호환).
+    조달 우선순위: market_gateway(라이브 데몬) → ReadOnlyScanGateway(키움 REST 온디맨드,
+    screener.py 와 동일) → ohlcv 캐시(cache_quotes, 지연 시세). 종목명은 stock_names
+    마스터로 항상 선시도, 실패 시 게이트웨이 응답명으로 보강.
     """
     if not stocks:
         return
@@ -209,27 +224,25 @@ async def _enrich_theme_stocks(stocks: list[ThemeStockOut]) -> None:
         if resolved and resolved != stock.symbol:
             stock.name = resolved
 
-    gateway = app_state.market_gateway
-    if gateway is None:
-        for stock in stocks[:_THEME_QUOTE_CAP]:
+    gateway = app_state.market_gateway or _get_readonly_gateway()
+
+    async def _fill(stock: ThemeStockOut) -> None:
+        try:
+            ticker = await gateway.get_ticker(stock.symbol)
+        except Exception as e:  # 개별 실패는 캐시 폴백 (None 유지 아님)
+            logger.debug("theme stock ticker 보강 실패 %s: %s", stock.symbol, e)
             q = cache_quotes.get_quote(stock.symbol)
             if not q:
-                continue
+                return
             stock.price = q.get("price")
             stock.change_pct = q.get("change_pct")
             stock.day_open = q.get("day_open")
             stock.day_high = q.get("day_high")
             stock.day_low = q.get("day_low")
             stock.value_traded = q.get("value_traded")
-        return
-
-    async def _fill(stock: ThemeStockOut) -> None:
-        try:
-            ticker = await gateway.get_ticker(stock.symbol)
-        except Exception as e:  # 개별 실패는 무시 (None 유지)
-            logger.debug("theme stock ticker 보강 실패 %s: %s", stock.symbol, e)
             return
-        stock.name = ticker.name
+        if ticker.name and ticker.name != stock.symbol:
+            stock.name = ticker.name
         stock.price = ticker.price
         stock.change_pct = ticker.change_pct
         if ticker.price and ticker.volume:
