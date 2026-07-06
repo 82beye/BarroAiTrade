@@ -41,7 +41,9 @@ class RSSSource:
     HOST_ALLOWLIST: frozenset[str] = frozenset(
         {
             "rss.hankyung.com",
+            "www.hankyung.com",   # [실측 2026-07-06] 실제 피드는 이 도메인에 있음
             "rss.mk.co.kr",
+            "www.mk.co.kr",       # [실측 2026-07-06] 실제 피드는 이 도메인에 있음
             "www.yna.co.kr",
             "rss.edaily.co.kr",
         }

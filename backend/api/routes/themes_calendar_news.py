@@ -139,6 +139,33 @@ async def refresh_themes() -> dict:
     return result
 
 
+@router.post("/api/themes/discover")
+async def discover_themes(
+    top_n: int = Query(default=100, ge=1, le=200),
+    min_value_traded_eok: float = Query(default=100.0, ge=0.0),
+    lookback_days: int = Query(default=7, ge=1, le=30),
+) -> dict:
+    """뉴스기반 신규 테마 그룹 동적 발굴(큐레이션 시드와 별개, news_theme_discovery 참조).
+
+    거래대금 top-N ∪ 등락률 top-N(≥min_value_traded_eok 억원) 후보종목의 최근
+    lookback_days 일 뉴스에서 키워드를 추출해 공통 키워드를 테마로 승격·적재한다.
+    읽기 전용(시세 조회+DB) — 주문 경로 무관, 게이트 불필요. news_items 가 비어있으면
+    (news_collector 미가동) 조용히 빈 결과를 반환한다(날조 금지).
+
+    반환: {status, candidates, symbols_with_news, themes_created, links_created, themes}.
+    """
+    from backend.core.themes.news_theme_discovery import discover_dynamic_themes
+
+    result = await discover_dynamic_themes(
+        top_n=top_n,
+        min_value_traded_eok=min_value_traded_eok,
+        lookback_days=lookback_days,
+    )
+    if result.get("themes_created"):
+        _THEME_STOCKS_CACHE.clear()
+    return result
+
+
 # ── tima P1: 시간대별 테마 스냅숏(타임라인) ──────────────────────────────────
 
 

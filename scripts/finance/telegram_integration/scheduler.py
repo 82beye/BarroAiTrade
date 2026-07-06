@@ -121,6 +121,32 @@ def start_scheduler() -> AsyncIOScheduler:
     except Exception as e:
         logger.warning("테마보드 캐시 갱신 잡 등록 실패 (선택적 기능): %s", e)
 
+    # 뉴스/공시 수집 잡 (기본 60s) — BARRO_NEWS_COLLECTOR_ENABLED=1 일 때만 등록
+    # (기본 OFF). RSS 4종(+DART, 키 설정 시) 를 news_items 로 적재, 읽기전용.
+    try:
+        from backend.core.scheduler.news_collector_jobs import (
+            register_news_collector_jobs,
+        )
+
+        _news_ids = register_news_collector_jobs(_scheduler)
+        if _news_ids:
+            logger.info("뉴스 수집 잡 등록: %s", _news_ids)
+    except Exception as e:
+        logger.warning("뉴스 수집 잡 등록 실패 (선택적 기능): %s", e)
+
+    # 테마 뉴스기반 동적발굴 잡 (기본 30분) — BARRO_THEME_DISCOVERY_ENABLED=1 일
+    # 때만 등록(기본 OFF, 실험적 — news_collector 로 채워진 news_items 필요).
+    try:
+        from backend.core.scheduler.theme_discovery_jobs import (
+            register_theme_discovery_jobs,
+        )
+
+        _discovery_ids = register_theme_discovery_jobs(_scheduler)
+        if _discovery_ids:
+            logger.info("테마 뉴스발굴 잡 등록: %s", _discovery_ids)
+    except Exception as e:
+        logger.warning("테마 뉴스발굴 잡 등록 실패 (선택적 기능): %s", e)
+
     _scheduler.start()
     logger.info("스케줄러 시작: 매일 18:00 KST 일일 리포트 전송")
     return _scheduler
