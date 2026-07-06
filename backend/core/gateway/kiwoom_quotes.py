@@ -110,6 +110,12 @@ def _opt_num(v) -> Optional[float]:
     return _num(v)
 
 
+def _abs_opt_num(v) -> Optional[float]:
+    """빈 값이면 None, 아니면 |float| — 가격류 필드의 등락방향 기호(+/-) 제거."""
+    n = _opt_num(v)
+    return None if n is None else abs(n)
+
+
 class KiwoomQuotes:
     """읽기 전용 시세 TR 클라이언트."""
 
@@ -570,17 +576,17 @@ def parse_stock_info(data: dict, symbol: str) -> dict:
         "eps": _opt_num(data.get("eps")),
         "roe": _opt_num(data.get("roe")),
         "bps": _opt_num(data.get("bps")),
-        "price": _opt_num(data.get("cur_prc")),
+        "price": _abs_opt_num(data.get("cur_prc")),
         "change_pct": _opt_num(data.get("flu_rt")),
-        # ref 블록 재료
-        "base_price": _opt_num(data.get("base_pric")),
-        "open": _opt_num(data.get("open_pric")),
-        "high": _opt_num(data.get("high_pric")),
-        "low": _opt_num(data.get("low_pric")),
-        "upper_limit": _opt_num(data.get("upl_pric")),
-        "lower_limit": _opt_num(data.get("lst_pric")),
-        "high_52w": _opt_num(data.get("250hgst")),
-        "low_52w": _opt_num(data.get("250lwst")),
+        # ref 블록 재료 — 가격류는 부호(등락방향 표기) 제거, change_pct 만 방향 유지
+        "base_price": _abs_opt_num(data.get("base_pric")),
+        "open": _abs_opt_num(data.get("open_pric")),
+        "high": _abs_opt_num(data.get("high_pric")),
+        "low": _abs_opt_num(data.get("low_pric")),
+        "upper_limit": _abs_opt_num(data.get("upl_pric")),
+        "lower_limit": _abs_opt_num(data.get("lst_pric")),
+        "high_52w": _abs_opt_num(data.get("250hgst")),
+        "low_52w": _abs_opt_num(data.get("250lwst")),
     }
 
 
