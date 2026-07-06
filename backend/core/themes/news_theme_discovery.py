@@ -9,13 +9,15 @@ description="뉴스기반 자동발굴"로 구분해 새 row 로 추가된다.
 파이프라인 (전부 읽기 전용, 주문/게이트웨이 무관):
     1) 후보 종목 유니버스 = 거래대금 top-N ∪ 등락률(상승) top-N (OR),
        value_traded(억원) ≥ min_value_traded_eok 필터.
-    2) 최근 lookback_days 일 news_items 중 후보 종목명이 title/body 에 등장하는
-       기사만 매칭(종목명 언급 없으면 그 종목은 스킵 — 날조 금지, 억지 배정 없음).
-    3) 매칭 기사 텍스트를 kiwipiepy 명사추출 + TF-IDF(sklearn) 로 종목별 상위
+    2) 갭필링: 위 후보 중 이미 테마(큐레이션이든 기존 발굴이든)가 하나라도
+       있는 종목은 제외 — 테마 분류가 **없는** 종목만 이 파이프라인의 대상.
+    3) 최근 lookback_days 일 news_items 중 (갭필링 후) 후보 종목명이 title/body
+       에 등장하는 기사만 매칭(종목명 언급 없으면 그 종목은 스킵 — 날조 금지).
+    4) 매칭 기사 텍스트를 kiwipiepy 명사추출 + TF-IDF(sklearn) 로 종목별 상위
        키워드 추출.
-    4) min_symbols_per_theme 개 이상 종목에 공통 등장하는 키워드 = 신규 테마명
+    5) min_symbols_per_theme 개 이상 종목에 공통 등장하는 키워드 = 신규 테마명
        으로 승격 (종목 중복 허용 — 한 종목이 여러 테마에 속할 수 있음).
-    5) ThemeRepository.upsert_theme + add_keyword + link_stock 로 적재.
+    6) ThemeRepository.upsert_theme + add_keyword + link_stock 로 적재.
 
 전제: news_items 가 실제로 채워져 있어야 유의미한 결과가 나온다(news_collector_jobs
 가 꺼져 있으면 symbols_with_news=0, themes_created=0 — 조용히 빈 결과, 에러 아님).
@@ -119,6 +121,38 @@ async def build_candidate_universe(
         row for row in by_symbol.values()
         if (row.get("value_traded") or 0.0) >= min_value_traded_eok
     ]
+
+
+async def filter_unthemed_symbols(candidates: list[dict]) -> list[dict]:
+    """이미 (큐레이션이든 발굴이든) 테마가 하나라도 있는 종목은 후보에서 제외.
+
+    갭필링 원칙: 거래대금·등락률 상위 종목 중 **테마 분류가 없는 종목만** 뉴스기반
+    파이프라인의 대상으로 삼는다 — 이미 21종 큐레이션 테마(반도체 등)에 속한
+    종목까지 중복으로 재분류하지 않는다.
+    """
+    if not candidates:
+        return []
+
+    from sqlalchemy import text
+
+    from backend.db.database import get_db
+
+    symbols = [c["symbol"] for c in candidates if c.get("symbol")]
+    if not symbols:
+        return []
+
+    async with get_db() as db:
+        if db is None:
+            return candidates  # DB 미가용 — 필터 불가, 전체를 폴백 후보로(조용히 강등)
+        placeholders = ", ".join(f":s{i}" for i in range(len(symbols)))
+        params = {f"s{i}": sym for i, sym in enumerate(symbols)}
+        res = await db.execute(
+            text(f"SELECT DISTINCT symbol FROM theme_stocks WHERE symbol IN ({placeholders})"),
+            params,
+        )
+        already_themed = {row["symbol"] for row in res.mappings().all()}
+
+    return [c for c in candidates if c["symbol"] not in already_themed]
 
 
 async def match_articles_to_symbols(
@@ -226,15 +260,17 @@ async def discover_dynamic_themes(
         quotes = _get_quotes()
     if quotes is None:
         return {
-            "status": "no_key", "candidates": 0, "symbols_with_news": 0,
-            "themes_created": 0, "links_created": 0, "themes": [],
+            "status": "no_key", "candidates": 0, "unthemed_candidates": 0,
+            "symbols_with_news": 0, "themes_created": 0, "links_created": 0,
+            "themes": [],
         }
 
-    candidates = await build_candidate_universe(
+    all_candidates = await build_candidate_universe(
         quotes, top_n=top_n, min_value_traded_eok=min_value_traded_eok
     )
+    candidates = await filter_unthemed_symbols(all_candidates)
     symbol_articles = await match_articles_to_symbols(candidates, lookback_days=lookback_days)
-    company_names = {c["name"] for c in candidates if c.get("name")}
+    company_names = {c["name"] for c in all_candidates if c.get("name")}
     groups = extract_theme_groups(
         symbol_articles,
         keywords_per_symbol=keywords_per_symbol,
@@ -262,7 +298,8 @@ async def discover_dynamic_themes(
     )
     return {
         "status": "ok",
-        "candidates": len(candidates),
+        "candidates": len(all_candidates),
+        "unthemed_candidates": len(candidates),
         "symbols_with_news": len(symbol_articles),
         "themes_created": themes_created,
         "links_created": links_created,

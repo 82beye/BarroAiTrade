@@ -147,12 +147,14 @@ async def discover_themes(
 ) -> dict:
     """뉴스기반 신규 테마 그룹 동적 발굴(큐레이션 시드와 별개, news_theme_discovery 참조).
 
-    거래대금 top-N ∪ 등락률 top-N(≥min_value_traded_eok 억원) 후보종목의 최근
+    거래대금 top-N ∪ 등락률 top-N(≥min_value_traded_eok 억원) 후보종목 중 **이미
+    테마 분류가 있는 종목은 제외**(갭필링) — 테마가 없는 종목만 대상으로 최근
     lookback_days 일 뉴스에서 키워드를 추출해 공통 키워드를 테마로 승격·적재한다.
     읽기 전용(시세 조회+DB) — 주문 경로 무관, 게이트 불필요. news_items 가 비어있으면
     (news_collector 미가동) 조용히 빈 결과를 반환한다(날조 금지).
 
-    반환: {status, candidates, symbols_with_news, themes_created, links_created, themes}.
+    반환: {status, candidates, unthemed_candidates, symbols_with_news,
+    themes_created, links_created, themes}.
     """
     from backend.core.themes.news_theme_discovery import discover_dynamic_themes
 

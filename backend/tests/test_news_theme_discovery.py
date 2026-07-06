@@ -114,6 +114,19 @@ async def news_db(monkeypatch, tmp_path):
                 """
             )
         )
+        await db.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS theme_stocks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    theme_id INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    score REAL NOT NULL,
+                    UNIQUE(theme_id, symbol)
+                )
+                """
+            )
+        )
     yield db_file
     reset_engine_for_test()
 
@@ -128,6 +141,31 @@ async def _insert_news(title: str, body: str, published_at: datetime, source_id:
             ),
             {"sid": source_id, "title": title, "body": body, "pub": published_at.isoformat()},
         )
+
+
+class TestFilterUnthemedSymbols:
+    @pytest.mark.asyncio
+    async def test_already_themed_symbol_excluded(self, news_db):
+        async with get_db() as db:
+            await db.execute(
+                text("INSERT INTO theme_stocks (theme_id, symbol, score) VALUES (1, '005930', 5.0)")
+            )
+        candidates = [
+            {"symbol": "005930", "name": "삼성전자"},   # 이미 테마 있음 — 제외
+            {"symbol": "999999", "name": "무명회사"},   # 테마 없음 — 유지
+        ]
+        result = await ntd.filter_unthemed_symbols(candidates)
+        assert [c["symbol"] for c in result] == ["999999"]
+
+    @pytest.mark.asyncio
+    async def test_no_themed_symbols_keeps_all(self, news_db):
+        candidates = [{"symbol": "005930", "name": "삼성전자"}]
+        result = await ntd.filter_unthemed_symbols(candidates)
+        assert result == candidates
+
+    @pytest.mark.asyncio
+    async def test_empty_candidates_returns_empty(self, news_db):
+        assert await ntd.filter_unthemed_symbols([]) == []
 
 
 class TestMatchArticlesToSymbols:
@@ -173,7 +211,7 @@ class TestDiscoverDynamicThemes:
         assert result["themes_created"] == 0
 
     @pytest.mark.asyncio
-    async def test_full_pipeline_writes_via_repo(self, monkeypatch):
+    async def test_full_pipeline_writes_via_repo(self, monkeypatch, news_db):
         quotes = _FakeQuotes(
             value_rows=[
                 {"symbol": "005930", "name": "삼성전자", "value_traded": 1000.0},
