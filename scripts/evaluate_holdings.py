@@ -149,6 +149,19 @@ async def _run(args) -> int:
                 print("제외 후 평가 대상 종목 없음.")
                 return 0
 
+    # [2026-06-26] 전략 없는 수동매매 종목 SL 평가 제외
+    _all_active = ActivePositionStore(args.pos_log).load_all()
+    _manual_syms = {
+        h.symbol for h in holdings
+        if not (_all_active.get(h.symbol) and (_all_active[h.symbol].strategy or "").strip())
+    }
+    if _manual_syms:
+        holdings = [h for h in holdings if h.symbol not in _manual_syms]
+        print(f"[제외] 전략없음(수동매매) {len(_manual_syms)}종목 SL 평가 제외: {', '.join(sorted(_manual_syms))}")
+        if not holdings:
+            print("제외 후 평가 대상 종목 없음.")
+            return 0
+
     # PolicyConfig 자동 로드 (BAR-OPS-32) — CLI default 인 경우만 override
     cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
     # 국면 적응 청산 (default-OFF) — cfg 가 enabled=False/배수 1.0 이면 무조정.

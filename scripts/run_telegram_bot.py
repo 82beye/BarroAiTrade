@@ -108,6 +108,7 @@ async def _build_contexts(
 async def _cmd_help(bot: TelegramBot, msg: dict) -> str:
     return (
         "*BarroAiTrade 봇 명령*\n"
+        "/ops - 운영 머신 상태/전략/프로세스/로그 요약\n"
         "/balance - 잔고/예수금/보유 종목 수\n"
         "/history - 시뮬 누적 (전략별 PnL)\n"
         "/sim - 당일 주도주 top 3 + 추천 qty\n"
@@ -120,6 +121,16 @@ async def _cmd_help(bot: TelegramBot, msg: dict) -> str:
 
 async def _cmd_ping(bot: TelegramBot, msg: dict) -> str:
     return "pong 🏓"
+
+
+async def _cmd_ops(bot: TelegramBot, msg: dict) -> str:
+    """운영 머신 상태 요약 — 기존 상태 API/로그/env 정보를 read-only 로 재사용."""
+    from scripts import ops_subagent_monitor as opsmon
+
+    opsmon.apply_env_local()
+    api_base = os.environ.get("OPS_MONITOR_API_BASE", opsmon.DEFAULT_API_BASE)
+    snapshot = opsmon.collect_snapshot(api_base, opsmon.parse_process_specs(None))
+    return opsmon.format_snapshot_markdown(snapshot)
 
 
 async def _cmd_balance(bot: TelegramBot, msg: dict) -> str:
@@ -773,6 +784,7 @@ def main() -> None:
     )
     bot.register("/help", _cmd_help)
     bot.register("/ping", _cmd_ping)
+    bot.register("/ops", _cmd_ops)
     bot.register("/balance", _cmd_balance)
     bot.register("/history", _cmd_history)
     bot.register("/sim", _cmd_sim)                # OPS-25
