@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import time as _time
 from datetime import date, datetime, timezone
 from typing import Optional
 
@@ -21,6 +23,12 @@ _THEME_QUOTE_CAP = 20
 # 동시조회하면 mockapi 429/커넥션 과부하로 이어짐(socket hang up 관측) — 동시
 # 실거래소 조회 수를 프로세스 전역으로 제한(락은 순서 무관, 부하 완화 목적).
 _THEME_QUOTE_SEMAPHORE = asyncio.Semaphore(5)
+
+# 테마 화면 재진입 시 로딩 지연 완화용 응답 캐시(테마별 독립 TTL) — 프론트 30초
+# 폴링보다 짧게 잡아 화면 이탈→재진입처럼 짧은 재요청만 캐시로 즉시 응답,
+# 폴링 주기 이상 지나면 자연 갱신(변경분 반영). 0=off.
+_THEME_STOCKS_CACHE_TTL = float(os.environ.get("BARRO_THEME_STOCKS_CACHE_SEC", "20") or 0)
+_THEME_STOCKS_CACHE: dict[int, tuple] = {}  # theme_id -> (monotonic_ts, list[ThemeStockOut])
 
 logger = logging.getLogger(__name__)
 
@@ -99,10 +107,17 @@ async def list_themes() -> list[ThemeOut]:
 
 @router.get("/api/themes/{theme_id}/stocks", response_model=list[ThemeStockOut])
 async def get_theme_stocks(theme_id: int) -> list[ThemeStockOut]:
+    if _THEME_STOCKS_CACHE_TTL > 0:
+        ent = _THEME_STOCKS_CACHE.get(theme_id)
+        if ent and (_time.monotonic() - ent[0]) <= _THEME_STOCKS_CACHE_TTL:
+            return ent[1]
+
     # tima P0: gateway 가용 시 ticker 시세 보강 (동시성, 개별 실패는 None 유지).
     stocks = await fetch_theme_stocks(theme_id, enrich=True)
     if stocks is None:
         raise HTTPException(status_code=404, detail="theme not found")
+    if _THEME_STOCKS_CACHE_TTL > 0:
+        _THEME_STOCKS_CACHE[theme_id] = (_time.monotonic(), stocks)
     return stocks
 
 
@@ -118,7 +133,9 @@ async def refresh_themes() -> dict:
     """
     from backend.core.themes.theme_refresher import refresh_themes_from_seed
 
-    return await refresh_themes_from_seed()
+    result = await refresh_themes_from_seed()
+    _THEME_STOCKS_CACHE.clear()  # 명시적 갱신 후에는 캐시 만료 대기 없이 즉시 반영
+    return result
 
 
 # ── tima P1: 시간대별 테마 스냅숏(타임라인) ──────────────────────────────────
