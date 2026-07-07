@@ -7,6 +7,7 @@ import logging
 import os
 import time as _time
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -93,6 +94,7 @@ async def fetch_theme_stocks(
             score=float(r["score"]),
             theme_id=theme_id,
             theme_name=theme["name"],
+            change_pct=float(r["score"]),
         )
         for r in rows
     ]
@@ -136,6 +138,27 @@ async def refresh_themes() -> dict:
 
     result = await refresh_themes_from_seed()
     _THEME_STOCKS_CACHE.clear()  # 명시적 갱신 후에는 캐시 만료 대기 없이 즉시 반영
+    return result
+
+
+@router.post("/api/themes/import-finup")
+async def import_finup_themes(
+    snapshot_path: Optional[str] = Query(default=None),
+    replace: bool = Query(default=True),
+) -> dict:
+    """Finup 크롤링 스냅숏 → themes/theme_stocks 적재.
+
+    `snapshot_path` 미지정 시 `data/finup_theme/latest.json`이 가리키는 최신 스냅숏을
+    사용한다. `replace=true`는 기존 큐레이션 시드 테마를 비우고 Finup 스냅숏으로
+    보드를 교체한다.
+    """
+    from backend.core.themes.finup_importer import import_finup_theme_snapshot
+
+    result = await import_finup_theme_snapshot(
+        Path(snapshot_path) if snapshot_path else None,
+        replace=replace,
+    )
+    _THEME_STOCKS_CACHE.clear()
     return result
 
 

@@ -44,6 +44,12 @@ function fmtNum(n?: number | null): string {
   return n === null || n === undefined ? '-' : n.toLocaleString('ko-KR');
 }
 
+function fmtEok(n?: number | null): string {
+  return n === null || n === undefined
+    ? '-'
+    : n.toLocaleString('ko-KR', { maximumFractionDigits: 0 });
+}
+
 // 도달 시각 HH:MM:SS (SF존 등)
 function fmtReached(s?: string | null): string | null {
   if (!s) return null;
@@ -230,7 +236,7 @@ export default function SignalsPage() {
                         )}
                       </td>
                       <td className="p-2.5 text-right">
-                        <div className="font-mono text-tima-text">{fmtNum(it.value_traded)}</div>
+                        <div className="font-mono text-tima-text">{fmtEok(it.value_traded)}</div>
                         <div className="font-mono text-[11px] text-tima-sub">{capDisplay}</div>
                       </td>
                       {levelLabels.map((lb) => {

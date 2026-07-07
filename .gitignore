@@ -23,6 +23,7 @@ build/
 .env.*.backup-*
 .env.backup
 .env.backup-*
+docs/key.md
 
 # IDE
 .vscode/
@@ -68,6 +69,9 @@ htmlcov/
 data/*
 # 예외: 테마 매핑 시드는 커밋(유지보수 대상 — 시장-맥락 add-on)
 !data/theme_map.json
+# 예외: Finup 테마 크롤링 기초 데이터는 테마 기능 재현을 위해 추적
+!data/finup_theme/
+!data/finup_theme/**
 
 # Phase 1 daily pipeline 런타임 산출물 (analysis/*.py 는 추적 유지)
 analysis/imports/

@@ -15,6 +15,12 @@ tags: [index, plan]
 | [[MASTER-EXECUTION-PLAN-v2\|마스터 실행 계획 v2]] | Phase 0~6 / BAR-40~79 (40 티켓, BAR-51→BAR-79 재할당, BAR-44b 신설) | 2026-05-06 | 🟢 Active |
 | [[MASTER-EXECUTION-PLAN-v1\|마스터 실행 계획 v1]] | (supersede by v2) | 2026-05-06 | 📦 보존 |
 
+## 참조 문서 (벤치마킹)
+
+| 문서 | 범위 | 날짜 | 상태 |
+|------|------|------|------|
+| [[reference/tima-app-prd\|티마(TIMA) 앱 벤치마킹 PRD]] | 시장 테마·매매전략(F존 5종) 기능 역설계 + UI/UX 디자인 분석(컬러 실측·컴포넌트·UX플로우) + BarroAiTrade 갭 매핑 (레퍼런스 27장 + 548프레임 컨택트 시트 10장) | 2026-07-03 | 🟢 Draft v1.2 |
+
 ## 피처별 Plan 문서
 
 | 피처 | 문서 | 날짜 | 상태 |

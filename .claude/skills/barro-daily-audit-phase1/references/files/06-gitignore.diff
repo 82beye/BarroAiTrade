@@ -1,0 +1,61 @@
+# `.gitignore` 추가 라인 (Phase 1)
+
+worktree 의 기존 `.gitignore` 에서 다음 블록을 찾아라:
+
+```
+# Runtime data (SQLite, OHLCV cache 등)
+data/
+```
+
+(또는 유사한 `# Runtime data` 주석이 있는 블록)
+
+해당 블록 **바로 다음**에 아래 5줄을 추가한다:
+
+```
+
+# Phase 1 daily pipeline 런타임 산출물 (analysis/*.py 는 추적 유지)
+analysis/imports/
+analysis/strategy_ledger.csv
+analysis/strategy_perf.csv
+analysis/strategy_perf.png
+```
+
+(주의: 위 코드 블록의 첫 줄은 빈 줄이다 — 기존 `data/` 라인과 시각적으로 구분)
+
+## 적용 방법
+
+`Edit` 도구로 다음과 같이 처리:
+
+- `old_string`: `# Runtime data (SQLite, OHLCV cache 등)\ndata/\n`
+- `new_string`:
+  ```
+  # Runtime data (SQLite, OHLCV cache 등)
+  data/
+
+  # Phase 1 daily pipeline 런타임 산출물 (analysis/*.py 는 추적 유지)
+  analysis/imports/
+  analysis/strategy_ledger.csv
+  analysis/strategy_perf.csv
+  analysis/strategy_perf.png
+  ```
+
+또는 `# Runtime data` 주석 형식이 약간 다르면 (예: 다른 한국어 주석),
+실제 worktree `.gitignore` 를 먼저 `Read` 로 읽고 해당 블록의 정확한 텍스트를
+`old_string` 으로 사용한다.
+
+## 검증
+
+```bash
+cd /Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a
+grep -A 1 "daily pipeline 런타임" .gitignore
+# 출력에 4개의 analysis/ 라인이 보여야 함
+```
+
+그리고 `git check-ignore -v analysis/imports analysis/strategy_ledger.csv` 으로
+해당 경로가 ignore 되는지 확인 (이미 존재하는 경우만).
+
+## 주의
+
+- `analysis/*.py` 는 추적 유지 — `analysis/` 전체를 ignore 하면 안 됨
+- `analysis/strategy_ledger.csv`, `strategy_perf.csv`, `strategy_perf.png` 는 도구 실행 시 자동 생성됨 — 커밋되면 안 되므로 본 ignore 가 필수
+- `analysis/imports/` 는 zip 해제 산출물 — 단일 디렉터리 전체 ignore

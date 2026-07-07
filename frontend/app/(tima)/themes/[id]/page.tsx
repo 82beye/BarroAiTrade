@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Disclaimer } from '@/components/layout/disclaimer';
 import { WatchlistStar } from '@/components/watchlist/watchlist-star';
 import { api, type ThemeStockItem, type NewsItem } from '@/lib/api';
+import { formatDailyLimitScalePct } from '@/lib/change-percent';
 import { toInAppHref } from '@/lib/in-app-link';
 
 interface Theme {
@@ -18,6 +19,12 @@ const POLL_MS = 15_000;
 
 function fmtNum(n?: number | null): string {
   return n === null || n === undefined ? '-' : n.toLocaleString('ko-KR');
+}
+
+function fmtEok(n?: number | null): string {
+  return n === null || n === undefined
+    ? '-'
+    : n.toLocaleString('ko-KR', { maximumFractionDigits: 0 });
 }
 
 // 등락률 → 전일대비(변화금액) 역산 (ThemeStockItem 은 change_pct 만 제공)
@@ -238,10 +245,10 @@ export default function ThemeDetailPage() {
                           : `${up ? '▲' : '▼'} ${fmtNum(Math.round(Math.abs(chg)))}`}
                       </td>
                       <td className={`p-2.5 text-right font-mono ${dirColor}`}>
-                        {!hasCp ? '-' : `${up ? '+' : '-'}${Math.abs(cp as number).toFixed(2)}%`}
+                        {formatDailyLimitScalePct(cp)}
                       </td>
                       <td className="p-2.5 text-right font-mono text-tima-text">
-                        {fmtNum(s.value_traded)}
+                        {fmtEok(s.value_traded)}
                       </td>
                     </tr>
                   );

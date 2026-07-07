@@ -47,14 +47,63 @@ const DRAWER_LINKS = [
 ];
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+const MARKET_OPEN_MIN = 9 * 60;
+const MARKET_CLOSE_MIN = 15 * 60 + 30;
+
+function getSeoulParts(date: Date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour),
+    minute: Number(map.minute),
+  };
+}
+
+function isWeekday(day: number): boolean {
+  return day >= 1 && day <= 5;
+}
+
+function previousMarketDate(dateKeyUtc: number): Date {
+  let d = new Date(dateKeyUtc - 24 * 60 * 60 * 1000);
+  while (!isWeekday(d.getUTCDay())) {
+    d = new Date(d.getTime() - 24 * 60 * 60 * 1000);
+  }
+  return d;
+}
 
 function nowLabel(): string {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mi = String(d.getMinutes()).padStart(2, '0');
-  return `${mm}-${dd}(${WEEKDAYS[d.getDay()]}) ${hh}:${mi}`;
+  const parts = getSeoulParts(new Date());
+  const dateKeyUtc = Date.UTC(parts.year, parts.month - 1, parts.day);
+  const today = new Date(dateKeyUtc);
+  const weekday = today.getUTCDay();
+  const currentMin = parts.hour * 60 + parts.minute;
+  const isMarketOpen =
+    isWeekday(weekday) && currentMin >= MARKET_OPEN_MIN && currentMin < MARKET_CLOSE_MIN;
+
+  const displayDate = isMarketOpen
+    ? today
+    : isWeekday(weekday) && currentMin >= MARKET_CLOSE_MIN
+      ? today
+      : previousMarketDate(dateKeyUtc);
+  const displayHour = isMarketOpen ? parts.hour : Math.floor(MARKET_CLOSE_MIN / 60);
+  const displayMinute = isMarketOpen ? parts.minute : MARKET_CLOSE_MIN % 60;
+
+  const mm = String(displayDate.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(displayDate.getUTCDate()).padStart(2, '0');
+  const hh = String(displayHour).padStart(2, '0');
+  const mi = String(displayMinute).padStart(2, '0');
+  return `${mm}-${dd}(${WEEKDAYS[displayDate.getUTCDay()]}) ${hh}:${mi}`;
 }
 
 /**

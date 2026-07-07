@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-06-07T07:11:48.486Z",
+  "lastUpdated": "2026-07-05T18:08:17.307Z",
   "activeFeatures": [
     "bar-17-dashboard",
     "gateway",
@@ -43,7 +43,12 @@
     "tmp",
     "legacy",
     "2026-06-03",
-    "automation"
+    "automation",
+    "signals",
+    "(admin)",
+    "calendar",
+    "[symbol]",
+    "tima"
   ],
   "primaryFeature": "bar-17-dashboard",
   "features": {
@@ -83,9 +88,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T01:35:02.437Z",
-        "lastUpdated": "2026-05-16T07:56:51.338Z"
+        "lastUpdated": "2026-07-05T18:08:17.307Z"
       },
-      "lastFile": "/Users/beye/workspace/BarroAiTrade/backend/core/gateway/kiwoom_native_candles.py"
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/tima-dashboard-p0/backend/core/gateway/readonly_scan_gateway.py"
     },
     "backend": {
       "phase": "do",
@@ -96,9 +101,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T01:35:08.910Z",
-        "lastUpdated": "2026-05-30T18:47:46.351Z"
+        "lastUpdated": "2026-07-04T17:49:29.450Z"
       },
-      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/supertrend-strategy/backend/models/signal.py"
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/tima-dashboard-p0/backend/main.py"
     },
     "core": {
       "phase": "do",
@@ -148,9 +153,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T01:38:55.961Z",
-        "lastUpdated": "2026-04-12T02:33:51.214Z"
+        "lastUpdated": "2026-07-05T16:31:07.313Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/next.config.js"
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/tima-dashboard-p0/frontend/app/layout.tsx"
     },
     "trading": {
       "phase": "do",
@@ -213,9 +218,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T02:19:58.515Z",
-        "lastUpdated": "2026-04-11T02:20:12.738Z"
+        "lastUpdated": "2026-07-04T23:17:17.590Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/frontend/components/dashboard/recent-orders.tsx"
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/tima-dashboard-p0/frontend/components/dashboard/price-chart.tsx"
     },
     "strategy": {
       "phase": "do",
@@ -252,9 +257,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T03:39:34.491Z",
-        "lastUpdated": "2026-05-05T19:39:51.976Z"
+        "lastUpdated": "2026-07-05T17:59:24.613Z"
       },
-      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/strange-jackson-3c740a/backend/api/routes/metrics.py"
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/tima-dashboard-p0/backend/api/routes/screener.py"
     },
     "monitoring": {
       "phase": "do",
@@ -356,9 +361,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-04-11T09:25:38.809Z",
-        "lastUpdated": "2026-04-11T09:25:38.809Z"
+        "lastUpdated": "2026-07-05T17:50:33.384Z"
       },
-      "lastFile": "/Users/beye/Desktop/Workspace/Barro/BarroAiTrade/backend/db/database.py"
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/tima-dashboard-p0/backend/db/_legacy_sqlite.py"
     },
     "repositories": {
       "phase": "do",
@@ -421,9 +426,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-05T19:04:36.454Z",
-        "lastUpdated": "2026-06-03T14:50:28.325Z"
+        "lastUpdated": "2026-07-05T18:03:05.667Z"
       },
-      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/rsi-supertrend-filter/backend/tests/test_supertrend_auto_trader.py"
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/tima-dashboard-p0/backend/tests/test_screener_api.py"
     },
     "scalping_team": {
       "phase": "do",
@@ -564,9 +569,9 @@
       "documents": {},
       "timestamps": {
         "started": "2026-05-30T03:17:51.055Z",
-        "lastUpdated": "2026-06-03T00:24:52.834Z"
+        "lastUpdated": "2026-07-04T01:34:50.144Z"
       },
-      "lastFile": "/Users/beye/.claude/jobs/9a937dc4/tmp/sweep_tail.py"
+      "lastFile": "/Users/beye/.claude/jobs/c8bae232/tmp/seed_dev_data.py"
     },
     "legacy": {
       "phase": "do",
@@ -606,6 +611,71 @@
         "lastUpdated": "2026-06-07T07:11:48.486Z"
       },
       "lastFile": "/Users/beye/workspace/BarroSkills/.claude/skills/barrotube/scripts/automation/render-direct.js"
+    },
+    "signals": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-07-04T01:36:47.601Z",
+        "lastUpdated": "2026-07-04T01:36:50.533Z"
+      },
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/tima-dashboard-p0/frontend/app/(tima)/signals/page.tsx"
+    },
+    "(admin)": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-07-04T01:50:16.581Z",
+        "lastUpdated": "2026-07-04T01:50:16.581Z"
+      },
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/tima-dashboard-p0/frontend/app/(admin)/layout.tsx"
+    },
+    "calendar": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-07-04T01:51:01.377Z",
+        "lastUpdated": "2026-07-04T01:51:01.377Z"
+      },
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/tima-dashboard-p0/frontend/app/(tima)/calendar/page.tsx"
+    },
+    "[symbol]": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-07-04T01:51:14.890Z",
+        "lastUpdated": "2026-07-04T01:51:14.890Z"
+      },
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/tima-dashboard-p0/frontend/app/(tima)/stocks/[symbol]/page.tsx"
+    },
+    "tima": {
+      "phase": "do",
+      "phaseNumber": 3,
+      "matchRate": null,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-07-05T16:29:53.615Z",
+        "lastUpdated": "2026-07-05T16:30:44.158Z"
+      },
+      "lastFile": "/Users/beye/workspace/BarroAiTrade/.claude/worktrees/tima-dashboard-p0/frontend/components/tima/tima-shell.tsx"
     }
   },
   "pipeline": {
@@ -616,7 +686,7 @@
   "session": {
     "startedAt": "2026-04-11T01:23:25.516Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-06-07T07:11:48.486Z"
+    "lastActivity": "2026-07-05T18:08:17.307Z"
   },
   "history": [
     {
@@ -5350,6 +5420,288 @@
     {
       "timestamp": "2026-06-07T07:11:48.486Z",
       "feature": "automation",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-03T19:42:23.777Z",
+      "feature": "dashboard",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-03T19:42:36.622Z",
+      "feature": "dashboard",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-03T19:42:36.867Z",
+      "feature": "dashboard",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T01:34:50.144Z",
+      "feature": "tmp",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T01:36:47.601Z",
+      "feature": "signals",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T01:36:50.533Z",
+      "feature": "signals",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T01:50:15.299Z",
+      "feature": "frontend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T01:50:16.581Z",
+      "feature": "(admin)",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T01:50:28.243Z",
+      "feature": "dashboard",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T01:50:57.212Z",
+      "feature": "frontend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T01:51:01.377Z",
+      "feature": "calendar",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T01:51:14.891Z",
+      "feature": "[symbol]",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T17:49:29.450Z",
+      "feature": "backend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T17:50:03.987Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T18:05:08.750Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T23:06:55.011Z",
+      "feature": "dashboard",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T23:07:00.781Z",
+      "feature": "dashboard",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T23:07:23.575Z",
+      "feature": "dashboard",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T23:09:54.760Z",
+      "feature": "dashboard",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T23:09:56.876Z",
+      "feature": "dashboard",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T23:10:16.794Z",
+      "feature": "dashboard",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T23:17:06.662Z",
+      "feature": "dashboard",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-04T23:17:17.590Z",
+      "feature": "dashboard",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T16:29:53.615Z",
+      "feature": "tima",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T16:30:17.270Z",
+      "feature": "tima",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T16:30:44.158Z",
+      "feature": "tima",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T16:31:07.313Z",
+      "feature": "frontend",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:38:16.710Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:38:36.072Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:38:45.742Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:38:57.632Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:39:06.136Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:50:33.384Z",
+      "feature": "db",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:55:31.934Z",
+      "feature": "gateway",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:56:05.790Z",
+      "feature": "gateway",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:56:56.302Z",
+      "feature": "gateway",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:57:08.807Z",
+      "feature": "gateway",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:58:08.287Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:58:20.641Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:58:34.264Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:58:57.361Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T17:59:24.613Z",
+      "feature": "routes",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T18:00:52.175Z",
+      "feature": "tests",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T18:01:07.972Z",
+      "feature": "tests",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T18:01:20.950Z",
+      "feature": "tests",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T18:03:05.667Z",
+      "feature": "tests",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-05T18:08:17.307Z",
+      "feature": "gateway",
       "phase": "do",
       "action": "updated"
     }
