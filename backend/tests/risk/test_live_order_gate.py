@@ -86,9 +86,23 @@ async def test_env_flag_truthy_passes(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_daily_loss_limit_blocks_buy(tmp_path):
-    gate = _make_gate(tmp_path, dry_run=True, policy=GatePolicy(daily_loss_limit_pct=Decimal("-3.0")))
+    gate = _make_gate(
+        tmp_path,
+        dry_run=True,
+        policy=GatePolicy(
+            daily_loss_limit_pct=Decimal("-3.0"),
+            daily_loss_order_block_enabled=True,
+        ),
+    )
     with pytest.raises(DailyLossLimitExceeded):
         await gate.place_buy(symbol="005930", qty=1, daily_pnl_pct=Decimal("-3.5"))
+
+
+@pytest.mark.asyncio
+async def test_daily_loss_limit_block_temporarily_disabled_by_default(tmp_path):
+    gate = _make_gate(tmp_path, dry_run=True, policy=GatePolicy(daily_loss_limit_pct=Decimal("-3.0")))
+    r = await gate.place_buy(symbol="005930", qty=1, daily_pnl_pct=Decimal("-3.5"))
+    assert r.dry_run is True
 
 
 @pytest.mark.asyncio
@@ -191,7 +205,8 @@ async def test_p0_2_daily_loss_latch_sticky(tmp_path):
     459550: 12:30/12:35 -3.x% 차단 후 12:55 회복으로 통과시켜 2차(-509K) 재진입 허용 → latch 로 차단.
     """
     policy = GatePolicy(require_env_flag=False, daily_loss_latch=True,
-                        daily_loss_limit_pct=Decimal("-3.0"))
+                        daily_loss_limit_pct=Decimal("-3.0"),
+                        daily_loss_order_block_enabled=True)
     gate = _make_gate(tmp_path, dry_run=True, policy=policy)
     # 1) -3.5% → 차단 + latch 설정
     with pytest.raises(DailyLossLimitExceeded):
@@ -204,7 +219,8 @@ async def test_p0_2_daily_loss_latch_sticky(tmp_path):
 @pytest.mark.asyncio
 async def test_p0_2_no_latch_allows_recovery(tmp_path):
     """latch OFF(기본) — 회복 시 매수 재개(기존 stateless 동작 보존)."""
-    policy = GatePolicy(require_env_flag=False, daily_loss_limit_pct=Decimal("-3.0"))
+    policy = GatePolicy(require_env_flag=False, daily_loss_limit_pct=Decimal("-3.0"),
+                        daily_loss_order_block_enabled=True)
     gate = _make_gate(tmp_path, dry_run=True, policy=policy)
     with pytest.raises(DailyLossLimitExceeded):
         await gate.place_buy(symbol="459550", qty=1, daily_pnl_pct=Decimal("-3.5"))

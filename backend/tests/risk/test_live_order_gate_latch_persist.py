@@ -40,6 +40,7 @@ def _gate(tmp_path, state_path):
         audit_path=tmp_path / "audit.csv",
         policy=GatePolicy(
             daily_loss_limit_pct=Decimal("-3.0"),
+            daily_loss_order_block_enabled=True,
             daily_loss_latch=True,
             latch_state_path=str(state_path),
             loss_metric_label="당일실현+보유평가/추정예탁자산",
@@ -78,6 +79,7 @@ async def test_no_latch_without_state_path_is_per_instance(tmp_path):
         return LiveOrderGate(
             executor=exec_, audit_path=tmp_path / "audit.csv",
             policy=GatePolicy(daily_loss_limit_pct=Decimal("-3.0"),
+                              daily_loss_order_block_enabled=True,
                               daily_loss_latch=True),
         )
 

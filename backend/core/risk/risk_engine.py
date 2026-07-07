@@ -16,10 +16,19 @@ from backend.models.risk import RiskLimits, RiskStatus
 
 logger = logging.getLogger(__name__)
 
+# TEMP(2026-07-07): 일일 손실한도 도달 시 신규 주문 차단 임시 비활성화.
+# 손절/익절, 포지션 수, 익스포저 제한은 그대로 유지한다.
+DAILY_LOSS_ORDER_BLOCK_ENABLED = False
+
 
 class RiskEngine:
-    def __init__(self, limits: RiskLimits) -> None:
+    def __init__(
+        self,
+        limits: RiskLimits,
+        daily_loss_order_block_enabled: bool = DAILY_LOSS_ORDER_BLOCK_ENABLED,
+    ) -> None:
         self.limits = limits
+        self.daily_loss_order_block_enabled = daily_loss_order_block_enabled
         self._daily_pnl_pct: float = 0.0
         self._total_value: float = 0.0
         self._risk_events: List[Dict[str, Any]] = []  # 인메모리 이벤트 로그
@@ -32,8 +41,11 @@ class RiskEngine:
         Returns:
             (approved, reason) — False 시 이유 포함
         """
-        # 일일 손실 한도 체크
-        if self._daily_pnl_pct <= self.limits.daily_loss_limit_pct:
+        # 일일 손실 한도 주문 차단은 임시 비활성화 상태.
+        if (
+            self.daily_loss_order_block_enabled
+            and self._daily_pnl_pct <= self.limits.daily_loss_limit_pct
+        ):
             reason = f"일일 손실 한도 초과: {self._daily_pnl_pct:.1%}"
             self._log_risk_event("order_blocked_daily_loss", reason=reason)
             return False, reason
@@ -172,7 +184,7 @@ class RiskEngine:
             daily_pnl_pct=self._daily_pnl_pct,
             position_count=len(positions),
             daily_limit_breached=daily_limit_breached,
-            new_entry_blocked=daily_limit_breached,
+            new_entry_blocked=daily_limit_breached and self.daily_loss_order_block_enabled,
             limits=self.limits,
             timestamp=datetime.now(),
         )

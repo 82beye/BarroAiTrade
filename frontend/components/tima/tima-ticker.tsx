@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { toInAppHref } from '@/lib/in-app-link';
 import { api, type NewsItem, type MarketIndex } from '@/lib/api';
 
 const POLL_MS = 60_000;
@@ -81,10 +83,8 @@ export function TimaTicker() {
   return (
     <div>
       {/* ① 특징주 뉴스 1줄 (베이지) */}
-      <a
-        href={current?.url}
-        target="_blank"
-        rel="noopener noreferrer"
+      <Link
+        href={toInAppHref(current?.url)}
         className="flex h-8 items-center gap-2 overflow-hidden bg-tima-tickerNews px-3 text-xs"
       >
         <span className="shrink-0 font-bold text-tima-emph">[특징주]</span>
@@ -100,7 +100,7 @@ export function TimaTicker() {
         ) : (
           <span className="text-tima-sub">특징주 뉴스 대기 중</span>
         )}
-      </a>
+      </Link>
 
       {/* ② 지수 바 (연보라) */}
       <div className="flex h-8 items-center gap-5 overflow-x-auto bg-tima-tickerIndex px-3 text-xs">

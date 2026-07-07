@@ -87,6 +87,102 @@ class TestExtractThemeGroups:
         assert groups == {}
 
 
+class TestClassifyThemeGroups:
+    def test_rejects_boilerplate_keywords(self):
+        for keyword in ["펀드", "연합뉴스", "서울", "김태종", "돌파"]:
+            theme_name, reason = ntd.classify_theme_keyword(keyword)
+            assert theme_name is None
+            assert reason in {"stopword", "unclassified"}
+
+    def test_maps_aliases_to_canonical_theme(self):
+        assert ntd.classify_theme_keyword("파운드리") == ("반도체", "taxonomy")
+        assert ntd.classify_theme_keyword("배터리") == ("2차전지", "taxonomy")
+        assert ntd.classify_theme_keyword("SMR") == ("원전", "taxonomy")
+
+    def test_classified_groups_merge_aliases_and_reject_noise(self):
+        groups = {
+            "반도체": [("005930", 0.4)],
+            "파운드리": [("005930", 0.7), ("000660", 0.3)],
+            "펀드": [("005930", 0.9), ("000660", 0.8)],
+        }
+        classified, keywords, rejected = ntd.classify_theme_groups(groups)
+
+        assert set(classified) == {"반도체"}
+        assert classified["반도체"] == [("005930", 0.7), ("000660", 0.3)]
+        assert keywords["반도체"] == ["반도체", "파운드리"]
+        assert rejected == {"펀드": "stopword"}
+
+    @pytest.mark.asyncio
+    async def test_rules_analyst_accepts_dynamic_theme_keyword(self):
+        groups = {
+            "초전도체": [("111111", 0.6), ("222222", 0.5)],
+            "연합뉴스": [("111111", 0.9), ("222222", 0.8)],
+        }
+        classified, keywords, rejected, decisions, backend = (
+            await ntd.classify_theme_groups_with_analyst(
+                groups,
+                candidates=[
+                    {"symbol": "111111", "name": "A테크"},
+                    {"symbol": "222222", "name": "B소재"},
+                ],
+                symbol_articles={},
+                analyst_backend="rules",
+            )
+        )
+
+        assert backend == "rules"
+        assert classified["초전도체"] == [("111111", 0.6), ("222222", 0.5)]
+        assert keywords["초전도체"] == ["초전도체"]
+        assert rejected == {"연합뉴스": "stopword"}
+        assert any(d["action"] == "accept" and d["theme"] == "초전도체" for d in decisions)
+
+    @pytest.mark.asyncio
+    async def test_claude_analyst_groups_keywords_into_new_theme(self):
+        groups = {
+            "변압기": [("010120", 0.7), ("006340", 0.4)],
+            "전력망": [("010120", 0.5), ("006340", 0.6)],
+            "펀드": [("010120", 0.9), ("006340", 0.8)],
+        }
+
+        def fake_llm(prompt):
+            assert "한국 주식 장중 테마" in prompt
+            return {
+                "themes": [
+                    {
+                        "theme": "전력망 증설",
+                        "keywords": ["변압기", "전력망"],
+                        "symbols": ["010120", "006340"],
+                        "confidence": 0.86,
+                        "reason": "전력 인프라 뉴스와 거래대금이 함께 붙음",
+                    }
+                ],
+                "rejected_keywords": [{"keyword": "펀드", "reason": "금융 일반어"}],
+            }
+
+        classified, keywords, rejected, decisions, backend = (
+            await ntd.classify_theme_groups_with_analyst(
+                groups,
+                candidates=[
+                    {"symbol": "010120", "name": "LS ELECTRIC"},
+                    {"symbol": "006340", "name": "대원전선"},
+                ],
+                symbol_articles={
+                    "010120": ["LS ELECTRIC 변압기 수출 확대"],
+                    "006340": ["대원전선 전력망 투자 기대"],
+                },
+                analyst_backend="claude-cli",
+                llm_fn=fake_llm,
+            )
+        )
+
+        assert backend == "claude-cli"
+        assert set(classified) == {"전력망 증설"}
+        assert classified["전력망 증설"] == [("010120", 0.7), ("006340", 0.6)]
+        assert keywords["전력망 증설"] == ["변압기", "전력망"]
+        assert rejected == {"펀드": "금융 일반어"}
+        assert decisions[0]["action"] == "accept"
+
+
 @pytest.fixture
 async def news_db(monkeypatch, tmp_path):
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -211,6 +307,38 @@ class TestDiscoverDynamicThemes:
         assert result["themes_created"] == 0
 
     @pytest.mark.asyncio
+    async def test_candidate_discovery_can_include_already_themed_symbols(
+        self, monkeypatch, news_db
+    ):
+        async with get_db() as db:
+            await db.execute(
+                text("INSERT INTO theme_stocks (theme_id, symbol, score) VALUES (1, '005930', 5.0)")
+            )
+        quotes = _FakeQuotes(
+            value_rows=[
+                {"symbol": "005930", "name": "삼성전자", "value_traded": 1000.0},
+                {"symbol": "999999", "name": "무명회사", "value_traded": 900.0},
+            ]
+        )
+        seen: list[list[str]] = []
+
+        async def fake_match(candidates, *, lookback_days=7):
+            seen.append([c["symbol"] for c in candidates])
+            return {}
+
+        monkeypatch.setattr(ntd, "match_articles_to_symbols", fake_match)
+
+        await ntd.discover_dynamic_theme_candidates(
+            quotes=quotes, exclude_already_themed=True, analyst_backend="rules"
+        )
+        await ntd.discover_dynamic_theme_candidates(
+            quotes=quotes, exclude_already_themed=False, analyst_backend="rules"
+        )
+
+        assert seen[0] == ["999999"]
+        assert seen[1] == ["005930", "999999"]
+
+    @pytest.mark.asyncio
     async def test_full_pipeline_writes_via_repo(self, monkeypatch, news_db):
         quotes = _FakeQuotes(
             value_rows=[
@@ -247,7 +375,9 @@ class TestDiscoverDynamicThemes:
         monkeypatch.setattr(ThemeRepository, "add_keyword", fake_add_keyword)
         monkeypatch.setattr(ThemeRepository, "link_stock", fake_link)
 
-        result = await ntd.discover_dynamic_themes(quotes=quotes, min_symbols_per_theme=2)
+        result = await ntd.discover_dynamic_themes(
+            quotes=quotes, min_symbols_per_theme=2, analyst_backend="rules"
+        )
 
         assert result["status"] == "ok"
         assert result["candidates"] == 2
@@ -256,3 +386,39 @@ class TestDiscoverDynamicThemes:
         assert any(name == "반도체" for name, _ in created_themes)
         assert all(desc == "뉴스기반 자동발굴" for _, desc in created_themes)
         assert len(linked) >= 2  # 반도체 테마에 최소 2종목 링크
+
+    @pytest.mark.asyncio
+    async def test_persist_skips_single_symbol_groups(self, monkeypatch):
+        created_themes: list[str] = []
+        linked: list[str] = []
+
+        async def fake_upsert(self, name, description=""):
+            created_themes.append(name)
+            return len(created_themes)
+
+        async def fake_add_keyword(self, theme_id, keyword):
+            return True
+
+        async def fake_link(self, theme_id, symbol, score):
+            linked.append(symbol)
+            return True
+
+        monkeypatch.setattr(ThemeRepository, "upsert_theme", fake_upsert)
+        monkeypatch.setattr(ThemeRepository, "add_keyword", fake_add_keyword)
+        monkeypatch.setattr(ThemeRepository, "link_stock", fake_link)
+
+        result = await ntd.persist_theme_groups(
+            {
+                "개별급등": [{"symbol": "111111", "score": 0.9}],
+                "반도체": [
+                    {"symbol": "005930", "score": 0.8},
+                    {"symbol": "000660", "score": 0.7},
+                ],
+            },
+            theme_keywords={"개별급등": ["개별급등"], "반도체": ["반도체"]},
+        )
+
+        assert result["themes_created"] == 1
+        assert result["individual_groups"] == 1
+        assert created_themes == ["반도체"]
+        assert linked == ["005930", "000660"]

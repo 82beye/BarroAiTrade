@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Disclaimer } from '@/components/layout/disclaimer';
 import { PriceChart } from '@/components/dashboard/price-chart';
 import { categoryStyle } from '@/lib/event-category';
+import { toInAppHref } from '@/lib/in-app-link';
 import { WatchlistStar } from '@/components/watchlist/watchlist-star';
 import {
   api,
@@ -45,7 +46,7 @@ export default function StockDetailPage() {
   const params = useParams();
   const symbol = Array.isArray(params.symbol) ? params.symbol[0] : (params.symbol ?? '');
 
-  const [tab, setTab] = useState<DetailTab>('info');
+  const [tab, setTab] = useState<DetailTab>('chart');
   const [ticker, setTicker] = useState<Ticker | null>(null);
   const [themes, setThemes] = useState<StockTheme[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -161,14 +162,14 @@ export default function StockDetailPage() {
   }, [news, symbol, ticker?.name]);
 
   const TABS: { key: DetailTab; label: string }[] = [
-    { key: 'info', label: '정보' },
     { key: 'chart', label: '차트' },
     { key: 'orderbook', label: '호가' },
+    { key: 'info', label: '정보' },
   ];
 
   return (
     <div className="p-3">
-      {/* 뒤로 + 서브탭 (정보 | 차트 | 호가 — 활성 tima.select 분홍, PRD §3.3) */}
+      {/* 뒤로 + 서브탭 (차트 | 호가 | 정보 — 활성 tima.select 분홍, PRD §3.3) */}
       <div className="mb-3 flex items-center gap-2">
         <button
           onClick={() => history.back()}
@@ -315,11 +316,9 @@ export default function StockDetailPage() {
               <h2 className="mb-2 text-sm font-bold text-tima-teal">관련 뉴스</h2>
               <div className="space-y-2">
                 {relatedNews.map((n) => (
-                  <a
+                  <Link
                     key={n.id}
-                    href={n.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    href={toInAppHref(n.url)}
                     className="block rounded-lg border border-tima-line bg-tima-bg/40 px-3 py-2 hover:border-tima-teal/50"
                   >
                     <p className="text-sm text-tima-text">{n.title}</p>
@@ -334,7 +333,7 @@ export default function StockDetailPage() {
                         })}
                       </span>
                     </div>
-                  </a>
+                  </Link>
                 ))}
               </div>
             </div>

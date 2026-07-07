@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Disclaimer } from '@/components/layout/disclaimer';
 import { WatchlistStar } from '@/components/watchlist/watchlist-star';
 import { api, type ThemeStockItem, type NewsItem } from '@/lib/api';
+import { toInAppHref } from '@/lib/in-app-link';
 
 interface Theme {
   id: number;
@@ -150,11 +151,9 @@ export default function ThemeDetailPage() {
           <h2 className="mb-2 text-sm font-bold text-tima-teal">최근이슈</h2>
           <div className="space-y-2">
             {(issuesOpen ? themeIssues : themeIssues.slice(0, 3)).map((n) => (
-              <a
+              <Link
                 key={n.id}
-                href={n.url}
-                target="_blank"
-                rel="noopener noreferrer"
+                href={toInAppHref(n.url)}
                 className="block rounded-lg border border-tima-line bg-tima-bg/40 px-3 py-2 hover:border-tima-teal/50"
               >
                 <p className="text-sm text-tima-text">{n.title}</p>
@@ -169,7 +168,7 @@ export default function ThemeDetailPage() {
                     })}
                   </span>
                 </div>
-              </a>
+              </Link>
             ))}
           </div>
           {themeIssues.length > 3 && (

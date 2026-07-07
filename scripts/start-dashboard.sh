@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # BarroAiTrade /monitor 대시보드 수동 기동 스크립트
-# 구성: Next.js 프론트엔드(:3000) + ngrok 터널(고정 도메인)
+# 구성: Next.js 프론트엔드(:3000) + Cloudflare Tunnel(trycloudflare)
 # launchd 미등록 영역 — 재부팅/장애 후 이 스크립트로 수동 기동.
 # 사용: ./scripts/start-dashboard.sh
 #
@@ -12,8 +12,8 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
 LOG_DIR="$PROJECT_ROOT/logs"
-NGROK_DOMAIN="myspace-wagon-elephant.ngrok-free.dev"
 PORT=3000
+CLOUDFLARED_LOG="$LOG_DIR/cloudflared.log"
 
 GREEN="\033[0;32m"; YELLOW="\033[1;33m"; RED="\033[0;31m"; NC="\033[0m"
 info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
@@ -40,17 +40,17 @@ else
         || warn "프론트엔드가 아직 :$PORT 바인딩 안 됨 — logs/frontend.log 확인"
 fi
 
-# ── 2) ngrok 터널 (고정 도메인 → :PORT) ─────────────────────────────
-if pgrep -f "ngrok http" >/dev/null 2>&1; then
-    info "ngrok 이미 실행 중 — 건너뜀"
+# ── 2) Cloudflare Tunnel (trycloudflare → :PORT) ────────────────────
+if pgrep -f "cloudflared tunnel --url http://localhost:$PORT" >/dev/null 2>&1; then
+    info "Cloudflare Tunnel 이미 실행 중 — 건너뜀"
 else
-    command -v ngrok >/dev/null 2>&1 || error "ngrok 미설치 (/usr/local/bin/ngrok 등)"
-    info "ngrok 터널 기동 ($NGROK_DOMAIN → :$PORT)..."
-    nohup ngrok http --url="https://$NGROK_DOMAIN" "$PORT" </dev/null >>"$LOG_DIR/ngrok.log" 2>&1 &
+    command -v cloudflared >/dev/null 2>&1 || error "cloudflared 미설치 (/usr/local/bin/cloudflared 등)"
+    info "Cloudflare Tunnel 기동 (trycloudflare → :$PORT)..."
+    nohup cloudflared tunnel --url "http://localhost:$PORT" </dev/null >>"$CLOUDFLARED_LOG" 2>&1 &
     disown
-    # 에이전트 API(:4040)로 터널 등록 대기 (최대 ~15s)
-    for _ in $(seq 1 15); do
-        curl -s -m 3 http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -q public_url && break
+    # quick tunnel URL 로그 출력 대기 (최대 ~30s)
+    for _ in $(seq 1 30); do
+        grep -qE "https://[-a-z0-9]+\\.trycloudflare\\.com" "$CLOUDFLARED_LOG" 2>/dev/null && break
         sleep 1
     done
 fi
@@ -58,14 +58,18 @@ fi
 # ── 3) 검증 ─────────────────────────────────────────────────────────
 sleep 1
 LCODE=$(curl -s -m 10 -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/monitor" 2>/dev/null || echo "000")
-PCODE=$(curl -s -m 15 -H "ngrok-skip-browser-warning: 1" -o /dev/null -w "%{http_code}" \
-        "https://$NGROK_DOMAIN/monitor" 2>/dev/null || echo "000")
+PUBLIC_URL=$(grep -Eo "https://[-a-z0-9]+\\.trycloudflare\\.com" "$CLOUDFLARED_LOG" 2>/dev/null | tail -1 || true)
+if [[ -n "$PUBLIC_URL" ]]; then
+    PCODE=$(curl -s -m 15 -o /dev/null -w "%{http_code}" "$PUBLIC_URL/monitor" 2>/dev/null || echo "000")
+else
+    PCODE="000"
+fi
 
 echo
 info "로컬   /monitor  → HTTP $LCODE"
-info "공개   /monitor  → HTTP $PCODE   (https://$NGROK_DOMAIN/monitor)"
+info "공개   /monitor  → HTTP $PCODE   (${PUBLIC_URL:-Cloudflare URL 미확인}/monitor)"
 if [[ "$PCODE" == "200" ]]; then
     info "✅ 대시보드 가동 완료"
 else
-    warn "공개 URL이 200이 아님 — logs/frontend.log, logs/ngrok.log 확인"
+    warn "공개 URL이 200이 아님 — logs/frontend.log, logs/cloudflared.log 확인"
 fi

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Disclaimer } from '@/components/layout/disclaimer';
 import { ThemeCardView } from '@/components/themes/theme-card';
 import { api, type ThemeStockItem, type ThemeSnapshot } from '@/lib/api';
@@ -12,30 +12,97 @@ interface Theme {
 }
 
 const POLL_MS = 15_000;
+const MIN_THEME_STOCKS = 2;
 
 // 장중 3개 고정 스냅숏 시점 (PRD §3.2)
 const SNAPSHOT_SLOTS = ['10:00', '12:30', '15:35'];
 
-// 라이브 테마 카드 (자체 종목 조회 + 폴링)
-function LiveThemeCard({ theme, tick }: { theme: Theme; tick: number }) {
-  const [stocks, setStocks] = useState<ThemeStockItem[]>([]);
+function calcThemeChangePct(stocks?: ThemeStockItem[]): number | null {
+  const vals = (stocks ?? [])
+    .map((s) => s.change_pct)
+    .filter((v): v is number => v !== null && v !== undefined);
+  if (vals.length === 0) return null;
+  return vals.reduce((acc, v) => acc + v, 0) / vals.length;
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .getThemeStocks(theme.id)
-      .then((res) => {
-        if (!cancelled) setStocks(Array.isArray(res.data) ? res.data : []);
-      })
-      .catch(() => {
-        if (!cancelled) setStocks([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [theme.id, tick]);
+type ThemeCardItem = {
+  key: string;
+  id?: number | string | null;
+  name: string;
+  description: string;
+  stocks: ThemeStockItem[];
+  themeChangePct: number | null;
+};
 
-  return <ThemeCardView id={theme.id} name={theme.name} description={theme.description} stocks={stocks} />;
+function mergeIndividualStocks(groups: ThemeStockItem[][]): ThemeStockItem[] {
+  const bySymbol = new Map<string, ThemeStockItem>();
+  for (const stocks of groups) {
+    for (const stock of stocks) {
+      const prev = bySymbol.get(stock.symbol);
+      if (!prev || (stock.score ?? 0) > (prev.score ?? 0)) {
+        bySymbol.set(stock.symbol, stock);
+      }
+    }
+  }
+  return Array.from(bySymbol.values()).sort((a, b) => {
+    const av = a.change_pct;
+    const bv = b.change_pct;
+    if (av !== null && av !== undefined && bv !== null && bv !== undefined && av !== bv) {
+      return bv - av;
+    }
+    if (av !== null && av !== undefined) return -1;
+    if (bv !== null && bv !== undefined) return 1;
+    return (b.score ?? 0) - (a.score ?? 0);
+  });
+}
+
+function sortThemeItems(items: ThemeCardItem[]): ThemeCardItem[] {
+  return [...items].sort((a, b) => {
+    const av = a.themeChangePct;
+    const bv = b.themeChangePct;
+    if (av !== null && bv !== null && av !== bv) return bv - av;
+    if (av !== null && bv === null) return -1;
+    if (av === null && bv !== null) return 1;
+    return a.name.localeCompare(b.name, 'ko-KR');
+  });
+}
+
+function buildThemeCardItems(
+  themes: Theme[],
+  themeStocks: Record<number, ThemeStockItem[] | undefined>,
+): ThemeCardItem[] {
+  const themeItems: ThemeCardItem[] = [];
+  const individualGroups: ThemeStockItem[][] = [];
+
+  for (const theme of themes) {
+    const stocks = themeStocks[theme.id];
+    if (stocks !== undefined && stocks.length > 0 && stocks.length < MIN_THEME_STOCKS) {
+      individualGroups.push(stocks);
+      continue;
+    }
+    themeItems.push({
+      key: `theme-${theme.id}`,
+      id: theme.id,
+      name: theme.name,
+      description: theme.description,
+      stocks: stocks ?? [],
+      themeChangePct: calcThemeChangePct(stocks),
+    });
+  }
+
+  const individualStocks = mergeIndividualStocks(individualGroups);
+  if (individualStocks.length > 0) {
+    themeItems.push({
+      key: 'individual',
+      id: null,
+      name: '개별',
+      description: '단일 종목 이슈',
+      stocks: individualStocks,
+      themeChangePct: calcThemeChangePct(individualStocks),
+    });
+  }
+
+  return sortThemeItems(themeItems);
 }
 
 // 타임라인 스냅숏 모달 (PRD §3.2)
@@ -81,6 +148,20 @@ function TimelineModal({ onClose }: { onClose: () => void }) {
         minute: '2-digit',
       })
     : slot;
+  const rankedSnapshotThemes = useMemo(
+    () => {
+      const themeList = (snapshot?.themes ?? []).map((theme) => ({
+        id: Number(theme.id),
+        name: theme.name,
+        description: theme.description ?? '',
+      }));
+      const stocksByTheme = Object.fromEntries(
+        (snapshot?.themes ?? []).map((theme) => [Number(theme.id), theme.stocks ?? []]),
+      ) as Record<number, ThemeStockItem[]>;
+      return buildThemeCardItems(themeList, stocksByTheme);
+    },
+    [snapshot],
+  );
 
   return (
     <div
@@ -138,14 +219,15 @@ function TimelineModal({ onClose }: { onClose: () => void }) {
             <div className="py-12 text-center text-tima-sub">해당 시각 스냅숏이 없습니다.</div>
           ) : (
             <div className="grid grid-cols-2 gap-3">
-              {snapshot.themes.map((t) => (
+              {rankedSnapshotThemes.map((t) => (
                 <ThemeCardView
-                  key={t.id}
+                  key={t.key}
                   id={t.id}
                   name={t.name}
                   description={t.description}
-                  stocks={t.stocks ?? []}
+                  stocks={t.stocks}
                   capturedAt={capturedLabel}
+                  themeChangePct={t.themeChangePct}
                 />
               ))}
             </div>
@@ -158,32 +240,73 @@ function TimelineModal({ onClose }: { onClose: () => void }) {
 
 export default function ThemesPage() {
   const [themes, setThemes] = useState<Theme[]>([]);
+  const [themeStocks, setThemeStocks] = useState<Record<number, ThemeStockItem[] | undefined>>({});
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [tick, setTick] = useState(0);
   const [showTimeline, setShowTimeline] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loadingRef = useRef(false);
+
+  const rankedThemes = useMemo(
+    () => buildThemeCardItems(themes, themeStocks),
+    [themeStocks, themes],
+  );
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .getThemes()
-      .then((res) => {
-        if (!cancelled) setThemes(Array.isArray(res.data) ? res.data : []);
-      })
-      .catch(() => {
-        if (!cancelled) setThemes([]);
-      })
-      .finally(() => {
+
+    const loadThemeBoard = async () => {
+      if (loadingRef.current) return;
+      loadingRef.current = true;
+      try {
+        const themeRes = await api.getThemes();
+        if (cancelled) return;
+        const themeList: Theme[] = Array.isArray(themeRes.data) ? themeRes.data : [];
+        const themeIds = new Set(themeList.map((theme) => String(theme.id)));
+        setThemes(themeList);
+        setThemeStocks((prev) =>
+          Object.fromEntries(
+            Object.entries(prev).filter(([themeId]) => themeIds.has(themeId)),
+          ),
+        );
+        setLoading(false);
+        setLastUpdated(new Date());
+
+        await Promise.all(
+          themeList.map(async (theme) => {
+            try {
+              const stockRes = await api.getThemeStocks(theme.id);
+              if (!cancelled) {
+                setThemeStocks((prev) => ({
+                  ...prev,
+                  [theme.id]: Array.isArray(stockRes.data) ? stockRes.data : [],
+                }));
+              }
+            } catch {
+              if (!cancelled) {
+                setThemeStocks((prev) => ({ ...prev, [theme.id]: [] }));
+              }
+            }
+          }),
+        );
+      } catch {
+        if (!cancelled) {
+          setThemes([]);
+          setThemeStocks({});
+        }
+      } finally {
+        loadingRef.current = false;
         if (!cancelled) {
           setLoading(false);
           setLastUpdated(new Date());
         }
-      });
+      }
+    };
+
+    loadThemeBoard();
 
     intervalRef.current = setInterval(() => {
-      setTick((t) => t + 1);
-      setLastUpdated(new Date());
+      loadThemeBoard();
     }, POLL_MS);
 
     return () => {
@@ -214,8 +337,15 @@ export default function ThemesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3">
-          {themes.map((t) => (
-            <LiveThemeCard key={t.id} theme={t} tick={tick} />
+          {rankedThemes.map((item) => (
+            <ThemeCardView
+              key={item.key}
+              id={item.id}
+              name={item.name}
+              description={item.description}
+              stocks={item.stocks}
+              themeChangePct={item.themeChangePct}
+            />
           ))}
         </div>
       )}

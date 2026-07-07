@@ -21,15 +21,15 @@ import {
   type RealizedPnlResponse,
 } from '@/lib/api';
 
-// ── 티마 계좌 화면 (라이트 셸 · 총괄/보유종목/실현손익) ──
+// ── 티마 계좌 화면 (라이트 셸 · 보유종목/실현손익/총괄) ──
 // 키움 키 미연동 개발 환경에선 API 가 빈/에러 → 모든 뷰가 "미연동" 빈 상태로 강등.
 
 type AccountTab = 'overview' | 'holdings' | 'pnl';
 
 const TABS: { key: AccountTab; label: string }[] = [
-  { key: 'overview', label: '총괄' },
   { key: 'holdings', label: '보유종목' },
   { key: 'pnl', label: '실현손익' },
+  { key: 'overview', label: '총괄' },
 ];
 
 const DAYS_OPTIONS = [7, 30, 90];
@@ -109,7 +109,7 @@ export default function AccountPage() {
   const [history, setHistory] = useState<BalanceHistoryPoint[]>([]);
   const [pnl, setPnl] = useState<RealizedPnlResponse | null>(null);
   const [days, setDays] = useState(30);
-  const [tab, setTab] = useState<AccountTab>('overview');
+  const [tab, setTab] = useState<AccountTab>('holdings');
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);

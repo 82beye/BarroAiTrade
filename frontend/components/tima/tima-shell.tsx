@@ -128,14 +128,17 @@ export function TimaShell({ children }: { children: ReactNode }) {
         {/* ── 하단 고정 (티커·지수·5탭바) ── */}
         <div className="shrink-0">
           <TimaTicker />
-          <nav className="grid grid-cols-5 border-t border-black/10 bg-tima-tabbar">
+          <nav
+            className="grid grid-cols-5 border-t border-black/10 bg-tima-tabbar"
+            style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+          >
             {TABS.map((t) => {
               const active = pathname === t.href || pathname.startsWith(t.href + '/');
               return (
                 <Link
                   key={t.href}
                   href={t.href}
-                  className={`flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition-colors ${
+                  className={`flex flex-col items-center gap-0.5 pb-1 pt-2 text-[11px] font-medium transition-colors ${
                     active ? 'text-tima-teal' : 'text-tima-sub'
                   }`}
                 >

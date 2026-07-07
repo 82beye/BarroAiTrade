@@ -16,6 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from backend.core.risk.risk_engine import DAILY_LOSS_ORDER_BLOCK_ENABLED
 from backend.core.state import app_state
 from backend.models.risk import RiskLimits, RiskStatus
 
@@ -98,7 +99,7 @@ async def get_risk_status() -> dict:
             "daily_pnl_pct": round(daily_pnl_pct, 2),
             "position_count": position_count,
             "daily_limit_breached": breached,
-            "new_entry_blocked": breached,
+            "new_entry_blocked": breached and DAILY_LOSS_ORDER_BLOCK_ENABLED,
             "limits": {
                 "daily_loss_limit_pct": (
                     float(_eng_limits.daily_loss_limit_pct) if _eng_limits

@@ -26,6 +26,7 @@ from backend.core.gateway.kiwoom_native_orders import (
     OrderResult,
     OrderSide,
 )
+from backend.core.risk.risk_engine import DAILY_LOSS_ORDER_BLOCK_ENABLED
 from backend.core.notify.telegram import (
     TelegramNotifier,
     format_blocked_alert,
@@ -104,6 +105,8 @@ class InvalidOrderQty(ValueError):
 @dataclass(frozen=True)
 class GatePolicy:
     daily_loss_limit_pct: Decimal = Decimal("-3.0")     # -3% 도달 시 차단
+    # TEMP(2026-07-07): 일일 손실한도 도달 주문 차단 임시 비활성화.
+    daily_loss_order_block_enabled: bool = DAILY_LOSS_ORDER_BLOCK_ENABLED
     daily_max_orders: int = 50                           # 일 50건
     require_env_flag: bool = True                        # LIVE_TRADING_ENABLED 강제
     env_flag_name: str = "LIVE_TRADING_ENABLED"
@@ -162,8 +165,8 @@ class LiveOrderGate:
                     f"DRY_RUN 모드는 ok. 실전 진입 시 명시적 활성화 필수."
                 )
 
-        # 2) 일일 손실 한도 — 매수만 차단 (매도는 손절 가능해야)
-        if side == OrderSide.BUY:
+        # 2) 일일 손실 한도 — 임시 비활성화. 매도는 원래도 손절 가능해야 한다.
+        if side == OrderSide.BUY and self._policy.daily_loss_order_block_enabled:
             limit = self._policy.daily_loss_limit_pct
             # [BAR-OPS-38] 차단 사유에 입력 지표 산식 명시(사후 분석 오도 방지).
             _label = f"({self._policy.loss_metric_label})" if self._policy.loss_metric_label else ""

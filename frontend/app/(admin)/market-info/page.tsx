@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { toInAppHref } from '@/lib/in-app-link';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface Theme {
@@ -275,11 +277,9 @@ function NewsTab() {
       ) : (
         <div className="space-y-2">
           {filtered.map((item) => (
-            <a
+            <Link
               key={item.id}
-              href={item.url}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={toInAppHref(item.url)}
               className="block rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 hover:border-slate-500 hover:bg-slate-700 hover:bg-opacity-60"
             >
               <div className="flex items-start justify-between gap-4">
@@ -301,7 +301,7 @@ function NewsTab() {
                 </div>
                 <span className="mt-0.5 text-slate-600">↗</span>
               </div>
-            </a>
+            </Link>
           ))}
         </div>
       )}

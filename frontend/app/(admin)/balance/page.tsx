@@ -61,7 +61,7 @@ export default function BalancePage() {
   const [pnlData, setPnlData] = useState<PnLData | null>(null);
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'overview' | 'holdings' | 'pnl'>('overview');
+  const [tab, setTab] = useState<'overview' | 'holdings' | 'pnl'>('holdings');
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -140,7 +140,7 @@ export default function BalancePage() {
           ))}
         </div>
         <div className="flex gap-1 rounded-lg bg-slate-800 p-1">
-          {([['overview', '총괄'], ['holdings', '보유종목'], ['pnl', '실현손익']] as const).map(([key, label]) => (
+          {([['holdings', '보유종목'], ['pnl', '실현손익'], ['overview', '총괄']] as const).map(([key, label]) => (
             <button
               key={key}
               onClick={() => setTab(key)}

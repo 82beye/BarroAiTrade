@@ -8,6 +8,19 @@ function fmtNum(n?: number | null): string {
   return n === null || n === undefined ? '-' : n.toLocaleString('ko-KR');
 }
 
+function fmtSignedPct(n: number): string {
+  const sign = n > 0 ? '+' : n < 0 ? '-' : '';
+  return `${sign}${Math.abs(n).toFixed(2)}%`;
+}
+
+function calcThemeChangePct(stocks: ThemeStockItem[]): number | null {
+  const vals = stocks
+    .map((s) => s.change_pct)
+    .filter((v): v is number => v !== null && v !== undefined);
+  if (vals.length === 0) return null;
+  return vals.reduce((acc, v) => acc + v, 0) / vals.length;
+}
+
 // 등락률 내림차순 (null 은 score 순으로 뒤쪽)
 export function sortStocks(a: ThemeStockItem, b: ThemeStockItem): number {
   const ca = a.change_pct;
@@ -72,6 +85,8 @@ interface ThemeCardViewProps {
   capturedAt?: string | null;
   /** 전달 시 헤더 테마명이 /themes/[id] 상세로 링크 */
   id?: number | string | null;
+  /** 테마 구성종목 기준 평균 등락률. 미전달 시 stocks 에서 계산. */
+  themeChangePct?: number | null;
 }
 
 /**
@@ -79,8 +94,19 @@ interface ThemeCardViewProps {
  * teal 헤더 + 대금 배지 + 이슈 1줄 + 대표종목 4~5행(등락률순, 박스플롯 바).
  * 라이트 모바일 셸 기준 흰 카드 + 검정 텍스트 + 등락 빨강/파랑.
  */
-export function ThemeCardView({ name, description, stocks, capturedAt, id }: ThemeCardViewProps) {
+export function ThemeCardView({
+  name,
+  description,
+  stocks,
+  capturedAt,
+  id,
+  themeChangePct,
+}: ThemeCardViewProps) {
   const sorted = useMemo(() => [...stocks].sort(sortStocks).slice(0, 5), [stocks]);
+  const effectiveThemeChangePct = useMemo(
+    () => themeChangePct ?? calcThemeChangePct(stocks),
+    [stocks, themeChangePct],
+  );
 
   const totalValue = useMemo(() => {
     const vals = stocks
@@ -92,26 +118,39 @@ export function ThemeCardView({ name, description, stocks, capturedAt, id }: The
   return (
     <div className="overflow-hidden rounded-lg border border-tima-line bg-white shadow-sm">
       {/* 헤더 (teal) — id 전달 시 테마 상세로 링크 */}
-      <div className="flex items-center justify-between bg-tima-teal px-3 py-2">
-        {id !== null && id !== undefined ? (
-          <Link href={`/themes/${id}`} className="truncate font-bold text-black hover:underline">
-            {name}
-          </Link>
-        ) : (
-          <span className="truncate font-bold text-black">{name}</span>
-        )}
-        <div className="flex items-center gap-1.5">
+      <div className="bg-tima-teal px-3 py-2">
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          {id !== null && id !== undefined ? (
+            <Link href={`/themes/${id}`} className="min-w-0 flex-1 truncate font-bold text-black hover:underline">
+              {name}
+            </Link>
+          ) : (
+            <span className="min-w-0 flex-1 truncate font-bold text-black">{name}</span>
+          )}
           {capturedAt && (
-            <span className="rounded bg-white/30 px-1.5 py-0.5 text-[10px] font-medium text-black/70">
+            <span className="shrink-0 rounded bg-white/30 px-1.5 py-0.5 text-[10px] font-medium text-black/70">
               {capturedAt}
             </span>
           )}
+        </div>
+        {(effectiveThemeChangePct !== null || totalValue !== null) && (
+          <div className="mt-1 flex items-center gap-1">
+          {effectiveThemeChangePct !== null && (
+            <span
+              className={`shrink-0 rounded-full bg-white px-1.5 py-0.5 font-mono text-[11px] font-bold shadow-sm ${
+                effectiveThemeChangePct >= 0 ? 'text-tima-up' : 'text-tima-down'
+              }`}
+            >
+              {fmtSignedPct(effectiveThemeChangePct)}
+            </span>
+          )}
           {totalValue !== null && (
-            <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-xs font-bold text-tima-teal shadow-sm">
+            <span className="shrink-0 rounded-full bg-white px-1.5 py-0.5 text-[11px] font-bold text-tima-teal shadow-sm">
               {fmtNum(totalValue)}억
             </span>
           )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* 이슈 1줄 */}

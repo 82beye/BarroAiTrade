@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # BarroAiTrade /monitor 대시보드 수동 종료 스크립트
-# start-dashboard.sh 로 띄운 Next.js 프론트엔드(:3000) + ngrok 터널 종료.
+# start-dashboard.sh 로 띄운 Next.js 프론트엔드(:3000) + Cloudflare Tunnel 종료.
 # 사용: ./scripts/stop-dashboard.sh
 
 set -euo pipefail
@@ -10,11 +10,11 @@ GREEN="\033[0;32m"; YELLOW="\033[1;33m"; NC="\033[0m"
 info() { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 
-# ── ngrok 종료 ──────────────────────────────────────────────────────
-if pgrep -f "ngrok http" >/dev/null 2>&1; then
-    pkill -f "ngrok http" && info "ngrok 종료"
+# ── Cloudflare Tunnel 종료 ─────────────────────────────────────────
+if pgrep -f "cloudflared tunnel --url http://localhost:$PORT" >/dev/null 2>&1; then
+    pkill -f "cloudflared tunnel --url http://localhost:$PORT" && info "Cloudflare Tunnel 종료"
 else
-    warn "ngrok 미실행"
+    warn "Cloudflare Tunnel 미실행"
 fi
 
 # ── 프론트엔드(:PORT) 종료 ──────────────────────────────────────────
