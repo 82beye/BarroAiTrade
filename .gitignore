@@ -69,6 +69,7 @@ htmlcov/
 data/*
 # 예외: 테마 매핑 시드는 커밋(유지보수 대상 — 시장-맥락 add-on)
 !data/theme_map.json
+!data/stock_names.json
 # 예외: Finup 테마 크롤링 기초 데이터는 테마 기능 재현을 위해 추적
 !data/finup_theme/
 !data/finup_theme/**
