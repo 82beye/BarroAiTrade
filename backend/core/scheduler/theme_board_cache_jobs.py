@@ -30,9 +30,11 @@ logger = logging.getLogger(__name__)
 _FLAG_ENV = "BARRO_THEME_BOARD_CACHE_ENABLED"
 _INTERVAL_ENV = "BARRO_THEME_BOARD_CACHE_INTERVAL_SEC"
 _ENRICH_ENV = "BARRO_THEME_BOARD_CACHE_ENRICH"
-# 실측: 21테마 전체갱신 1사이클=18~28s(동시조회 상한5+429백오프 영향) — 15s는
-# 매번 겹쳐 max_instances=1 로 스킵됨(무해하나 로그 노이즈). 20s로 스킵 최소화.
-_DEFAULT_INTERVAL_SEC = 20
+# [2026-07-08] Finup 도입으로 21→30테마 + theme_market_rows_capture(60s) 신규
+# 병행 실행 — enrich=True 복원 직후 실측 1사이클 CAP=20 기준 4.5분(429 누적),
+# _THEME_QUOTE_CAP 20→8 축소 후 재실측 ~110s. 20s 그대로면 매 사이클 대부분
+# max_instances=1 스킵만 반복하므로 실측치에 맞춰 120s로 조정.
+_DEFAULT_INTERVAL_SEC = 120
 
 
 def _flag_enabled() -> bool:
