@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Disclaimer } from '@/components/layout/disclaimer';
 import { PriceChart } from '@/components/dashboard/price-chart';
 import { categoryStyle } from '@/lib/event-category';
 import { toInAppHref } from '@/lib/in-app-link';
@@ -344,7 +343,7 @@ export default function StockDetailPage() {
       {/* ── 차트 탭 ── */}
       {tab === 'chart' && (
         <div className="mb-6">
-          <PriceChart key={symbol} defaultSymbol={symbol} defaultTimeframe="15m" theme="light" />
+          <PriceChart key={symbol} defaultSymbol={symbol} defaultTimeframe="15m" theme="light" height={390} />
         </div>
       )}
 
@@ -355,7 +354,6 @@ export default function StockDetailPage() {
         </div>
       )}
 
-      <Disclaimer />
     </div>
   );
 }
@@ -526,7 +524,14 @@ function OrderBookPanel({
 
       <div>
         {sub === 'chart' && (
-          <PriceChart key={`ob-${symbol}`} defaultSymbol={symbol} defaultTimeframe="15m" hideControls theme="light" />
+          <PriceChart
+            key={`ob-${symbol}`}
+            defaultSymbol={symbol}
+            defaultTimeframe="15m"
+            hideControls
+            theme="light"
+            height={360}
+          />
         )}
         {sub === 'program' && <ProgramTab symbol={symbol} />}
         {sub === 'brokers' && <BrokersTab symbol={symbol} />}
@@ -570,10 +575,12 @@ function RefPanel({ refData, strength }: { refData: OrderBookRef | null; strengt
               key={r.label}
               className="flex items-center justify-between border-b border-tima-line/60 px-1.5 py-1 last:border-0"
             >
-              <span className="text-[10px] text-tima-sub">{r.label}</span>
+              {/* 레퍼런스 호가창(참고가 패널)은 값이 먼저, 라벨이 뒤 — 상승VI/하락VI
+                  블록(라벨 먼저)과는 순서가 반대라 여기만 별도 배치 */}
               <span className={`font-mono text-[11px] font-semibold ${r.color ?? 'text-tima-text'}`}>
                 {fmtNum(r.value)}
               </span>
+              <span className="text-[10px] text-tima-sub">{r.label}</span>
             </div>
           ))}
         </div>
