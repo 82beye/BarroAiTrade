@@ -115,6 +115,7 @@ export function TimaShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [drawer, setDrawer] = useState(false);
   const [clock, setClock] = useState('');
+  const showSearch = pathname === '/themes';
 
   // 시각 1분 갱신 (SSR 불일치 회피 위해 마운트 후 세팅)
   useEffect(() => {
@@ -142,7 +143,7 @@ export function TimaShell({ children }: { children: ReactNode }) {
             </div>
           </div>
           <div className="mt-2 flex items-center gap-2">
-            <TimaSearch />
+            {showSearch && <TimaSearch />}
             {/* 알림내역 (5탭에서 이동 — PRD §2.1) */}
             <Link
               href="/alerts"
