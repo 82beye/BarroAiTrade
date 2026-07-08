@@ -29,6 +29,12 @@ def _flag_enabled() -> bool:
 async def _run_theme_discovery_job() -> None:
     """1 사이클 발굴. 예외는 삼켜 로깅만(스케줄러 무영향)."""
     try:
+        from backend.core.scheduler.market_hours import is_open_rush
+
+        if is_open_rush():
+            logger.debug("테마 뉴스발굴 — 개장 유예 구간, 이번 사이클 보류")
+            return
+
         from backend.core.themes.news_theme_discovery import discover_dynamic_themes
 
         result = await discover_dynamic_themes()
