@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Disclaimer } from '@/components/layout/disclaimer';
 import { ThemeCardView } from '@/components/themes/theme-card';
-import { api, type ThemeStockItem, type ThemeSnapshot } from '@/lib/api';
+import {
+  api,
+  type ThemeStockItem,
+  type ThemeSnapshot,
+  type ThemeMarketAggregateRaw,
+} from '@/lib/api';
 
 interface Theme {
   id: number;
@@ -25,6 +30,46 @@ function calcThemeChangePct(stocks?: ThemeStockItem[]): number | null {
   return vals.reduce((acc, v) => acc + v, 0) / vals.length;
 }
 
+// market_row_store 집계(거래대금/등락률 top-N 랭킹row 기준) — 오늘 실제 수급이
+// 몰린 테마 순으로 카드 정렬에 쓴다. CSV 원천이라 필드가 전부 문자열로 온다.
+export type ThemeMarketAggregate = {
+  themeId: number;
+  rankByValue: number | null;
+  rankByChange: number | null;
+  matchedCount: number;
+  stockCount: number;
+  sumValueTraded: number | null;
+  avgChangePct: number | null;
+  valueWeightedChangePct: number | null;
+};
+
+function toNum(v: string | undefined): number | null {
+  if (v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseThemeAggregates(
+  rows: ThemeMarketAggregateRaw[],
+): Map<number, ThemeMarketAggregate> {
+  const map = new Map<number, ThemeMarketAggregate>();
+  for (const row of rows) {
+    const themeId = toNum(row.theme_id);
+    if (themeId === null) continue;
+    map.set(themeId, {
+      themeId,
+      rankByValue: toNum(row.rank_by_value),
+      rankByChange: toNum(row.rank_by_change),
+      matchedCount: toNum(row.matched_count) ?? 0,
+      stockCount: toNum(row.stock_count) ?? 0,
+      sumValueTraded: toNum(row.sum_value_traded),
+      avgChangePct: toNum(row.avg_change_pct),
+      valueWeightedChangePct: toNum(row.value_weighted_change_pct),
+    });
+  }
+  return map;
+}
+
 type ThemeCardItem = {
   key: string;
   id?: number | string | null;
@@ -32,6 +77,7 @@ type ThemeCardItem = {
   description: string;
   stocks: ThemeStockItem[];
   themeChangePct: number | null;
+  marketAggregate: ThemeMarketAggregate | null;
 };
 
 function mergeIndividualStocks(groups: ThemeStockItem[][]): ThemeStockItem[] {
@@ -58,6 +104,14 @@ function mergeIndividualStocks(groups: ThemeStockItem[][]): ThemeStockItem[] {
 
 function sortThemeItems(items: ThemeCardItem[]): ThemeCardItem[] {
   return [...items].sort((a, b) => {
+    // 1순위: market_row_store 집계의 거래대금 랭킹(rank_by_value, 낮을수록 상위) —
+    // 오늘 실제 수급이 몰린 테마부터. 두 테마 다 집계 커버(랭킹 top-N 매칭)일 때만 적용.
+    const ar = a.marketAggregate?.rankByValue ?? null;
+    const br = b.marketAggregate?.rankByValue ?? null;
+    if (ar !== null && br !== null && ar !== br) return ar - br;
+    if (ar !== null && br === null) return -1;
+    if (ar === null && br !== null) return 1;
+    // 2순위(집계 미커버 테마끼리): 카드 종목 등락률 평균 — 기존 로직 유지.
     const av = a.themeChangePct;
     const bv = b.themeChangePct;
     if (av !== null && bv !== null && av !== bv) return bv - av;
@@ -70,6 +124,7 @@ function sortThemeItems(items: ThemeCardItem[]): ThemeCardItem[] {
 function buildThemeCardItems(
   themes: Theme[],
   themeStocks: Record<number, ThemeStockItem[] | undefined>,
+  aggregates: Map<number, ThemeMarketAggregate>,
 ): ThemeCardItem[] {
   const themeItems: ThemeCardItem[] = [];
   const individualGroups: ThemeStockItem[][] = [];
@@ -87,6 +142,7 @@ function buildThemeCardItems(
       description: theme.description,
       stocks: stocks ?? [],
       themeChangePct: calcThemeChangePct(stocks),
+      marketAggregate: aggregates.get(theme.id) ?? null,
     });
   }
 
@@ -99,6 +155,7 @@ function buildThemeCardItems(
       description: '단일 종목 이슈',
       stocks: individualStocks,
       themeChangePct: calcThemeChangePct(individualStocks),
+      marketAggregate: null,
     });
   }
 
@@ -158,7 +215,9 @@ function TimelineModal({ onClose }: { onClose: () => void }) {
       const stocksByTheme = Object.fromEntries(
         (snapshot?.themes ?? []).map((theme) => [Number(theme.id), theme.stocks ?? []]),
       ) as Record<number, ThemeStockItem[]>;
-      return buildThemeCardItems(themeList, stocksByTheme);
+      // 스냅숏(과거 동결)은 오늘자 실시간 집계 랭킹과 무관 — 빈 맵으로 기존
+      // change_pct 기반 정렬 유지.
+      return buildThemeCardItems(themeList, stocksByTheme, new Map());
     },
     [snapshot],
   );
@@ -241,6 +300,7 @@ function TimelineModal({ onClose }: { onClose: () => void }) {
 export default function ThemesPage() {
   const [themes, setThemes] = useState<Theme[]>([]);
   const [themeStocks, setThemeStocks] = useState<Record<number, ThemeStockItem[] | undefined>>({});
+  const [aggregates, setAggregates] = useState<Map<number, ThemeMarketAggregate>>(new Map());
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [showTimeline, setShowTimeline] = useState(false);
@@ -248,8 +308,8 @@ export default function ThemesPage() {
   const loadingRef = useRef(false);
 
   const rankedThemes = useMemo(
-    () => buildThemeCardItems(themes, themeStocks),
-    [themeStocks, themes],
+    () => buildThemeCardItems(themes, themeStocks, aggregates),
+    [themeStocks, themes, aggregates],
   );
 
   useEffect(() => {
@@ -271,6 +331,20 @@ export default function ThemesPage() {
         );
         setLoading(false);
         setLastUpdated(new Date());
+
+        // 정렬 기준(market_row_store 집계) — 실패해도 카드 표시 자체는 막지 않고
+        // 기존 change_pct 기반 정렬로 조용히 강등(날조 금지, 화면 렌더 최우선).
+        try {
+          const aggRes = await api.getThemeMarketAggregates(200);
+          if (!cancelled) {
+            const rows: ThemeMarketAggregateRaw[] = Array.isArray(aggRes.data?.aggregates)
+              ? aggRes.data.aggregates
+              : [];
+            setAggregates(parseThemeAggregates(rows));
+          }
+        } catch {
+          if (!cancelled) setAggregates(new Map());
+        }
 
         await Promise.all(
           themeList.map(async (theme) => {
