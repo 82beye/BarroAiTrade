@@ -108,7 +108,7 @@ def start_scheduler() -> AsyncIOScheduler:
     except Exception as e:
         logger.warning("테마 라이브 갱신 잡 등록 실패 (선택적 기능): %s", e)
 
-    # 테마보드 화면표시 캐시 갱신 잡 (기본 15s) — BARRO_THEME_BOARD_CACHE_ENABLED=0
+    # 테마보드 화면표시 캐시 갱신 잡 (기본 120s) — BARRO_THEME_BOARD_CACHE_ENABLED=0
     # 아니면 기본 등록(데이터 작업을 백엔드 자체 주기로 분리, 프론트는 순수 표시).
     try:
         from backend.core.scheduler.theme_board_cache_jobs import (
@@ -120,6 +120,19 @@ def start_scheduler() -> AsyncIOScheduler:
             logger.info("테마보드 캐시 갱신 잡 등록: %s", _theme_board_ids)
     except Exception as e:
         logger.warning("테마보드 캐시 갱신 잡 등록 실패 (선택적 기능): %s", e)
+
+    # 테마 랭킹 row CSV 저장 + 집계 잡 (기본 60s) — BARRO_THEME_MARKET_ROWS_ENABLED=0
+    # 이 아니면 등록. 키움 거래대금/등락률 랭킹 row 를 CSV 로 남긴 뒤 테마별로 집계한다.
+    try:
+        from backend.core.scheduler.theme_market_row_jobs import (
+            register_theme_market_row_jobs,
+        )
+
+        _theme_market_row_ids = register_theme_market_row_jobs(_scheduler)
+        if _theme_market_row_ids:
+            logger.info("테마 랭킹 row CSV 저장 잡 등록: %s", _theme_market_row_ids)
+    except Exception as e:
+        logger.warning("테마 랭킹 row CSV 저장 잡 등록 실패 (선택적 기능): %s", e)
 
     # 뉴스/공시 수집 잡 (기본 60s) — BARRO_NEWS_COLLECTOR_ENABLED=1 일 때만 등록
     # (기본 OFF). RSS 4종(+DART, 키 설정 시) 를 news_items 로 적재, 읽기전용.

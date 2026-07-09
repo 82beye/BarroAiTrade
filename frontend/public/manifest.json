@@ -1,0 +1,22 @@
+{
+  "id": "/",
+  "name": "BarroTrade",
+  "short_name": "BarroTrade",
+  "description": "AI 기반 멀티마켓 자동매매 플랫폼",
+  "start_url": "/themes",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#eaf2f0",
+  "theme_color": "#0f172a",
+  "orientation": "portrait",
+  "categories": ["finance", "business"],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

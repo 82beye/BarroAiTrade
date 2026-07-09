@@ -1,10 +1,31 @@
 import { ReactNode } from 'react';
+import type { Metadata, Viewport } from 'next';
 import { RealtimeProvider } from '@/components/layout/realtime-provider';
+import { InAppNavigationGuard } from '@/components/layout/in-app-navigation-guard';
 import './globals.css';
 
-export const metadata = {
+export const metadata: Metadata = {
   title: 'BarroTrade',
   description: 'AI 기반 멀티마켓 자동매매 플랫폼',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    title: 'BarroTrade',
+    statusBarStyle: 'black-translucent',
+  },
+  formatDetection: {
+    telephone: false,
+  },
+  icons: {
+    icon: '/icon.svg',
+  },
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#0f172a',
 };
 
 /**
@@ -17,7 +38,16 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ko">
+      <head>
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="BarroTrade" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <link rel="icon" href="/icon.svg" />
+      </head>
       <body>
+        <InAppNavigationGuard />
         <RealtimeProvider>{children}</RealtimeProvider>
       </body>
     </html>

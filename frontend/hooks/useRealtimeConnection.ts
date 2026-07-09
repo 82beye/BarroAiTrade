@@ -19,6 +19,12 @@ export function useRealtimeConnection() {
 
     fetchStatus();
 
+    if (!WebSocketClient.isEnabled()) {
+      setConnected(false);
+      setError(null);
+      return;
+    }
+
     // WebSocket 연결
     const wsClient = new WebSocketClient();
 

@@ -18,18 +18,23 @@ from backend.core.state import app_state
 from backend.db.database import get_db
 
 # tima P0: 테마 종목 시세 보강 종목 수 상한 (gateway 부하 방지)
-_THEME_QUOTE_CAP = 20
+# [2026-07-08] Finup 도입으로 테마 수 21→30 증가 + theme_market_rows_capture(60s)
+# 신규 병행 실행 — 기존 20 유지 시 1 사이클(30테마×20종목)이 429 누적으로 수분간
+# 안 끝나는 것을 실측(theme_board_cache_jobs 20s 주기 대비 압도적으로 느려짐).
+# 카드 요약 표시 목적상 테마당 상위 8종목이면 충분해 부하를 유의미하게 줄인다.
+_THEME_QUOTE_CAP = int(os.environ.get("BARRO_THEME_QUOTE_CAP", "8") or 8)
 
 # 테마보드 전체 로딩 시 여러 테마가 동시에 각자 최대 _THEME_QUOTE_CAP 종목을
 # 동시조회하면 mockapi 429/커넥션 과부하로 이어짐(socket hang up 관측) — 동시
 # 실거래소 조회 수를 프로세스 전역으로 제한(락은 순서 무관, 부하 완화 목적).
 _THEME_QUOTE_SEMAPHORE = asyncio.Semaphore(5)
 
-# 테마보드 화면표시 캐시 — 데이터 작업(라이브 시세 갱신)은 백엔드 배경잡
-# (theme_board_cache_jobs, 기본 15s 주기)이 전담하고, 이 GET 은 순수 읽기(표시)만
-# 수행한다. TTL 은 "이 값보다 오래되면 배경잡이 멈춘 것으로 보고 인라인 폴백
-# 계산"하는 안전망일 뿐 — 정상 운영 시 항상 잡 주기(15s) 내로 신선하다.
-_THEME_STOCKS_CACHE_TTL = float(os.environ.get("BARRO_THEME_STOCKS_CACHE_SEC", "30") or 0)
+# 테마보드 화면표시 캐시 — GET 은 기본적으로 DB/캐시만 읽는다.
+# Finup 기반 테마는 테마당 종목 수가 많아, 프론트 폴링 요청에서 키움 REST를 직접
+# 기다리면 화면 전체가 멈춘다. 라이브 시세 보강은 명시적인 enrich=true 또는 별도
+# 배경잡에서만 수행한다. 기본 TTL은 배경잡 기본 주기(120초)보다 길어야 갱신 사이에
+# 라이브 캐시가 만료되어 오래된 Finup score로 되돌아가지 않는다.
+_THEME_STOCKS_CACHE_TTL = float(os.environ.get("BARRO_THEME_STOCKS_CACHE_SEC", "180") or 0)
 _THEME_STOCKS_CACHE: dict[int, tuple] = {}  # theme_id -> (monotonic_ts, list[ThemeStockOut])
 
 logger = logging.getLogger(__name__)
@@ -98,6 +103,7 @@ async def fetch_theme_stocks(
         )
         for r in rows
     ]
+    _apply_theme_stock_names(stocks)
     if enrich:
         await _enrich_theme_stocks(stocks)
     return stocks
@@ -109,17 +115,24 @@ async def list_themes() -> list[ThemeOut]:
 
 
 @router.get("/api/themes/{theme_id}/stocks", response_model=list[ThemeStockOut])
-async def get_theme_stocks(theme_id: int) -> list[ThemeStockOut]:
-    if _THEME_STOCKS_CACHE_TTL > 0:
+async def get_theme_stocks(
+    theme_id: int,
+    enrich: bool = Query(
+        default=False,
+        description="true면 키움 REST/캐시로 시세 보강. 기본 false는 DB 스냅숏 즉시 반환.",
+    ),
+) -> list[ThemeStockOut]:
+    if not enrich and _THEME_STOCKS_CACHE_TTL > 0:
         ent = _THEME_STOCKS_CACHE.get(theme_id)
         if ent and (_time.monotonic() - ent[0]) <= _THEME_STOCKS_CACHE_TTL:
             return ent[1]
 
-    # tima P0: gateway 가용 시 ticker 시세 보강 (동시성, 개별 실패는 None 유지).
-    stocks = await fetch_theme_stocks(theme_id, enrich=True)
+    # 기본 경로는 Finup/DB 스냅숏의 score(change_pct fallback)를 즉시 반환한다.
+    # enrich=true 에서만 ticker 시세 보강을 수행한다.
+    stocks = await fetch_theme_stocks(theme_id, enrich=enrich)
     if stocks is None:
         raise HTTPException(status_code=404, detail="theme not found")
-    if _THEME_STOCKS_CACHE_TTL > 0:
+    if not enrich and _THEME_STOCKS_CACHE_TTL > 0:
         _THEME_STOCKS_CACHE[theme_id] = (_time.monotonic(), stocks)
     return stocks
 
@@ -197,6 +210,55 @@ async def discover_themes(
     if result.get("themes_created"):
         _THEME_STOCKS_CACHE.clear()
     return result
+
+
+@router.post("/api/themes/market-rows/capture")
+async def capture_theme_market_rows(
+    top_n: int = Query(default=100, ge=1, le=200),
+    filters: str = Query(
+        default="value,gainers,losers",
+        description="comma separated: value,gainers,losers",
+    ),
+    stex_tp: str = Query(default="3", description="1=KRX, 2=NXT, 3=통합"),
+    mrkt_tp: str = Query(default="000", description="키움 시장 구분"),
+) -> dict:
+    """키움 랭킹 row 를 CSV 로 저장하고, 같은 row 기준 테마 집계 CSV 를 생성한다."""
+    from backend.core.themes.market_row_store import capture_theme_market_rows as _capture
+
+    try:
+        return await _capture(top_n=top_n, filters=filters, stex_tp=stex_tp, mrkt_tp=mrkt_tp)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+@router.get("/api/themes/market-rows/latest")
+async def latest_theme_market_rows(
+    limit: int = Query(default=200, ge=0, le=1000),
+) -> dict:
+    """가장 최근 CSV 로 저장한 키움 랭킹 row 를 조회한다."""
+    from backend.core.themes.market_row_store import latest_meta, latest_rows
+
+    meta = latest_meta()
+    if meta is None:
+        return {"status": "no_data", "rows": []}
+    return {"status": "ok", "meta": meta, "rows": latest_rows(limit=limit or None)}
+
+
+@router.get("/api/themes/market-aggregates/latest")
+async def latest_theme_market_aggregates(
+    limit: int = Query(default=200, ge=0, le=1000),
+) -> dict:
+    """가장 최근 CSV row 기준 테마별 등락률/거래대금 집계를 조회한다."""
+    from backend.core.themes.market_row_store import latest_aggregates, latest_meta
+
+    meta = latest_meta()
+    if meta is None:
+        return {"status": "no_data", "aggregates": []}
+    return {
+        "status": "ok",
+        "meta": meta,
+        "aggregates": latest_aggregates(limit=limit or None),
+    }
 
 
 # ── tima P1: 시간대별 테마 스냅숏(타임라인) ──────────────────────────────────
@@ -300,12 +362,9 @@ async def _enrich_theme_stocks(stocks: list[ThemeStockOut]) -> None:
     if not stocks:
         return
 
-    from backend.core.market_data import cache_quotes, stock_names
+    from backend.core.market_data import cache_quotes
 
-    for stock in stocks[:_THEME_QUOTE_CAP]:
-        resolved = stock_names.resolve(stock.symbol)
-        if resolved and resolved != stock.symbol:
-            stock.name = resolved
+    _apply_theme_stock_names(stocks[:_THEME_QUOTE_CAP])
 
     gateway = app_state.market_gateway or _get_readonly_gateway()
 
@@ -338,6 +397,24 @@ async def _enrich_theme_stocks(stocks: list[ThemeStockOut]) -> None:
                 stock.value_traded = q.get("value_traded")
 
     await asyncio.gather(*(_fill(s) for s in stocks[:_THEME_QUOTE_CAP]))
+
+
+def _apply_theme_stock_names(stocks: list[ThemeStockOut]) -> None:
+    """로컬 stock_names.json 으로 종목명을 채운다. 네트워크 호출 없음."""
+    if not stocks:
+        return
+    try:
+        from backend.core.market_data import stock_names
+    except Exception:
+        return
+
+    for stock in stocks:
+        try:
+            resolved = stock_names.resolve(stock.symbol)
+        except Exception:
+            continue
+        if resolved and resolved != stock.symbol:
+            stock.name = resolved
 
 
 @router.get("/api/calendar", response_model=list[EventOut])

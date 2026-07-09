@@ -549,7 +549,7 @@ def parse_ranking(rows: list, limit: int = 30) -> list[dict]:
         prica = _opt_num(r.get("trde_prica"))
         out.append(
             {
-                "symbol": str(r.get("stk_cd", "")).strip(),
+                "symbol": normalize_symbol(str(r.get("stk_cd", "")).strip()),
                 "name": str(r.get("stk_nm", "")).strip(),
                 "price": abs(_num(r.get("cur_prc"))),
                 "change_pct": _opt_num(r.get("flu_rt")),

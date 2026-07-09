@@ -115,6 +115,8 @@ export function TimaShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [drawer, setDrawer] = useState(false);
   const [clock, setClock] = useState('');
+  const showBottomTicker = !pathname.startsWith('/stocks/');
+  const showSearch = pathname === '/themes';
 
   // 시각 1분 갱신 (SSR 불일치 회피 위해 마운트 후 세팅)
   useEffect(() => {
@@ -129,10 +131,13 @@ export function TimaShell({ children }: { children: ReactNode }) {
   }, [pathname]);
 
   return (
-    <div className="min-h-screen bg-neutral-900">
-      <div className="relative mx-auto flex h-screen w-full max-w-[430px] flex-col overflow-hidden bg-tima-bg text-tima-text shadow-2xl">
+    <div className="tima-viewport bg-neutral-900">
+      <div className="tima-viewport-frame relative mx-auto flex w-full max-w-[430px] flex-col overflow-hidden bg-tima-bg text-tima-text shadow-2xl">
         {/* ── 상단 고정 셸 ── */}
-        <header className="shrink-0 border-b border-black/5 bg-tima-bg px-3 pb-2 pt-2">
+        <header
+          className="shrink-0 border-b border-black/5 bg-tima-bg px-3 pb-2"
+          style={{ paddingTop: 'calc(0.5rem + env(safe-area-inset-top, 0px))' }}
+        >
           <div className="flex items-center justify-between">
             <div className="flex items-baseline gap-2">
               <Link href="/themes" className="text-xl font-black tracking-tight text-tima-brand">
@@ -142,7 +147,7 @@ export function TimaShell({ children }: { children: ReactNode }) {
             </div>
           </div>
           <div className="mt-2 flex items-center gap-2">
-            <TimaSearch />
+            {showSearch && <TimaSearch />}
             {/* 알림내역 (5탭에서 이동 — PRD §2.1) */}
             <Link
               href="/alerts"
@@ -176,7 +181,7 @@ export function TimaShell({ children }: { children: ReactNode }) {
 
         {/* ── 하단 고정 (티커·지수·5탭바) ── */}
         <div className="shrink-0">
-          <TimaTicker />
+          {showBottomTicker && <TimaTicker />}
           <nav
             className="grid grid-cols-5 border-t border-black/10 bg-tima-tabbar"
             style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}

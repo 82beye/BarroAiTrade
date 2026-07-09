@@ -35,6 +35,25 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  html,
+  body {
+    min-height: 100%;
+  }
+}
+
+@layer utilities {
+  .tima-viewport {
+    min-height: 100vh;
+    min-height: 100svh;
+    min-height: 100dvh;
+  }
+
+  .tima-viewport-frame {
+    height: 100vh;
+    height: 100svh;
+    height: 100dvh;
+  }
 }
 
 @layer components {

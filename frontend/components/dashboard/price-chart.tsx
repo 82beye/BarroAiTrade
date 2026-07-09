@@ -51,6 +51,47 @@ function isMinuteTf(tf: string): boolean {
   return MINUTE_UNITS.some((u) => u.value === tf);
 }
 
+function toChartTime(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
+  }
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return toChartTime(Number(trimmed));
+  const parsed = Date.parse(trimmed);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.floor(parsed / 1000);
+}
+
+function normalizeCandles(raw: any[]): OHLCVData[] {
+  const byTime = new Map<number, OHLCVData>();
+  raw.forEach((item: any) => {
+    const time = toChartTime(item?.timestamp ?? item?.time);
+    const open = Number(item?.open);
+    const high = Number(item?.high);
+    const low = Number(item?.low);
+    const close = Number(item?.close);
+    if (
+      time === null ||
+      !Number.isFinite(open) ||
+      !Number.isFinite(high) ||
+      !Number.isFinite(low) ||
+      !Number.isFinite(close)
+    ) {
+      return;
+    }
+    byTime.set(time, {
+      time,
+      open,
+      high,
+      low,
+      close,
+      volume: Number.isFinite(Number(item?.volume)) ? Number(item.volume) : 0,
+    });
+  });
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
 // ── 전략 기준선 색 매핑 (PRD §4.3 / §6.8) ──
 function levelColor(label: string): string {
   const u = (label || '').toUpperCase();
@@ -141,15 +182,20 @@ export function PriceChart({
 
   // 차트 초기화
   useEffect(() => {
-    if (!chartContainerRef.current) return;
+    const container = chartContainerRef.current;
+    if (!container) return;
 
     let chart: any = null;
     let handleResize: (() => void) | null = null;
+    let disposed = false;
 
     const initChart = async () => {
       const lc = await import('lightweight-charts');
+      if (disposed || !chartContainerRef.current) return;
+
       lcRef.current = lc;
       const { createChart } = lc;
+      chartContainerRef.current.replaceChildren();
 
       chart = createChart(chartContainerRef.current!, {
         width: chartContainerRef.current!.clientWidth,
@@ -166,6 +212,8 @@ export function PriceChart({
         timeScale: {
           borderColor: isLight ? '#DDDDDD' : '#334155',
           timeVisible: true,
+          secondsVisible: false,
+          rightOffset: 4,
         },
         rightPriceScale: {
           borderColor: isLight ? '#DDDDDD' : '#334155',
@@ -229,21 +277,34 @@ export function PriceChart({
       };
       window.addEventListener('resize', handleResize);
 
+      if (disposed) {
+        chart.remove();
+        chartContainerRef.current?.replaceChildren();
+        return;
+      }
+
       await loadData();
     };
 
     initChart();
 
     return () => {
+      disposed = true;
       if (handleResize) window.removeEventListener('resize', handleResize);
-      if (chartRef.current) {
-        chartRef.current.remove();
-        chartRef.current = null;
+      if (chart) {
+        try {
+          chart.remove();
+        } catch {
+          /* noop */
+        }
       }
+      chartContainerRef.current?.replaceChildren();
+      chartRef.current = null;
       seriesRef.current = null;
       volSeriesRef.current = null;
       maSeriesRef.current = {};
       priceLinesRef.current = [];
+      levelPricesRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -261,14 +322,7 @@ export function PriceChart({
         try {
           const response = await api.getOHLCV(symbol, tf, lim);
           const raw: any[] = response.data?.data ?? [];
-          return raw.map((item: any) => ({
-            time: item.timestamp,
-            open: item.open,
-            high: item.high,
-            low: item.low,
-            close: item.close,
-            volume: item.volume ?? 0,
-          }));
+          return normalizeCandles(raw);
         } catch {
           return [];
         }
@@ -547,8 +601,9 @@ export function PriceChart({
           )}
         </CardHeader>
       )}
-      <CardContent>
-        <div ref={chartContainerRef} className="relative w-full" style={{ minHeight: chartHeight }}>
+      <CardContent className={isLight ? 'pb-3' : undefined}>
+        <div className="relative w-full" style={{ height: chartHeight }}>
+          <div ref={chartContainerRef} className="absolute inset-0" />
           {loading && (
             <div
               className={`absolute inset-0 z-10 flex items-center justify-center ${

@@ -8,6 +8,22 @@ const API_URL =
   typeof window !== 'undefined'
     ? ''
     : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || '';
+
+function buildWebSocketUrl(path: string): string {
+  if (WS_URL) {
+    const url = new URL(WS_URL);
+    if (url.protocol === 'http:') url.protocol = 'ws:';
+    if (url.protocol === 'https:') url.protocol = 'wss:';
+    if (url.pathname === '/' || url.pathname === '') url.pathname = path;
+    return url.toString();
+  }
+  if (typeof window !== 'undefined' && !API_URL) {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}${path}`;
+  }
+  return `${(API_URL || 'http://localhost:8000').replace('http', 'ws')}${path}`;
+}
 
 export const apiClient = axios.create({
   baseURL: API_URL,
@@ -28,12 +44,11 @@ export class WebSocketClient {
   private storedListeners: Map<string, Array<(data: any) => void>> = new Map();
 
   constructor(path: string = '/ws/realtime') {
-    if (typeof window !== 'undefined' && !API_URL) {
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      this.url = `${proto}//${window.location.host}${path}`;
-    } else {
-      this.url = `${(API_URL || 'http://localhost:8000').replace('http', 'ws')}${path}`;
-    }
+    this.url = buildWebSocketUrl(path);
+  }
+
+  static isEnabled(): boolean {
+    return process.env.NEXT_PUBLIC_WS_ENABLED === '1';
   }
 
   connect(): Promise<void> {
@@ -55,9 +70,9 @@ export class WebSocketClient {
           resolve();
         };
 
-        this.ws.onerror = (error) => {
-          console.error('[WS] Error:', error);
-          reject(error);
+        this.ws.onerror = () => {
+          console.warn(`[WS] Connection failed: ${this.url}`);
+          reject(new Error(`WebSocket connection failed: ${this.url}`));
         };
 
         this.ws.onclose = () => {
@@ -170,6 +185,9 @@ export const api = {
   getThemeStocks: (id: number | string) =>
     apiClient.get(`/api/themes/${id}/stocks`),
 
+  getThemeMarketAggregates: (limit?: number) =>
+    apiClient.get('/api/themes/market-aggregates/latest', { params: { limit } }),
+
   // ── 티마 P1 — 알림센터 / 스냅숏 / 종목상세 / 티커 ──
   getAlertsHistory: (strategy?: string, limit?: number) =>
     apiClient.get('/api/alerts/history', { params: { strategy, limit } }),
@@ -269,6 +287,25 @@ export interface ThemeStockItem {
   day_high?: number | null;
   day_low?: number | null;
   value_traded?: number | null; // 억원
+}
+
+// 백엔드가 CSV(market_row_store)에서 그대로 읽어 전부 문자열로 내려준다 — 화면에서 파싱.
+export interface ThemeMarketAggregateRaw {
+  theme_id: string;
+  theme_name: string;
+  rank_by_value: string;
+  rank_by_change: string;
+  stock_count: string;
+  matched_count: string;
+  avg_change_pct: string;
+  value_weighted_change_pct: string;
+  sum_value_traded: string;
+  top_value_traded: string;
+  max_change_pct: string;
+  min_change_pct: string;
+  positive_count: string;
+  negative_count: string;
+  top_symbols: string;
 }
 
 // ── 티마 P1 타입 ──

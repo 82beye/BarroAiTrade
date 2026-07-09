@@ -104,6 +104,22 @@ def _merge_stock_names(names: dict[str, str]) -> int:
     return changed
 
 
+# [2026-07-08 수정] Finup 재수입 시 다른 출처(큐레이션 시드·뉴스기반 자동발굴) 테마까지
+# 전부 삭제되던 문제(docs/03-analysis/2026-07-08-theme-implementation-issues-and-fix-design.md
+# §2-B) — 스키마 변경 없이 theme_keywords 를 출처 마커로 활용해 삭제 범위를 Finup
+# 테마로만 한정한다. 이름이 다른 출처와 겹치면(예: 큐레이션의 "방산") 기존 테마의
+# 설명과 소유권을 보존하고 구성 종목만 합친다.
+_SOURCE_MARKER = "__source:finup__"
+
+
+async def _finup_owned_theme_ids(db) -> list[int]:
+    res = await db.execute(
+        text("SELECT DISTINCT theme_id FROM theme_keywords WHERE keyword = :kw"),
+        {"kw": _SOURCE_MARKER},
+    )
+    return [int(r["theme_id"]) for r in res.mappings().all()]
+
+
 async def import_finup_theme_snapshot(
     snapshot_path: Optional[Path] = None,
     *,
@@ -115,6 +131,10 @@ async def import_finup_theme_snapshot(
     The crawler snapshot uses `relation_stocks` for stock membership. `score` is
     populated from Finup's stock `diff` value so the frontend can use it as a
     fallback change percentage before live quote enrichment succeeds.
+
+    `replace=True` clears only themes this importer previously created (tagged via
+    a `theme_keywords` marker row) — curated-seed themes(theme_refresher.py) and
+    news-discovered themes(news_theme_discovery.py) are left untouched.
     """
     path, snapshot = _load_snapshot(snapshot_path)
     metadata = snapshot.get("metadata") if isinstance(snapshot.get("metadata"), dict) else {}
@@ -139,9 +159,17 @@ async def import_finup_theme_snapshot(
 
         is_sqlite = db.engine.dialect.name == "sqlite"
         if replace:
-            await db.execute(text("DELETE FROM theme_stocks"))
-            await db.execute(text("DELETE FROM theme_keywords"))
-            await db.execute(text("DELETE FROM themes"))
+            owned_ids = await _finup_owned_theme_ids(db)
+            if owned_ids:
+                placeholders = ", ".join(f":t{i}" for i in range(len(owned_ids)))
+                params = {f"t{i}": tid for i, tid in enumerate(owned_ids)}
+                await db.execute(
+                    text(f"DELETE FROM theme_stocks WHERE theme_id IN ({placeholders})"), params
+                )
+                await db.execute(
+                    text(f"DELETE FROM theme_keywords WHERE theme_id IN ({placeholders})"), params
+                )
+                await db.execute(text(f"DELETE FROM themes WHERE id IN ({placeholders})"), params)
 
         for item in snapshot.get("themes") or []:
             theme = item.get("theme") if isinstance(item, dict) else None
@@ -158,52 +186,67 @@ async def import_finup_theme_snapshot(
             if not description:
                 description = f"{name} 테마 (Finup 크롤링 기반)"
 
-            if replace:
-                if is_sqlite:
-                    await db.execute(
-                        text(
-                            "INSERT INTO themes (name, description, created_at) "
-                            "VALUES (:name, :description, :created_at)"
-                        ),
-                        {"name": name, "description": description, "created_at": now},
-                    )
-                    res = await db.execute(text("SELECT last_insert_rowid() AS id"))
-                else:
-                    res = await db.execute(
-                        text(
-                            "INSERT INTO themes (name, description) "
-                            "VALUES (:name, :description) RETURNING id"
-                        ),
-                        {"name": name, "description": description},
-                    )
-            else:
-                if is_sqlite:
-                    await db.execute(
-                        text(
-                            "INSERT INTO themes (name, description, created_at) "
-                            "VALUES (:name, :description, :created_at) "
-                            "ON CONFLICT(name) DO UPDATE SET description = excluded.description"
-                        ),
-                        {"name": name, "description": description, "created_at": now},
-                    )
-                    res = await db.execute(text("SELECT id FROM themes WHERE name = :name"), {"name": name})
-                else:
-                    res = await db.execute(
-                        text(
-                            "INSERT INTO themes (name, description) "
-                            "VALUES (:name, :description) "
-                            "ON CONFLICT(name) DO UPDATE SET description = EXCLUDED.description "
-                            "RETURNING id"
-                        ),
-                        {"name": name, "description": description},
-                    )
+            existing_res = await db.execute(
+                text(
+                    "SELECT t.id, t.description, "
+                    "EXISTS(SELECT 1 FROM theme_keywords tk "
+                    "WHERE tk.theme_id = t.id AND tk.keyword = :marker) AS finup_owned "
+                    "FROM themes t WHERE t.name = :name"
+                ),
+                {"name": name, "marker": _SOURCE_MARKER},
+            )
+            existing = existing_res.mappings().first()
+            preserve_existing = existing is not None and not bool(existing["finup_owned"])
 
-            row = res.mappings().first()
-            if row is None:
-                skipped_themes += 1
-                continue
-            theme_id = int(row["id"])
+            # 이름이 같은 큐레이션/뉴스 테마는 기존 설명과 소유권을 보존한다. 종목은
+            # 합치되 Finup 마커를 붙이지 않아 다음 replace 에서 테마 전체가 삭제되지
+            # 않게 한다. Finup 이 만들었거나 이미 소유한 테마만 설명을 갱신한다.
+            if preserve_existing:
+                theme_id = int(existing["id"])
+            elif is_sqlite:
+                await db.execute(
+                    text(
+                        "INSERT INTO themes (name, description, created_at) "
+                        "VALUES (:name, :description, :created_at) "
+                        "ON CONFLICT(name) DO UPDATE SET description = excluded.description"
+                    ),
+                    {"name": name, "description": description, "created_at": now},
+                )
+                res = await db.execute(
+                    text("SELECT id FROM themes WHERE name = :name"), {"name": name}
+                )
+            else:
+                res = await db.execute(
+                    text(
+                        "INSERT INTO themes (name, description) "
+                        "VALUES (:name, :description) "
+                        "ON CONFLICT(name) DO UPDATE SET description = EXCLUDED.description "
+                        "RETURNING id"
+                    ),
+                    {"name": name, "description": description},
+                )
+
+            if not preserve_existing:
+                row = res.mappings().first()
+                if row is None:
+                    skipped_themes += 1
+                    continue
+                theme_id = int(row["id"])
             theme_count += 1
+
+            if not preserve_existing:
+                kw_sql = (
+                    text(
+                        "INSERT OR IGNORE INTO theme_keywords (theme_id, keyword) "
+                        "VALUES (:tid, :kw)"
+                    )
+                    if is_sqlite
+                    else text(
+                        "INSERT INTO theme_keywords (theme_id, keyword) VALUES (:tid, :kw) "
+                        "ON CONFLICT (theme_id, keyword) DO NOTHING"
+                    )
+                )
+                await db.execute(kw_sql, {"tid": theme_id, "kw": _SOURCE_MARKER})
 
             for stock in item.get("relation_stocks") or []:
                 symbol = _normalize_symbol(stock.get("stockCode"))
