@@ -322,6 +322,23 @@ async def get_ticker(symbol: str = Path(..., description="종목 코드")) -> di
             "as_of": q["as_of"],
             "source": "cache",
         }
+
+    # [2026-07-08 수정] 시세(라이브+캐시)가 전부 실패해도 이름은 로컬 마스터로
+    # 항상 조회 가능하다 — 이름까지 통째로 버리고 404 를 던지면 화면이 "종목명"
+    # 대신 종목코드를 그대로 노출하는 문제로 이어졌다(429 소진 등 일시적 시세
+    # 실패가 잦은 상황에서 실제로 관측됨). 이름을 알면 name-only 로 강등해서
+    # 반환하고, 이름조차 모르는 진짜 미상 종목만 404.
+    resolved = stock_names.resolve(symbol)
+    if resolved != symbol:
+        return {
+            "symbol": symbol,
+            "name": resolved,
+            "price": None,
+            "volume": None,
+            "change_pct": None,
+            "timestamp": datetime.now(_KST).isoformat(),
+            "source": "name_only",
+        }
     raise HTTPException(status_code=404, detail=f"시세 없음: {symbol}")
 
 

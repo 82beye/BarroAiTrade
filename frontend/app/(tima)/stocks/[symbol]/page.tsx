@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Disclaimer } from '@/components/layout/disclaimer';
 import { PriceChart } from '@/components/dashboard/price-chart';
 import { categoryStyle } from '@/lib/event-category';
 import { toInAppHref } from '@/lib/in-app-link';
@@ -170,7 +169,7 @@ export default function StockDetailPage() {
   return (
     <div className="p-3">
       {/* 뒤로 + 서브탭 (차트 | 호가 | 정보 — 활성 tima.select 분홍, PRD §3.3) */}
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-2 flex items-center gap-2">
         <button
           onClick={() => history.back()}
           aria-label="뒤로"
@@ -183,7 +182,7 @@ export default function StockDetailPage() {
             <button
               key={key}
               onClick={() => setTab(key)}
-              className={`flex-1 rounded-full border py-1.5 text-sm font-semibold transition-colors ${
+              className={`flex-1 rounded-full border py-1 text-sm font-semibold transition-colors ${
                 tab === key
                   ? 'border-tima-select bg-tima-select text-white'
                   : 'border-tima-line bg-white text-tima-sub'
@@ -195,23 +194,25 @@ export default function StockDetailPage() {
         </div>
       </div>
 
-      {/* 종목 헤더 */}
-      <div className="mb-4 rounded-lg border border-tima-line bg-white px-3 py-2.5">
-        <div className="flex items-center gap-2">
+      {/* 종목 헤더 — 레퍼런스처럼 한 줄(이름·코드 좌 / 가격·등락 우)로 압축.
+          호가 탭에서 사다리+참조가+체결강도+차트까지 스크롤 없이 한 화면에
+          들어오게 하려면 이 블록의 세로 높이가 핵심 변수였음. */}
+      <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-tima-line bg-white px-2.5 py-1.5">
+        <div className="flex min-w-0 items-center gap-1.5">
           {symbol && <WatchlistStar symbol={symbol} size="sm" />}
-          <span className="text-lg font-bold text-tima-text">{name}</span>
-          <span className="font-mono text-xs text-tima-sub">{symbol}</span>
+          <span className="truncate text-sm font-bold text-tima-text">{name}</span>
+          <span className="shrink-0 font-mono text-[10px] text-tima-sub">{symbol}</span>
         </div>
-        <div className="mt-1 flex items-baseline gap-2">
+        <div className="flex shrink-0 items-baseline gap-1.5">
           <span
-            className={`font-mono text-2xl font-bold ${
+            className={`font-mono text-lg font-bold ${
               !hasCp ? 'text-tima-text' : up ? 'text-tima-up' : 'text-tima-down'
             }`}
           >
             {fmtNum(ticker?.price)}
           </span>
           <span
-            className={`font-mono text-sm font-semibold ${
+            className={`font-mono text-xs font-semibold ${
               !hasCp ? 'text-tima-sub' : up ? 'text-tima-up' : 'text-tima-down'
             }`}
           >
@@ -344,7 +345,7 @@ export default function StockDetailPage() {
       {/* ── 차트 탭 ── */}
       {tab === 'chart' && (
         <div className="mb-6">
-          <PriceChart key={symbol} defaultSymbol={symbol} defaultTimeframe="15m" theme="light" />
+          <PriceChart key={symbol} defaultSymbol={symbol} defaultTimeframe="15m" theme="light" height={390} />
         </div>
       )}
 
@@ -355,7 +356,6 @@ export default function StockDetailPage() {
         </div>
       )}
 
-      <Disclaimer />
     </div>
   );
 }
@@ -526,7 +526,14 @@ function OrderBookPanel({
 
       <div>
         {sub === 'chart' && (
-          <PriceChart key={`ob-${symbol}`} defaultSymbol={symbol} defaultTimeframe="15m" hideControls theme="light" />
+          <PriceChart
+            key={`ob-${symbol}`}
+            defaultSymbol={symbol}
+            defaultTimeframe="15m"
+            hideControls
+            theme="light"
+            height={360}
+          />
         )}
         {sub === 'program' && <ProgramTab symbol={symbol} />}
         {sub === 'brokers' && <BrokersTab symbol={symbol} />}
@@ -570,10 +577,12 @@ function RefPanel({ refData, strength }: { refData: OrderBookRef | null; strengt
               key={r.label}
               className="flex items-center justify-between border-b border-tima-line/60 px-1.5 py-1 last:border-0"
             >
-              <span className="text-[10px] text-tima-sub">{r.label}</span>
+              {/* 레퍼런스 호가창(참고가 패널)은 값이 먼저, 라벨이 뒤 — 상승VI/하락VI
+                  블록(라벨 먼저)과는 순서가 반대라 여기만 별도 배치 */}
               <span className={`font-mono text-[11px] font-semibold ${r.color ?? 'text-tima-text'}`}>
                 {fmtNum(r.value)}
               </span>
+              <span className="text-[10px] text-tima-sub">{r.label}</span>
             </div>
           ))}
         </div>

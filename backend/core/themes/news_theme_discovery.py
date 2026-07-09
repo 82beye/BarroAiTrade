@@ -194,20 +194,21 @@ async def build_candidate_universe(
 ) -> list[dict]:
     """거래대금 top-N ∪ 등락률(상승) top-N, value_traded(억원) ≥ 임계 필터.
 
-    반환 항목: {symbol, name, price, change_pct, value_traded}. 실패한 쪽은
-    빈 리스트로 취급(둘 다 실패면 빈 유니버스 — 조용히 반환, 에러 아님).
+    market_row_store.fetch_ranking_rows/merge_symbol_rows 를 재사용해 랭킹
+    후보 유니버스 로직 중복을 제거한다(docs/03-analysis/2026-07-08-theme-
+    implementation-issues-and-fix-design.md §2-D). 반환 항목은 기존과 동일
+    {symbol, name, price, change_pct, value_traded, ...} — 실패한 쪽은 빈
+    리스트로 취급(둘 다 실패면 빈 유니버스 — 조용히 반환, 에러 아님).
     """
-    value_rows = await quotes.ranking(filter="value", stex_tp=stex_tp, limit=top_n) or []
-    gainer_rows = await quotes.ranking(filter="gainers", stex_tp=stex_tp, limit=top_n) or []
+    from backend.core.themes.market_row_store import fetch_ranking_rows, merge_symbol_rows
 
-    by_symbol: dict[str, dict] = {}
-    for row in [*value_rows, *gainer_rows]:
-        sym = (row.get("symbol") or "").strip()
-        if sym and sym not in by_symbol:
-            by_symbol[sym] = row
+    rows = await fetch_ranking_rows(
+        quotes=quotes, top_n=top_n, filters=("value", "gainers"), stex_tp=stex_tp,
+    )
+    merged = merge_symbol_rows(rows)
 
     return [
-        row for row in by_symbol.values()
+        row for row in merged.values()
         if (row.get("value_traded") or 0.0) >= min_value_traded_eok
     ]
 
