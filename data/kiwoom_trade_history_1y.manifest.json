@@ -1,0 +1,72 @@
+{
+  "bad_terminal_pages": 0,
+  "counts": {
+    "cash_ledger": 0,
+    "daily_pnl": 24,
+    "executions": 513,
+    "orders": 513,
+    "raw_responses": 333,
+    "realized_pnl": 162,
+    "sync_days": 286,
+    "sync_runs": 2,
+    "sync_windows": 28
+  },
+  "coverage_error": null,
+  "covered_business_days": 260,
+  "created_at_utc": "2026-07-12T14:30:53+00:00",
+  "duplicate_source_fill_keys": 0,
+  "environment_match": true,
+  "execution_date_max": "2026-07-10",
+  "execution_date_min": "2026-06-05",
+  "expected_business_days": 260,
+  "expected_environment": "mock",
+  "extra_business_days": 0,
+  "failed_days_in_success_runs": 0,
+  "foreign_key_issues": 0,
+  "format": "kiwoom-trade-history-sqlite",
+  "integrity_check": "ok",
+  "last_run_id": 2,
+  "last_run_status": "SUCCEEDED",
+  "metadata": {
+    "account_id": "kiwoom-bbd86c626788787bc0d35452",
+    "api_tr_ids": "kt00009,ka10073,ka10074",
+    "broker": "KIWOOM",
+    "coverage_requested_from": "2025-07-12",
+    "coverage_requested_to": "2026-07-12",
+    "environment": "mock",
+    "kt00015_status": "unsupported_by_mock_server",
+    "last_success_at_utc": "2026-07-12T14:28:58+00:00",
+    "schema_version": "3",
+    "timezone": "Asia/Seoul"
+  },
+  "missing_business_days": 0,
+  "path": "/Users/beye82/Workspace/BarroAiTrade/data/kiwoom_trade_history_1y.db",
+  "pnl_reconciliation": {
+    "compared_days": 24,
+    "date_mismatches": 0,
+    "max_realized_pnl_rounding_difference_krw": "809.93",
+    "sell_amount_mismatch_days": 0,
+    "semantics": "ka10073 buy_uv is sold-position cost basis; ka10074 buy_amt is same-day buy activity, so buy amount and commission are not equal-scope totals",
+    "tax_mismatch_days": 0
+  },
+  "raw_hash_mismatches": 0,
+  "schema_version": 3,
+  "sha256": "e1d70db1b4e5726320e60c2c67e3851421fd1ee38c61cdd40476cc1af225ba1b",
+  "size_bytes": 2916352,
+  "sqlite_version": "3.53.0",
+  "stale_failed_rows": {
+    "cash_ledger": 0,
+    "daily_pnl": 0,
+    "executions": 0,
+    "orders": 0,
+    "realized_pnl": 0
+  },
+  "successful_runs": 2,
+  "sync_date_max": "2026-07-10",
+  "sync_date_min": "2025-07-14",
+  "uncovered_window_days": {
+    "ka10073": 0,
+    "ka10074": 0
+  },
+  "verification_ok": true
+}
