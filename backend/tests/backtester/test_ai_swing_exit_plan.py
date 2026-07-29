@@ -170,6 +170,59 @@ def test_exit_engine_stops_out_after_min_hold():
     assert orders[0].reason == ExitReason.STOP_LOSS
 
 
+def test_exit_engine_trails_after_peak_drawdown():
+    """★사용자 요구 핵심★ peak +20% 도달 후 고점 -5% 하락 → TRAIL_STOP 청산.
+
+    trail_stages 가 plan 에 실리지 않으면 ExitPlan.trail_sl_for_peak() 가 None 을
+    돌려주고 트레일링이 통째로 비활성된다(기존 전략들이 실제로 그 상태).
+    """
+    strat = _build_strategies(["ai_swing"], None)[0]
+    plan = _exit_plan_for_strategy("ai_swing", ENTRY, _window(), strategy_obj=strat)
+    assert plan.trail_stages, "트레일링 단계가 plan 에 실려야 한다"
+
+    now = datetime(2026, 7, 30, 10, 0)
+    pos = _pos(now - timedelta(days=5))            # min_hold 경과
+    peak = ENTRY * Decimal("1.25")                 # +25% (trail_start +20% 초과)
+
+    # 1) 고점 갱신만 — 아직 청산 없음
+    pos2, orders = ExitEngine().evaluate(pos, plan, peak, now)
+    assert orders == [] or orders[0].reason != ExitReason.TRAIL_STOP
+    assert pos2.high_water_mark == peak
+
+    # 2) 고점 대비 -6% 하락 → trail_sl(peak×0.95) 하회 → TRAIL_STOP
+    dropped = peak * Decimal("0.94")
+    _, orders2 = ExitEngine().evaluate(pos2, plan, dropped, now)
+    assert orders2, "고점 대비 offset 초과 하락 시 청산돼야 한다"
+    assert orders2[0].reason == ExitReason.TRAIL_STOP
+
+
+def test_trail_stages_matches_holding_evaluator_profile():
+    """ExitPlan.trail_stages 가 HoldingEvaluator 프로파일과 등가여야 한다.
+
+    라이브는 두 경로(ExitEngine=분봉 plan / HoldingEvaluator=브로커 pnl_rate)로
+    청산을 평가하므로, 트레일링 임계가 어긋나면 경로에 따라 청산 시점이 달라진다.
+    """
+    from backend.core.risk.holding_evaluator import ExitPolicy, resolve_policy
+
+    strat = _build_strategies(["ai_swing"], None)[0]
+    plan = _exit_plan_for_strategy("ai_swing", ENTRY, _window(), strategy_obj=strat)
+    policy = resolve_policy(ExitPolicy(), "ai_swing_v1")
+
+    (start, trail), = plan.trail_stages
+    assert start * 100 == policy.trailing_start_pct      # 0.20 ↔ 20.0
+    assert -trail * 100 == policy.trailing_offset_pct    # -0.05 ↔ 5.0
+
+
+def test_trailing_can_be_disabled_by_grid():
+    """trail_start=0 그리드로 트레일링을 끌 수 있다 (효과 격리 대조군)."""
+    strat = _build_strategies(
+        ["ai_swing"], None,
+        params_override={"ai_swing": {"trail_start_pct": Decimal("0")}},
+    )[0]
+    plan = _exit_plan_for_strategy("ai_swing", ENTRY, _window(), strategy_obj=strat)
+    assert plan.trail_stages is None
+
+
 def test_exit_engine_time_exits_at_max_hold():
     """max_hold 20일 도달 → 손익 무관 TIME_EXIT 전량."""
     strat = _build_strategies(["ai_swing"], None)[0]

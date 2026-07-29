@@ -88,6 +88,16 @@ class AiSwingParams(Swing38Params):
     tp2_pct: Decimal = Decimal("0.50")
     tp2_qty: Decimal = Decimal("0.5")
     be_pct: Decimal = Decimal("0.10")         # breakeven_trigger (+10% 도달 시 본전 잠금)
+    # ── 추적 수익화(트레일링) — 사용자 요구의 핵심: "손절선만 깨지지 않으면 추적 수익화" ──
+    # HoldingEvaluator 프로파일(trailing_start_pct 20 / trailing_offset_pct 5)과 **등가**로
+    # ExitPlan.trail_stages 에 실어 ExitEngine 도 같은 트레일링을 쓰게 한다.
+    #   peak 가 entry 대비 +trail_start_pct 도달 → SL 을 peak × (1 - trail_offset_pct) 로 올림.
+    # ※ 이 배선이 없으면 ExitPlan.trail_sl_for_peak() 가 None 을 돌려주고(trail_stages 부재)
+    #   ExitEngine 트레일링이 통째로 비활성 → 시뮬은 SL/TP/BE 만으로 돌아 라이브
+    #   HoldingEvaluator(트레일링 있음)와 다시 어긋난다. 기존 전략들이 실제로 그 상태다
+    #   (backend/core/strategy/ 전체에 trail_stages 설정 0건).
+    trail_start_pct: Decimal = Decimal("0.20")
+    trail_offset_pct: Decimal = Decimal("0.05")
 
 
 def build_exit_plan(
@@ -107,12 +117,21 @@ def build_exit_plan(
         symbol: 라운드피겨 로그용 종목코드 (선택).
 
     Returns:
-        ExitPlan — TP1/TP2 분할익절 + SL(라운드피겨 보정 경유) + BE + 보유기간 게이트.
-        time_exit 은 두지 않는다 (multi-day 스윙 — 당일 강제청산 폐기).
+        ExitPlan — TP1/TP2 분할익절 + SL(라운드피겨 보정 경유) + BE + **트레일링** +
+        보유기간 게이트. time_exit 은 두지 않는다 (multi-day 스윙 — 당일 강제청산 폐기).
     """
     entry = entry_price if isinstance(entry_price, Decimal) else Decimal(str(entry_price))
     # env 가 있으면 param 을 덮는다 (운영 kill-lever). 없으면 그리드 서치 대상 param.
     sl_base = _sl_fraction_from_env(p.sl_pct)
+    # 트레일링 — HoldingEvaluator 프로파일(start 20% / offset 5%)과 등가 1단계.
+    #   trail_stages 형식은 [(high_pnl_pct, trail_pct), ...] DESC 이고
+    #   trail_sl = peak × (1 + trail_pct) 이므로 offset 은 음수로 넣는다.
+    #   trail_start_pct <= 0 이면 트레일링 비활성(None) — 그리드로 끌 수 있게 한다.
+    trail_stages = (
+        [(p.trail_start_pct, -abs(p.trail_offset_pct))]
+        if p.trail_start_pct > 0 and p.trail_offset_pct > 0
+        else None
+    )
     return ExitPlan(
         take_profits=[
             TakeProfitTier(
@@ -129,6 +148,7 @@ def build_exit_plan(
         stop_loss=StopLoss(fixed_pct=resolve_sl_pct(
             STRATEGY_ID, entry, sl_base, symbol=symbol)),
         breakeven_trigger=p.be_pct,
+        trail_stages=trail_stages,
         min_hold_days=p.min_hold_days,
         max_hold_days=p.max_hold_days,
     )

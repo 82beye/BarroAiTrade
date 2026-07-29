@@ -66,6 +66,9 @@ _PCT_FIELDS = {
     "tp1": "tp1_pct",
     "tp2": "tp2_pct",
     "be": "be_pct",
+    # 추적 수익화 축 — trail_start=0 이면 트레일링 비활성(효과 격리용 대조군)
+    "trail_start": "trail_start_pct",
+    "trail_off": "trail_offset_pct",
 }
 # 그리드 키 → 그대로 쓰는 필드 (정수/실수)
 _RAW_FIELDS = {
