@@ -169,6 +169,24 @@ STRATEGY_EXIT_PROFILES: dict[str, dict] = {
         "min_hold_days": 1,
         "max_hold_days": 3,
     },
+    # 단테 교집합 스윙(ai_swing) — swing_38 프로파일 계승, SL env 만 분리.
+    # resolve_policy() 가 strategy.replace("_v1","") 하므로 "ai_swing_v1" → "ai_swing"
+    # 으로 매칭된다. 값은 swing_38 Phase D2 그리드 최적(S6 2D + S7 필터) 복제이며,
+    # SL env 만 BARRO_AI_SWING_SL_PCT 로 분리해 swing_38 운영 튜닝이 ai_swing 청산을
+    # 오염시키지 않게 했다 (backend/core/strategy/ai_swing.py 와 동일 기준).
+    # ai_swing 포지션(strategy_id=ai_swing_v1)이 생겨야 매칭 — 그 전엔 inert(라이브 무영향).
+    "ai_swing": {
+        "stop_loss_pct": Decimal(os.environ.get("BARRO_AI_SWING_SL_PCT", "-15.0")),
+        "take_profit_pct": Decimal("50.0"),
+        "partial_tp_pct": Decimal("20.0"),
+        "partial_tp_ratio": Decimal("0.5"),
+        "trailing_start_pct": Decimal("20.0"),
+        "trailing_offset_pct": Decimal("5.0"),
+        "breakeven_trigger_pct": Decimal("10.0"),
+        "tightened_sl_pct": Decimal("-15.0"),
+        "min_hold_days": 3,
+        "max_hold_days": 20,
+    },
 }
 
 
