@@ -175,15 +175,21 @@ STRATEGY_EXIT_PROFILES: dict[str, dict] = {
     # SL env 만 BARRO_AI_SWING_SL_PCT 로 분리해 swing_38 운영 튜닝이 ai_swing 청산을
     # 오염시키지 않게 했다 (backend/core/strategy/ai_swing.py 와 동일 기준).
     # ai_swing 포지션(strategy_id=ai_swing_v1)이 생겨야 매칭 — 그 전엔 inert(라이브 무영향).
+    # 2026-07-30 그리드 실측 최적 적용 (사용자 승인). 초기값은 swing_38 계승
+    # (SL -15 / trail 20·5) 이었으나 27/27 PASS · 3-seed 평균 +2.172%(계승값 +0.309%)
+    # 조합으로 교체했다. ★ai_swing.py 의 AiSwingParams 와 반드시 같은 값을 유지한다★ —
+    # 라이브는 두 경로(ExitEngine=분봉 plan / HoldingEvaluator=브로커 pnl_rate)로 청산을
+    # 평가하므로 어긋나면 경로에 따라 청산 시점이 달라진다(등가성은 테스트로 고정).
+    # 실측: docs/04-report/features/2026-07-30-ai-swing-p0.report.md §3-4
     "ai_swing": {
-        "stop_loss_pct": Decimal(os.environ.get("BARRO_AI_SWING_SL_PCT", "-15.0")),
+        "stop_loss_pct": Decimal(os.environ.get("BARRO_AI_SWING_SL_PCT", "-5.0")),
         "take_profit_pct": Decimal("50.0"),
         "partial_tp_pct": Decimal("20.0"),
         "partial_tp_ratio": Decimal("0.5"),
-        "trailing_start_pct": Decimal("20.0"),
-        "trailing_offset_pct": Decimal("5.0"),
+        "trailing_start_pct": Decimal("10.0"),
+        "trailing_offset_pct": Decimal("3.0"),
         "breakeven_trigger_pct": Decimal("10.0"),
-        "tightened_sl_pct": Decimal("-15.0"),
+        "tightened_sl_pct": Decimal("-5.0"),
         "min_hold_days": 3,
         "max_hold_days": 20,
     },

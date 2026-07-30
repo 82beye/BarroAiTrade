@@ -27,7 +27,7 @@
 | `BARRO_AI_SWING_DRYRUN` | `1` | 1이면 주문 시뮬(audit 에 `DRY_RUN` 기록) |
 | `BARRO_AI_SWING_BUDGET_RATIO` | `0.0` | ai_swing 평가액 상한 비율. **0이면 진입 0** |
 | `BARRO_AI_SWING_MAX_POSITIONS` | `3` | 동시 보유 슬롯 |
-| `BARRO_AI_SWING_SL_PCT` | `-15.0` | 손절률(percent). `HoldingEvaluator` 프로파일과 `build_exit_plan` 양쪽에 적용 |
+| `BARRO_AI_SWING_SL_PCT` | `-5.0` | 손절률(percent). `HoldingEvaluator` 프로파일과 `build_exit_plan` 양쪽에 적용 |
 | `BARRO_AI_SWING_ALLOW_STALE` | `0` | 전일자 산출물 허용 여부 |
 | `BARRO_AI_SWING_MAX_AGE_H` | `12` | 신선도 임계(소비자 판단용) |
 | `BARRO_AI_SWING_FALLBACK` | `""` | `scan_only` 면 예측 부재 시 스캔 단독 허용 |
@@ -169,7 +169,11 @@ python scripts/backtest_ai_swing.py --random 120 --seeds 42,7,123 \
 python scripts/backtest_ai_swing.py --universe-from-ai-trade --grid "sl=-5"
 ```
 
-**실측 권고 (2026-07-30, 랜덤 유니버스 120종목 × 3 seed)**: SL **-5~-6%** 가 3/3 PASS
-(3-seed 평균 +1.10 / +0.92%). 확정값 -15% 는 1/3 PASS(+0.31%). 트레일링 +20%/-5% 는
-6/6 케이스 개선(평균 +0.96%p)으로 유지 권고. 단 **단테 교집합이 아닌 대조군** 기준이며
-캐시 `as_of 2026-06-18` 이다 — 교집합 실측 후 재검토할 것.
+**현재 기본값 (2026-07-30 그리드 실측 최적, 사용자 승인 적용)**:
+`SL -5% / trail_start +10% / trail_off 3%` — 랜덤 유니버스 120종목 × 3 seed 에서
+27/27 PASS · 3-seed 평균 +2.172% · holdout +2.75~4.17% · 승률 36~39.5%.
+초기 swing_38 계승값(SL -15%/trail +20%·5%)은 +0.309%/1-of-3 PASS 였다.
+
+⚠️ **단테 교집합이 아닌 대조군** 기준이며 캐시 `as_of 2026-06-18`(약 6주 낙후)이다.
+교집합 shadow 실측 후 재검토할 것. 롤백은 `BARRO_AI_SWING_SL_PCT=-15.0`(손절만) 또는
+`AiSwingParams` + `STRATEGY_EXIT_PROFILES` 양쪽 되돌리기(트레일링 포함).

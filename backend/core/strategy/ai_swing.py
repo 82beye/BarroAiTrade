@@ -80,9 +80,17 @@ class AiSwingParams(Swing38Params):
     # 시작하고 shadow 실측 후 조인다.
     min_score: float = 3.0
 
-    # ── 청산: swing_38 프로파일 계승 + 그리드 서치용 파라미터화 ──
-    # 값 근거는 swing_38 Phase D2 (S6 SL×max_hold 2D + S7 진입필터 그리드) 결과 계승.
-    sl_pct: Decimal = Decimal("-0.15")        # env BARRO_AI_SWING_SL_PCT 로 override
+    # ── 청산: 2026-07-30 그리드 실측 최적 (사용자 결정으로 적용) ──
+    # 초기값은 swing_38 Phase D2 계승(SL -15% / trail +20%·off 5%)이었으나, 일봉 랜덤
+    # 유니버스 120종목 × 3 seed 그리드에서 아래 조합이 27/27 PASS · 3-seed 평균 +2.172%
+    # (계승값 +0.309% 대비 약 7배)로 나와 사용자 승인 후 기본값을 교체했다.
+    #   두 축 모두 단조: trail_off 3%>5%>8% (9/9 쌍), trail_start 10%>15%>20%.
+    #   승률도 동시 개선(26~28% → 36~39.5%) — 좁은 손절↔낮은 승률 트레이드오프가
+    #   트레일링 최적화와 함께 사라진다.
+    # 실측 근거: docs/04-report/features/2026-07-30-ai-swing-p0.report.md §3-2·§3-4
+    # ⚠️ 랜덤 유니버스(대조군) 기준이며 단테 교집합은 미검증 — shadow 실측 후 재검토.
+    sl_pct: Decimal = Decimal("-0.05")        # env BARRO_AI_SWING_SL_PCT 로 override
+    # TP/BE 는 그리드 미검증 → swing_38 계승값 유지
     tp1_pct: Decimal = Decimal("0.20")
     tp1_qty: Decimal = Decimal("0.5")
     tp2_pct: Decimal = Decimal("0.50")
@@ -96,8 +104,8 @@ class AiSwingParams(Swing38Params):
     #   ExitEngine 트레일링이 통째로 비활성 → 시뮬은 SL/TP/BE 만으로 돌아 라이브
     #   HoldingEvaluator(트레일링 있음)와 다시 어긋난다. 기존 전략들이 실제로 그 상태다
     #   (backend/core/strategy/ 전체에 trail_stages 설정 0건).
-    trail_start_pct: Decimal = Decimal("0.20")
-    trail_offset_pct: Decimal = Decimal("0.05")
+    trail_start_pct: Decimal = Decimal("0.10")
+    trail_offset_pct: Decimal = Decimal("0.03")
 
 
 def build_exit_plan(

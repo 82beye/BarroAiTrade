@@ -107,14 +107,14 @@ def _position(avg_price: float = 10_000.0, strategy_id: str = "ai_swing_v1") -> 
 
 class TestBuildExitPlan:
     def test_default_thresholds(self):
-        """swing_38 계승: TP1 +20%(0.5) / TP2 +50%(0.5) / SL -15% / BE +10% / 3~20일."""
+        """2026-07-30 그리드 최적: TP1 +20%(0.5) / TP2 +50%(0.5) / SL -5% / BE +10% / 3~20일."""
         plan = build_exit_plan(Decimal("10000"), AiSwingParams())
         assert len(plan.take_profits) == 2
         assert plan.take_profits[0].price == Decimal("10000") * Decimal("1.20")
         assert plan.take_profits[0].qty_pct == Decimal("0.5")
         assert plan.take_profits[1].price == Decimal("10000") * Decimal("1.50")
         assert plan.take_profits[1].qty_pct == Decimal("0.5")
-        assert plan.stop_loss.fixed_pct == Decimal("-0.15")
+        assert plan.stop_loss.fixed_pct == Decimal("-0.05")
         assert plan.breakeven_trigger == Decimal("0.10")
         assert plan.min_hold_days == 3
         assert plan.max_hold_days == 20
@@ -151,7 +151,7 @@ class TestBuildExitPlan:
     def test_exit_plan_ctx_optional(self):
         """ctx 없이도 호출 가능 (시뮬 진입점이 position 만 들고 부를 수 있게)."""
         plan = AiSwingStrategy().exit_plan(_position())
-        assert plan.stop_loss.fixed_pct == Decimal("-0.15")
+        assert plan.stop_loss.fixed_pct == Decimal("-0.05")
 
 
 # ─── 2) SL env override + swing_38 env 로부터의 분리 ────────────────────────
@@ -167,7 +167,7 @@ class TestSlEnvSeparation:
         """★분리★ BARRO_SWING38_SL_PCT 를 바꿔도 ai_swing SL 은 영향 없음."""
         monkeypatch.setenv("BARRO_SWING38_SL_PCT", "-3.0")
         plan = build_exit_plan(Decimal("10000"), AiSwingParams())
-        assert plan.stop_loss.fixed_pct == Decimal("-0.15")
+        assert plan.stop_loss.fixed_pct == Decimal("-0.05")
 
     def test_ai_swing_env_does_not_leak_into_swing38(self, monkeypatch):
         """역방향 분리 — ai_swing env 가 swing_38 exit_plan 을 건드리지 않음."""
@@ -181,7 +181,7 @@ class TestSlEnvSeparation:
         """외부 입력 예외 전량 흡수 (§2 S3) — 무효값은 param default 로 폴백."""
         monkeypatch.setenv("BARRO_AI_SWING_SL_PCT", raw)
         plan = build_exit_plan(Decimal("10000"), AiSwingParams())
-        assert plan.stop_loss.fixed_pct == Decimal("-0.15")
+        assert plan.stop_loss.fixed_pct == Decimal("-0.05")
 
 
 # ─── 3) 시그널 라벨 + 진입 판정 상속 ───────────────────────────────────────
@@ -258,22 +258,47 @@ class TestRegistrationPoints:
     def test_resolve_policy_matches_ai_swing_v1(self):
         """resolve_policy 가 "_v1" 제거 후 "ai_swing" 프로파일로 매칭."""
         pol = resolve_policy(ExitPolicy(), "ai_swing_v1")
-        assert pol.stop_loss_pct == Decimal("-15.0")
+        # 2026-07-30 그리드 최적 (사용자 승인) — 초기 swing_38 계승값에서 교체됨
+        assert pol.stop_loss_pct == Decimal("-5.0")
         assert pol.take_profit_pct == Decimal("50.0")
         assert pol.partial_tp_pct == Decimal("20.0")
         assert pol.partial_tp_ratio == Decimal("0.5")
-        assert pol.trailing_start_pct == Decimal("20.0")
-        assert pol.trailing_offset_pct == Decimal("5.0")
+        assert pol.trailing_start_pct == Decimal("10.0")
+        assert pol.trailing_offset_pct == Decimal("3.0")
         assert pol.breakeven_trigger_pct == Decimal("10.0")
-        assert pol.tightened_sl_pct == Decimal("-15.0")
+        assert pol.tightened_sl_pct == Decimal("-5.0")
         assert pol.min_hold_days == 3
         assert pol.max_hold_days == 20
 
-    def test_profile_matches_swing_38_values(self):
-        """프로파일 = swing_38 값 복제 (SL env 키만 분리)."""
+    def test_profile_equals_params_across_both_exit_paths(self):
+        """★두 청산 경로 등가성★ HoldingEvaluator 프로파일 == AiSwingParams.
+
+        라이브는 ExitEngine(분봉 plan)과 HoldingEvaluator(브로커 pnl_rate) 두 경로로
+        청산을 평가한다. 임계가 어긋나면 경로에 따라 청산 시점이 달라지므로,
+        한쪽만 바꾸는 실수를 이 테스트가 잡는다.
+        """
+        prof = STRATEGY_EXIT_PROFILES["ai_swing"]
+        p = AiSwingParams()
+        assert prof["stop_loss_pct"] == p.sl_pct * 100
+        assert prof["trailing_start_pct"] == p.trail_start_pct * 100
+        assert prof["trailing_offset_pct"] == p.trail_offset_pct * 100
+        assert prof["breakeven_trigger_pct"] == p.be_pct * 100
+        assert prof["partial_tp_pct"] == p.tp1_pct * 100
+        assert prof["partial_tp_ratio"] == p.tp1_qty
+        assert prof["take_profit_pct"] == p.tp2_pct * 100
+        assert prof["min_hold_days"] == p.min_hold_days
+        assert prof["max_hold_days"] == p.max_hold_days
+
+    def test_profile_diverged_from_swing_38(self):
+        """ai_swing 은 더 이상 swing_38 복제가 아니다 — 실측으로 분기했음을 고정."""
         ai = STRATEGY_EXIT_PROFILES["ai_swing"]
         sw = STRATEGY_EXIT_PROFILES["swing_38"]
-        assert ai == sw, "ai_swing 프로파일은 swing_38 계승 — 값 드리프트 감지"
+        assert ai["stop_loss_pct"] != sw["stop_loss_pct"]
+        assert ai["trailing_start_pct"] != sw["trailing_start_pct"]
+        # 그리드 미검증 항목은 여전히 계승값과 같다
+        assert ai["take_profit_pct"] == sw["take_profit_pct"]
+        assert (ai["min_hold_days"], ai["max_hold_days"]) == (
+            sw["min_hold_days"], sw["max_hold_days"])
 
     def test_max_stop_for_ai_swing_is_swing_tier(self):
         """★결함 수정★ "ai_swing_v1" 이 인트라데이 상한(0.04)으로 조여지지 않음."""
@@ -313,7 +338,7 @@ class TestSwing38Regression:
         assert plan.take_profits[0].price == Decimal("10000") * Decimal("1.20")
         assert plan.take_profits[0].qty_pct == Decimal("0.5")
         assert plan.take_profits[1].price == Decimal("10000") * Decimal("1.50")
-        assert plan.stop_loss.fixed_pct == Decimal("-0.15")
+        assert plan.stop_loss.fixed_pct == Decimal("-0.15")   # ★swing_38 값 — ai_swing(-0.05)과 무관
         assert plan.breakeven_trigger == Decimal("0.10")
         assert plan.min_hold_days == 3
         assert plan.max_hold_days == 20

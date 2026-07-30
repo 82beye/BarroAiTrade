@@ -110,7 +110,7 @@ def test_sim_exit_plan_carries_live_thresholds():
     assert plan.take_profits[0].price == ENTRY * Decimal("1.20")   # TP1 +20%
     assert plan.take_profits[0].qty_pct == Decimal("0.5")
     assert plan.take_profits[1].price == ENTRY * Decimal("1.50")   # TP2 +50%
-    assert plan.stop_loss.fixed_pct == Decimal("-0.15")            # SL -15%
+    assert plan.stop_loss.fixed_pct == Decimal("-0.05")            # SL -5% (그리드 최적)
     assert plan.breakeven_trigger == Decimal("0.10")               # BE +10%
     # ★ 보유 기간 게이트가 plan 에 실려야 ExitEngine 이 소비한다 (_scaled_exit_plan 은 미설정)
     assert plan.min_hold_days == 3
@@ -146,12 +146,12 @@ def _pos(entry_time: datetime) -> PositionState:
 
 
 def test_exit_engine_blocks_before_min_hold():
-    """min_hold 3일 미달 → SL -15% 를 넘겨도 청산되지 않는다 (게이트 실작동 증명)."""
+    """min_hold 3일 미달 → SL(-5%)을 크게 넘겨도 청산되지 않는다 (게이트 실작동 증명)."""
     strat = _build_strategies(["ai_swing"], None)[0]
     plan = _exit_plan_for_strategy("ai_swing", ENTRY, _window(), strategy_obj=strat)
     now = datetime(2026, 7, 30, 10, 0)
     pos = _pos(now - timedelta(days=1))            # 1일 보유 (min 3 미달)
-    crashed = ENTRY * Decimal("0.80")              # -20% (SL -15% 초과)
+    crashed = ENTRY * Decimal("0.80")              # -20% (SL -5% 크게 초과)
 
     _, orders = ExitEngine().evaluate(pos, plan, crashed, now)
     assert orders == []
@@ -171,7 +171,7 @@ def test_exit_engine_stops_out_after_min_hold():
 
 
 def test_exit_engine_trails_after_peak_drawdown():
-    """★사용자 요구 핵심★ peak +20% 도달 후 고점 -5% 하락 → TRAIL_STOP 청산.
+    """★사용자 요구 핵심★ peak 가 trail_start(+10%) 도달 후 고점 -3% 초과 하락 → TRAIL_STOP.
 
     trail_stages 가 plan 에 실리지 않으면 ExitPlan.trail_sl_for_peak() 가 None 을
     돌려주고 트레일링이 통째로 비활성된다(기존 전략들이 실제로 그 상태).
@@ -182,14 +182,14 @@ def test_exit_engine_trails_after_peak_drawdown():
 
     now = datetime(2026, 7, 30, 10, 0)
     pos = _pos(now - timedelta(days=5))            # min_hold 경과
-    peak = ENTRY * Decimal("1.25")                 # +25% (trail_start +20% 초과)
+    peak = ENTRY * Decimal("1.25")                 # +25% (trail_start +10% 초과)
 
     # 1) 고점 갱신만 — 아직 청산 없음
     pos2, orders = ExitEngine().evaluate(pos, plan, peak, now)
     assert orders == [] or orders[0].reason != ExitReason.TRAIL_STOP
     assert pos2.high_water_mark == peak
 
-    # 2) 고점 대비 -6% 하락 → trail_sl(peak×0.95) 하회 → TRAIL_STOP
+    # 2) 고점 대비 -6% 하락 → trail_sl(peak×0.97) 하회 → TRAIL_STOP
     dropped = peak * Decimal("0.94")
     _, orders2 = ExitEngine().evaluate(pos2, plan, dropped, now)
     assert orders2, "고점 대비 offset 초과 하락 시 청산돼야 한다"

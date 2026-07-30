@@ -11,7 +11,7 @@ swing_38 비활성 시 `active_positions.json` 동기화가 누락되고 보유�
 빠지고, 그 함수는 **전략 프로파일을 통째로 무시**하고 넘겨받은 policy(운영 데몬 기준
 `data/policy.json` = SL **-2.0** / TP +5.0)만 평가한다. 데몬은 장부(`active_positions`)에
 있는 종목만 `contexts` 를 채우므로(`intraday_buy_daemon.py:391-393`), **장부가 유실된
-스윙 포지션은 min_hold 3일도 SL -15% 도 적용받지 못하고 -2% 에서 전량 손절된다.**
+스윙 포지션은 min_hold 3일도 전략 SL(-5%) 도 적용받지 못하고 -2% 에서 전량 손절된다.**
 
 이 파일은 그 현상을 **현상 그대로 고정**한다 — 방어(2단 플래그·이중 장부·recover)가
 깨지면 즉시 red 가 되게 하는 것이 목적이다. "-2% 손절이 옳다"는 뜻이 아니다.
@@ -55,7 +55,7 @@ def _holding(pnl_rate: float) -> HoldingPosition:
 
 # ─── 1. 고아 경로 현상 고정 (F2) ──────────────────────────────────────────
 def test_orphan_ai_swing_stops_out_at_minus_2pct():
-    """★현상 고정★ 장부 유실(ctx=None) 시 -3% 에서 손절된다 — SL -15% 가 무시된다.
+    """★현상 고정★ 장부 유실(ctx=None) 시 -3% 에서 손절된다 — 전략 SL(-5%)이 무시된다.
 
     이 테스트가 green 인 동안 고아 포지션은 위험하다. 방어는 코드가 아니라
     운영 절차(2단 플래그 + 이중 장부 + recover)로 한다 — runbook 참조.
@@ -76,13 +76,17 @@ def test_ai_swing_with_context_survives_minus_3pct():
 
 
 def test_ai_swing_profile_overrides_live_policy():
-    """resolve_policy 가 policy.json(-2%)을 ai_swing 프로파일(-15%)로 덮는다."""
+    """resolve_policy 가 policy.json(-2%)을 ai_swing 프로파일(-5%)로 덮는다.
+
+    -5% 는 2026-07-30 그리드 최적값. policy.json 의 -2% 보다 넉넉해야 스윙이
+    노이즈에 털리지 않는다 — 고아 경로(ctx=None)에서는 이 override 가 적용되지 않는다.
+    """
     resolved = resolve_policy(_LIVE_POLICY, "ai_swing")
-    assert resolved.stop_loss_pct == Decimal("-15.0")
+    assert resolved.stop_loss_pct == Decimal("-5.0")
     assert resolved.min_hold_days == 3
     assert resolved.max_hold_days == 20
     # 버전 접미사가 붙은 형태도 동일하게 매칭 (시그널 strategy_id 경로)
-    assert resolve_policy(_LIVE_POLICY, "ai_swing_v1").stop_loss_pct == Decimal("-15.0")
+    assert resolve_policy(_LIVE_POLICY, "ai_swing_v1").stop_loss_pct == Decimal("-5.0")
 
 
 def test_profile_registered_for_daemon_tag_form():
