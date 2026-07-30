@@ -10,8 +10,9 @@
 ## 0. 이 전략의 성격 (활성 전 합의 사항)
 
 - **다일 보유 스윙** — `min_hold_days=3` / `max_hold_days=20`. 당일 청산하지 않는다.
-- **승률이 아니라 손익비로 수익을 내는 구조.** 실측상 손절을 좁힐수록 승률은 떨어지고
-  (SL -5% → 승률 25~28%) 평균 수익률은 올라간다. **승률 80% KPI 와는 방향이 반대다.**
+- **승률이 아니라 손익비로 수익을 내는 구조.** 현재 기본값 실측 승률은 **36~39.5%** 다
+  (트레일링 최적화 전, 손절만 좁혔을 때는 25~28%였다). 손익비로 수익을 내므로
+  **승률 80% KPI 와는 방향이 다르다** — 활성 전 이 점을 합의해야 한다.
 - 종목 원천은 운영 머신 ai-trade 봇의 **스캔 ∩ 예측 교집합**이다. 그 산출물이 없으면
   전략은 아무것도 하지 않는다(`status="no_data"` → 진입 0).
 
@@ -121,8 +122,9 @@ ai_swing 을 켤 때 **두 경로 중 어느 것이 살아 있는지 반드시 �
 
 **증상**: 브로커에 보유는 있는데 `active_positions.json` 에 없다.
 **결과**: `HoldingEvaluator` 가 `ctx=None` 경로로 빠져 전략 프로파일을 무시하고
-`data/policy.json`(SL **-2.0** / TP +5.0)으로 평가한다 → **SL -15% 와 min_hold 3일이
-전부 무시되고 -2% 에서 전량 손절된다.** (테스트 `test_ai_swing_orphan.py` 로 현상 고정)
+`data/policy.json`(SL **-2.0** / TP +5.0)으로 평가한다 → **전략 SL(-5%)·트레일링·
+min_hold 3일이 전부 무시되고 -2% 에서 전량 손절된다.**
+(테스트 `test_ai_swing_orphan.py` 로 현상 고정)
 
 ```bash
 python scripts/ai_swing_recover.py --dry-run     # 차집합 진단
@@ -143,7 +145,9 @@ python scripts/ai_swing_recover.py --apply       # 원천(order_audit/fill_audit
 
 1. **min_hold 3일 동안 손절이 걸리지 않는다.** `HoldingEvaluator` 의 보유기간 게이트가
    SL/TP/트레일링보다 **먼저** 평가되므로(`holding_evaluator.py:306-313`),
-   진입 후 3일간 -15% 를 초과하는 손실도 청산되지 않는다. 사용자 확정 정책이다.
+   진입 후 3일간 SL(-5%)을 초과하는 손실도 청산되지 않는다. 사용자 확정 정책이다.
+   ※ SL 을 -15%→-5% 로 좁혔으므로 이 3일 무방어 구간의 실질 위험이 커졌다 —
+     `BARRO_AI_SWING_MAX_POSITIONS`/`BUDGET_RATIO` 로 익스포저를 제한할 것.
 2. **hold 일수는 달력일이다** (`(now - entry_time).days`). 금요일 진입 시 min_hold 3일이
    거래일 1일 만에 해제되고, max_hold 20일은 거래일 약 14일이다.
 3. **데몬 자체 가드 `MIN_HOLD_MINUTES=15`** — 진입 후 15분간 방어적 매도(SL·BE·트레일)가
