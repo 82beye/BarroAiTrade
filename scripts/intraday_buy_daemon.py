@@ -32,7 +32,7 @@ from backend.core.gateway.kiwoom_native_account import KiwoomNativeAccountFetche
 from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
 from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
 from backend.core.gateway.kiwoom_native_orders import KiwoomNativeOrderExecutor
-from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker
+from backend.core.gateway.kiwoom_native_rank import KiwoomNativeLeaderPicker, LeaderCandidate
 from backend.core.journal.active_positions import ActivePositionStore
 from backend.core.journal.policy_config import PolicyConfigStore
 from backend.core.notify.telegram import TelegramNotifier, format_buy_alert, format_sell_alert
@@ -793,6 +793,166 @@ def _force_close_skip(symbol: str, strategy: str | None, cb_skip: set[str]) -> b
     return False
 
 
+# ── ai_swing 진입 훅 (단테 스캔∩예측 교집합 스윙) — 전부 default-OFF ──────────────
+# [2026-07-31] ai_swing 은 다른 zone 전략과 종목 원천이 다르다. f_zone/gold_zone 등은
+#   당일 주도주 랭킹(KiwoomNativeLeaderPicker)에서 후보를 받지만, ai_swing 은
+#   ai-trade(단테) 산출물의 스캔∩예측 교집합에서 받는다. 두 집합은 거의 겹치지 않으므로
+#   (랭킹=당일 급등 상위 N, 교집합=되돌림 대기 종목) 후보를 **별도로 합성해 주입**한다.
+#   합성하지 않으면 ai_swing 은 영구히 진입 0 이다.
+#
+# ★ 4중 default-OFF (§2 S3) — 아래가 전부 열려야 주문 시도가 생긴다:
+#     ① zone_strategies 에 "ai_swing" 포함 (BARRO_DAEMON_STRATEGIES 또는 --strategies)
+#     ② BARRO_AI_SWING_ENTRY_ENABLED=1   (기본 0 → 후보 주입 자체를 하지 않음)
+#     ③ BARRO_AI_SWING_BUDGET_RATIO>0    (기본 0.0 → 신호가 나와도 전량 차단)
+#     ④ BARRO_AI_TRADE_DIR 설정 + 산출물 존재 (미설정이면 로더가 no_data)
+#   상위에 LIVE_TRADING_ENABLED(실주문) 와 --no-dry-run 이 별도로 있다.
+#
+# ⚠️ shadow 실측(scripts/ai_swing_daemon.py) 으로 교집합 종목수·진입신호수가 0 이 아님을
+#   확인하기 전에는 ②③ 을 켜지 말 것 — docs/operations/ai-swing-runbook.md §2.
+_AI_SWING_SID = "ai_swing"
+
+
+def _ai_swing_entry_enabled() -> bool:
+    """ai_swing 후보 주입 여부. 기본 OFF."""
+    return _env_truthy("BARRO_AI_SWING_ENTRY_ENABLED", "0")
+
+
+def _ai_swing_caps() -> tuple[float, int]:
+    """(예산비율, 동시보유 슬롯 상한). 파싱 실패는 보수적으로 (0.0, 0) = 진입 차단."""
+    try:
+        ratio = float(os.environ.get("BARRO_AI_SWING_BUDGET_RATIO", "0") or 0)
+    except (TypeError, ValueError):
+        ratio = 0.0
+    try:
+        slots = int(os.environ.get("BARRO_AI_SWING_MAX_POSITIONS", "3") or 3)
+    except (TypeError, ValueError):
+        slots = 0
+    return max(0.0, ratio), max(0, slots)
+
+
+def _ai_swing_universe_symbols() -> tuple[list, str, str]:
+    """단테 교집합 유니버스를 읽어 (items, status, reason) 반환.
+
+    실패·부재는 전량 흡수해 ([], "no_data", <사유>) 를 돌린다 — 라이브 무영향(§2 S3).
+    status 가 ok/stale 이 아니면 items 는 비어 있다(로더 계약).
+    """
+    try:
+        from backend.core.scanner.ai_trade_universe import load_ai_trade_universe
+        uni = load_ai_trade_universe()
+        items = list(getattr(uni, "items", []) or [])
+        status = str(getattr(uni, "status", "no_data") or "no_data")
+        reason = str(getattr(uni, "reason", "") or "")
+        if status not in ("ok", "stale"):
+            return [], status, reason
+        return items, status, reason
+    except Exception as e:  # 로더는 예외를 흡수하지만 import 실패 등 2차 방어
+        return [], "no_data", f"loader_error:{type(e).__name__}"
+
+
+async def _ai_swing_extra_candidates(fetcher, items: list, excluded: set[str]) -> list:
+    """교집합 종목을 LeaderCandidate 로 합성. 읽기전용 일봉 TR 만 사용한다.
+
+    cur_price/flu_rate 는 일봉 마지막 2봉에서 산출한다(데몬이 시그널 판정에 쓰는
+    fetch_daily 와 동일 원천이라 정합). 조회 실패 종목은 조용히 건너뛴다.
+    ※ rank_* 는 랭킹 산출물이 아니므로 None, score 는 예측점수를 그대로 싣는다.
+    """
+    out: list = []
+    for it in items:
+        sym = str(getattr(it, "symbol", "") or "").strip()
+        if not sym or sym in excluded:
+            continue
+        try:
+            candles = await fetcher.fetch_daily(symbol=sym)
+        except Exception:
+            continue
+        if not candles or len(candles) < 2:
+            continue
+        try:
+            cur = float(candles[-1].close)
+            prev = float(candles[-2].close)
+            flu = ((cur - prev) / prev * 100.0) if prev > 0 else 0.0
+        except Exception:
+            continue
+        if cur <= 0:
+            continue
+        out.append(LeaderCandidate(
+            symbol=sym,
+            name=str(getattr(it, "name", "") or sym),
+            cur_price=cur,
+            flu_rate=flu,
+            rank_trade_value=None,
+            rank_flu_rate=None,
+            rank_volume=None,
+            score=float(getattr(it, "pred_score", 0.0) or 0.0),
+        ))
+    return out
+
+
+def _ai_swing_cap_filter(signals: list, pos_store, balance, deposit) -> tuple[list, list]:
+    """ai_swing 신호에 슬롯·예산 캡을 적용. (통과신호, [(symbol, 사유)]) 반환.
+
+    다른 전략 신호는 손대지 않는다. 캡 계산에 실패하면 ai_swing 신호를 **전량 차단**한다
+    (fail-closed — 예산을 모르는 채로 다일보유 포지션을 늘리지 않는다).
+    """
+    ai_sig = [s for s in signals if s[1] == _AI_SWING_SID]
+    if not ai_sig:
+        return signals, []
+
+    ratio, slots = _ai_swing_caps()
+    others = [s for s in signals if s[1] != _AI_SWING_SID]
+    skipped: list = []
+
+    if ratio <= 0 or slots <= 0:
+        for c, _, _ in ai_sig:
+            skipped.append((c.symbol, f"캡 0 (BUDGET_RATIO={ratio}, MAX_POSITIONS={slots})"))
+        return others, skipped
+
+    try:
+        held = pos_store.load_all()
+        held_ai = {
+            sym: p for sym, p in held.items()
+            if str(getattr(p, "strategy", "") or "").replace("_v1", "").replace("_v2", "") == _AI_SWING_SID
+        }
+        free_slots = max(0, slots - len(held_ai))
+
+        # 예산 = BUDGET_RATIO × 투자기준자산. 현 ai_swing 평가액을 빼 잔여를 구한다.
+        #   기준자산 정의는 balance_gate 관례를 따른다 — 매수가능액(orderable_cash,
+        #   없으면 cash) + 현 보유 평가총액(total_eval). 즉 "현금 + 주식" 근사.
+        _cash = getattr(deposit, "orderable_cash", None) or getattr(deposit, "cash", 0)
+        est_total = float(_cash or 0) + float(getattr(balance, "total_eval", 0) or 0)
+        holdings = {h.symbol: h for h in (getattr(balance, "holdings", None) or [])}
+        used = 0.0
+        for sym in held_ai:
+            h = holdings.get(sym)
+            if h is not None:
+                used += float(getattr(h, "eval_amount", 0) or 0)
+        budget_left = ratio * est_total - used
+    except Exception as e:
+        for c, _, _ in ai_sig:
+            skipped.append((c.symbol, f"캡 계산 실패({type(e).__name__}) — fail-closed 차단"))
+        return others, skipped
+
+    if est_total <= 0:
+        for c, _, _ in ai_sig:
+            skipped.append((c.symbol, "추정예탁자산 0 — fail-closed 차단"))
+        return others, skipped
+
+    passed: list = []
+    for s in ai_sig:
+        c = s[0]
+        if free_slots <= 0:
+            skipped.append((c.symbol, f"슬롯 소진 (보유 {len(held_ai)}/{slots})"))
+            continue
+        if budget_left <= 0:
+            skipped.append((c.symbol, f"예산 소진 (한도 {ratio:.0%} × 예탁 {est_total:,.0f})"))
+            continue
+        passed.append(s)
+        free_slots -= 1
+        budget_left -= float(c.cur_price)  # 최소 1주 기준 보수 차감
+
+    return others + passed, skipped
+
+
 def _zone_entry_cutoff_passed() -> bool:
     """[BAR-OPS-39 P0] KST 현재시각이 일반 전략 진입 컷오프 이후면 True."""
     if not _ZONE_ENTRY_CUTOFF:
@@ -1086,10 +1246,38 @@ async def _scan_and_buy(
     # 직전까지는 진입 허용하되, 상한가 도달분만 차단(추격매수 손실 위험 한계선).
     _excl_lev = _env_truthy("SUPERTREND_AUTO_EXCLUDE_LEVERAGE")
     _excl_etf = _env_truthy("SUPERTREND_AUTO_EXCLUDE_ETF")
-    filtered = [c for c in leaders if c.symbol not in excluded
+    def _passes_universe_filters(c) -> bool:
+        return (c.symbol not in excluded
                 and c.flu_rate < _MAX_FLU_RATE and c.cur_price >= 5_000
                 and not (_excl_lev and _is_leverage_or_inverse(c.symbol, c.name))
-                and not (_excl_etf and _is_etf_or_etn(c.symbol, c.name))]
+                and not (_excl_etf and _is_etf_or_etn(c.symbol, c.name)))
+
+    filtered = [c for c in leaders if _passes_universe_filters(c)]
+
+    # ── ai_swing 후보 주입 (단테 교집합) — default-OFF ────────────────────────
+    #   랭킹 후보와 원천이 달라 별도 합성이 필요하다(위 _ai_swing_extra_candidates 주석).
+    #   ENTRY_ENABLED=0(기본)이면 로더조차 호출하지 않아 라이브에 완전 무영향.
+    ai_swing_symbols: set[str] = set()
+    if _AI_SWING_SID in zone_strategies and _ai_swing_entry_enabled():
+        try:
+            _ai_items, _ai_status, _ai_reason = _ai_swing_universe_symbols()
+            ts_a = _now_kst().strftime("%H:%M:%S")
+            if not _ai_items:
+                print(f"  [{ts_a}][AI-SWING] 유니버스 없음 — status={_ai_status} reason={_ai_reason}")
+            else:
+                _extra = await _ai_swing_extra_candidates(
+                    fetcher, _ai_items, excluded | {c.symbol for c in filtered}
+                )
+                _extra = [c for c in _extra if _passes_universe_filters(c)]
+                ai_swing_symbols = {c.symbol for c in _extra}
+                filtered = filtered + _extra
+                print(
+                    f"  [{ts_a}][AI-SWING] status={_ai_status} 교집합={len(_ai_items)} "
+                    f"→ 후보주입 {len(_extra)}종목"
+                )
+        except Exception as _e:  # 주입 실패가 기존 전략 스캔을 깨뜨리면 안 된다
+            print(f"  [AI-SWING] 후보 주입 실패({type(_e).__name__}) — 기존 전략만 진행")
+            ai_swing_symbols = set()
 
     if not filtered:
         return 0
@@ -1277,6 +1465,15 @@ async def _scan_and_buy(
                         continue
             except Exception:
                 pass  # 분봉 fetch 실패 시 통과 (보수적 fallback)
+            # ai_swing 은 단테 교집합 종목에서만 인정한다 — 랭킹 종목이 우연히
+            #   ai_swing 시뮬에서 최고점을 받아도 진입시키지 않는다(종목 원천 격리).
+            if best_strategy == _AI_SWING_SID and c.symbol not in ai_swing_symbols:
+                ts_x = _now_kst().strftime("%H:%M:%S")
+                print(
+                    f"  [{ts_x}][SKIP-AI-SWING] {c.symbol} {c.name:<14} "
+                    f"— 단테 교집합 밖 종목(랭킹 후보)"
+                )
+                continue
             signals.append((c, best_strategy, best_pnl))
             print(f"  [SIGNAL] {c.symbol} {c.name:<14} 전략={best_strategy} PnL={best_pnl:+,.0f} (w={weights.get(best_strategy, 1.0):.1f})")
 
@@ -1349,6 +1546,18 @@ async def _scan_and_buy(
 
     # 자금 한도 체크
     deposit = await account.fetch_deposit()
+
+    # ── ai_swing 슬롯·예산 캡 — 슈퍼트렌드와의 자본 격리 ─────────────────────
+    #   BUDGET_RATIO 기본 0.0 이라 여기서 전량 차단된다(진입하려면 명시 설정 필요).
+    #   캡 계산 실패는 fail-closed(차단) — 다일보유 포지션을 모르는 예산으로 늘리지 않는다.
+    if any(s[1] == _AI_SWING_SID for s in signals):
+        signals, _ai_skipped = _ai_swing_cap_filter(signals, pos_store, balance, deposit)
+        for _sym, _why in _ai_skipped:
+            _ts_k = _now_kst().strftime("%H:%M:%S")
+            print(f"  [{_ts_k}][AI-SWING-CAP] {_sym} — {_why}")
+        if not signals:
+            return 0
+
     candidates_for_gate = [
         (c.symbol, c.name, Decimal(str(c.cur_price))) for c, _, _ in signals
     ]
