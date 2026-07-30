@@ -732,7 +732,9 @@ _MEANREV_STRATEGIES = {"gold_zone"}
 #   기록돼, 데몬 DCA 가 가짜 tranche2 를 실주문으로 추가 발사(6/10 319660: 23+9=32주, 권고의
 #   139%). single_tranche=True 전환으로 신규 포지션은 pending 이 없지만, 전환 전 생성된
 #   레거시 포지션(재시작 시 잔존)을 위한 이중 방어선.
-_NO_DCA_STRATEGIES = {"swing_38", "supertrend"}
+# [2026-07-30] ai_swing 추가 — Swing38Strategy 를 상속해 add_on_signal(자체 2차 분할진입)을
+#   그대로 물려받으므로 swing_38 과 동일한 이중 분할 위험이 있다.
+_NO_DCA_STRATEGIES = {"swing_38", "supertrend", "ai_swing"}
 
 # [BAR-OPS-38 P0#3] 되돌림(gold)·눌림(f) 전략 시초갭 상한(%) — 갭상승 폭등주에는 바닥/눌림
 #   신호가 고점에서 발화한다(6/10 gold 추격 3종 전패 -461K: SK오션플랜트 시가갭 +22.8% 등.
@@ -764,13 +766,18 @@ _GAP_GUARD_STRATEGIES = _parse_strategy_set(
 #   늦은 진입 = 짧은 검증시간 + 오버나이트 갭 리스크 후보. 빈 문자열이면 비활성.
 #   다일보유가 설계인 swing_38 은 예외(이월이 의도 — 이월 총액 한도 20%가 별도 캡).
 _ZONE_ENTRY_CUTOFF = os.environ.get("BARRO_ZONE_ENTRY_CUTOFF", "14:30").strip()
-_CUTOFF_EXEMPT_STRATEGIES = {"swing_38"}
+#   [2026-07-30] ai_swing 도 다일보유 설계(min_hold 3·max_hold 20)라 동일 면제.
+#   단 전략 자체의 entry_time_cutoff=14:00 은 그대로 적용된다(이중 게이트 중 전략 쪽).
+_CUTOFF_EXEMPT_STRATEGIES = {"swing_38", "ai_swing"}
 
 # [2026-06-22] EOD 강제청산(carry-limit 이월한도 트림) 제외 전략 — 다일보유가 설계인
 #   swing_38 은 이월이 의도(L653 참조)이므로, 이월총액 한도(20%) 초과 트림에서도 명시 보존한다.
 #   (종베는 _closing_bet_held() 로 별도 제외 — 수동관리 전용.) 장중 보유평가의 자체 손절·시간청산은
 #   그대로 적용되므로(여기서 제외하지 않음), 이 면제는 'EOD 강제 트림'에만 한정된다.
-_FORCE_CLOSE_EXEMPT_STRATEGIES = {"swing_38"}
+#   [2026-07-30] ai_swing 추가 — 단테 교집합 다일보유 스윙. 이월이 설계이므로 트림 면제.
+#   ※ 이 면제는 'EOD 강제 트림' 한정이다. 보유 유지의 실체는 exit 프로파일
+#     (SL/트레일링/min·max_hold)이며, 장중 자동매도는 면제되지 않는다.
+_FORCE_CLOSE_EXEMPT_STRATEGIES = {"swing_38", "ai_swing"}
 
 
 def _force_close_skip(symbol: str, strategy: str | None, cb_skip: set[str]) -> bool:
