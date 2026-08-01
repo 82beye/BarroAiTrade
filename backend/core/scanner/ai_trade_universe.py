@@ -38,6 +38,7 @@ from __future__ import annotations
 import glob
 import json
 import logging
+import math
 import os
 import re
 from dataclasses import asdict, dataclass
@@ -195,6 +196,38 @@ def _find_source(base_dir: str, prefix: str, today_iso: str) -> Optional[str]:
     return dated[-1][1]
 
 
+def validate_current_sources(
+    base_dir: str | None = None,
+    *,
+    today: date | None = None,
+    now: datetime | None = None,
+    require_predictions: bool = True,
+) -> tuple[bool, str]:
+    """실진입·shadow 공통 원본 신선도 게이트."""
+    resolved = (base_dir if base_dir is not None else os.environ.get(ENV_DIR, "") or "").strip()
+    if not resolved:
+        return False, "ai_trade_dir_unset"
+    try:
+        max_age_h = float(os.environ.get(ENV_MAX_AGE_H, "12") or 12)
+    except (TypeError, ValueError):
+        return False, "invalid_max_age_h"
+    if not math.isfinite(max_age_h) or max_age_h <= 0:
+        return False, "invalid_max_age_h"
+
+    current = now or datetime.now(_KST)
+    today_iso = (today or current.astimezone(_KST).date()).isoformat()
+    now_ts = current.timestamp()
+    prefixes = (_SCAN_PREFIX, _PRED_PREFIX) if require_predictions else (_SCAN_PREFIX,)
+    for prefix in prefixes:
+        path = os.path.join(resolved, f"{prefix}_{today_iso}.json")
+        if not os.path.isfile(path):
+            return False, f"source_missing:{os.path.basename(path)}"
+        age_h = (now_ts - os.path.getmtime(path)) / 3600.0
+        if age_h < -0.25 or age_h > max_age_h:
+            return False, f"source_age:{os.path.basename(path)}:{age_h:.2f}h"
+    return True, ""
+
+
 def _read_payload(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         payload = json.load(f)
@@ -331,8 +364,15 @@ def load_ai_trade_universe(
         scan_date = _payload_date(scan_payload, scan_path)
         scan_rows = _parse_scan(scan_payload)
 
-        # ─ predictions 부재 → partial. 스캔 단독 사용은 명시 opt-in 일 때만. ─
-        if pred_path is None:
+        # ─ 당일 predictions 부재 → partial. 과거 예측과 당일 scan을 섞지 않는다. ─
+        # _find_source()는 당일 파일이 없으면 과거 최신 파일을 돌려준다. 당일 scan이
+        # 있는데 예측만 실패한 흔한 경우 그 과거 파일로 stale 교집합을 만들면
+        # scan_only가 오히려 동작하지 않고 "오늘 선정"처럼 보일 수 있다.
+        current_pred_missing = (
+            scan_date == today_iso
+            and not os.path.isfile(os.path.join(resolved, f"{_PRED_PREFIX}_{today_iso}.json"))
+        )
+        if pred_path is None or current_pred_missing:
             fallback = (os.environ.get(ENV_FALLBACK, "") or "").strip().lower()
             if fallback == "scan_only":
                 items = _build_items(scan_rows, {}, list(scan_rows))
@@ -378,4 +418,5 @@ __all__ = [
     "ENV_FALLBACK",
     "ENV_MAX_AGE_H",
     "ENV_ALLOW_STALE",
+    "validate_current_sources",
 ]

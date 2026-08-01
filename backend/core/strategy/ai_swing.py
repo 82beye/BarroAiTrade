@@ -62,7 +62,7 @@ def _sl_fraction_from_env(default: Decimal) -> Decimal:
         pct = Decimal(str(raw).strip()) / Decimal("100")
     except (ArithmeticError, ValueError, TypeError):
         return default
-    if pct >= 0:
+    if not pct.is_finite() or not Decimal("-1") < pct < 0:
         return default
     return pct
 

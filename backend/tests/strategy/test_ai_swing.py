@@ -176,7 +176,9 @@ class TestSlEnvSeparation:
                                           _ctx(_ai_swing_candles()))
         assert plan.stop_loss.fixed_pct == Decimal("-0.15")
 
-    @pytest.mark.parametrize("raw", ["", "   ", "abc", "0", "5.0", "+2"])
+    @pytest.mark.parametrize(
+        "raw", ["", "   ", "abc", "0", "5.0", "+2", "NaN", "-Infinity", "-100", "-150"],
+    )
     def test_invalid_env_absorbed(self, monkeypatch, raw):
         """외부 입력 예외 전량 흡수 (§2 S3) — 무효값은 param default 로 폴백."""
         monkeypatch.setenv("BARRO_AI_SWING_SL_PCT", raw)

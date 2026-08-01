@@ -6,12 +6,15 @@ monkeypatch 로 갈아끼운다. 산출 파일은 `BARRO_DATA_DIR` 로 tmp_path 
 
 핵심 계약 고정:
   - `BARRO_AI_SWING_ENABLED` 가 truthy 아니면 아무 파일도 만들지 않는다.
-  - universe status 가 ok/stale 이 아니면 신호를 평가하지 않고 사유만 남긴다.
+  - ok/허용 stale/명시 opt-in scan_only 만 평가하고 나머지는 사유를 남긴다.
   - 조회 실패·캔들 부족은 예외 없이 `skipped` 로 간다.
+  - 실행 결과는 일자별 JSONL 에 누적되고 hard failure 는 exit 1/error 로 드러난다.
+  - 텔레그램은 선정 전 종목의 점수·현재 신호 여부/사유를 보낸다.
   - ★데몬 소스에 매매 체결 심볼이 한 번도 나오지 않는다 (소스 텍스트 검사).
 """
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import sys
@@ -44,7 +47,8 @@ SIGNALS_KEYS = {
     "signal_count", "signals", "skipped",
 }
 SIGNAL_ROW_KEYS = {
-    "symbol", "name", "entry_price", "score", "sl_price", "tp1_price", "tp2_price",
+    "symbol", "name", "entry_price", "score", "reason",
+    "sl_price", "tp1_price", "tp2_price",
 }
 
 
@@ -56,9 +60,12 @@ def env(tmp_path, monkeypatch):
     for name in (
         "BARRO_AI_SWING_ENABLED", "BARRO_AI_TRADE_DIR", "BARRO_AI_SWING_MIN_PRED_SCORE",
         "BARRO_AI_SWING_MIN_CONSENSUS", "BARRO_AI_SWING_TOP_N", "BARRO_AI_SWING_ALLOW_STALE",
+        "BARRO_AI_SWING_FALLBACK",
         "KIWOOM_APP_KEY", "KIWOOM_APP_SECRET",
     ):
         monkeypatch.delenv(name, raising=False)
+    # 로더 자체를 대역으로 바꾸는 테스트는 원본 파일 mtime도 함께 만들지 않는다.
+    monkeypatch.setattr(daemon, "validate_current_sources", lambda **_kw: (True, ""))
     return tmp_path
 
 
@@ -74,6 +81,12 @@ def _read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _history(base: Path) -> list[dict]:
+    paths = list((base / daemon.HISTORY_DIRNAME).glob("*.jsonl"))
+    assert len(paths) == 1
+    return [json.loads(line) for line in paths[0].read_text(encoding="utf-8").splitlines()]
+
+
 def _item(symbol: str, name: str, **kw) -> AiTradeItem:
     base = dict(
         scan_score=8.0, blue_line_status="BLUE", watermelon_signal=True,
@@ -84,10 +97,11 @@ def _item(symbol: str, name: str, **kw) -> AiTradeItem:
     return AiTradeItem(symbol=symbol, name=name, **base)
 
 
-def _universe(items, status="ok", reason="") -> AiTradeUniverse:
+def _universe(items, status="ok", reason="", source_scan_date=None) -> AiTradeUniverse:
+    source_scan_date = source_scan_date or datetime.now(daemon._KST).date().isoformat()
     return AiTradeUniverse(
         status=status, as_of="2026-07-31T09:00:00+09:00", reason=reason,
-        source_scan_date="2026-07-31", source_pred_date="2026-07-31",
+        source_scan_date=source_scan_date, source_pred_date=source_scan_date,
         scan_count=30, pred_count=20, items=tuple(items),
     )
 
@@ -224,12 +238,102 @@ def test_partial_scan_only_is_evaluated(env, monkeypatch):
     )
     fake = _FakeFetcher({"005930": make_signal_candles()})
     monkeypatch.setattr(daemon, "build_candle_fetcher", lambda: fake)
+    sent: list[str] = []
 
-    assert daemon.main(["--sleep", "0"]) == 0
+    async def _capture(text: str) -> None:
+        sent.append(text)
+
+    monkeypatch.setattr(daemon, "send_telegram", _capture)
+
+    assert daemon.main(["--sleep", "0", "--telegram"]) == 0
     sig = _read(_sig_path(env))
     assert sig["universe_status"] == "partial"
     assert sig["evaluated"] == 1
     assert fake.calls == ["005930"]
+    assert len(sent) == 1
+    assert "스캔 단독 관측 (예측 미포함)" in sent[0]
+    assert "교집합 shadow" not in sent[0]
+    assert "1. 삼성전자 (005930)" in sent[0]
+    assert "scan 8.00 / pred - (예측 없음)" in sent[0]
+    assert "현재 신호: ✅ 있음" in sent[0]
+
+
+def test_partial_scan_only_rejects_old_watchlist(env, monkeypatch):
+    monkeypatch.setenv("BARRO_AI_SWING_ENABLED", "1")
+    monkeypatch.setattr(
+        daemon, "load_ai_trade_universe",
+        lambda *a, **k: _universe(
+            [_item("005930", "삼성전자")],
+            status="partial",
+            reason="predictions_missing:scan_only",
+            source_scan_date="2000-01-01",
+        ),
+    )
+    fake = _FakeFetcher({"005930": make_signal_candles()})
+    monkeypatch.setattr(daemon, "build_candle_fetcher", lambda: fake)
+
+    assert daemon.main(["--sleep", "0"]) == 0
+    sig = _read(_sig_path(env))
+    assert sig["evaluated"] == 0
+    assert sig["universe_reason"].startswith("stale_not_allowed:source_scan_date=2000-01-01")
+    assert fake.calls == []
+
+
+def test_partial_scan_only_rejects_old_same_day_file(env, monkeypatch):
+    monkeypatch.setenv("BARRO_AI_SWING_ENABLED", "1")
+    monkeypatch.setattr(
+        daemon, "load_ai_trade_universe",
+        lambda *a, **k: _universe(
+            [_item("005930", "삼성전자")],
+            status="partial", reason="predictions_missing:scan_only",
+        ),
+    )
+    monkeypatch.setattr(
+        daemon, "validate_current_sources",
+        lambda **kw: (
+            (False, "source_age:watchlist_today.json:13.00h")
+            if kw.get("require_predictions") is False else (True, "")
+        ),
+    )
+    fake = _FakeFetcher({"005930": make_signal_candles()})
+    monkeypatch.setattr(daemon, "build_candle_fetcher", lambda: fake)
+
+    assert daemon.main(["--sleep", "0"]) == 0
+    sig = _read(_sig_path(env))
+    assert sig["evaluated"] == 0
+    assert sig["universe_reason"].startswith("stale_not_allowed:source_age:")
+    assert fake.calls == []
+
+
+def test_partial_scan_only_stale_override_is_explicit(env, monkeypatch):
+    monkeypatch.setenv("BARRO_AI_SWING_ENABLED", "1")
+    monkeypatch.setenv("BARRO_AI_SWING_ALLOW_STALE", "1")
+    monkeypatch.setattr(
+        daemon, "load_ai_trade_universe",
+        lambda *a, **k: _universe(
+            [_item("005930", "삼성전자")],
+            status="partial", reason="predictions_missing:scan_only",
+        ),
+    )
+    monkeypatch.setattr(
+        daemon, "validate_current_sources",
+        lambda **_kw: (False, "source_age:watchlist_today.json:13.00h"),
+    )
+    fake = _FakeFetcher({"005930": make_signal_candles()})
+    monkeypatch.setattr(daemon, "build_candle_fetcher", lambda: fake)
+    sent: list[str] = []
+
+    async def _capture(text: str) -> None:
+        sent.append(text)
+
+    monkeypatch.setattr(daemon, "send_telegram", _capture)
+
+    assert daemon.main(["--sleep", "0", "--telegram"]) == 0
+    sig = _read(_sig_path(env))
+    assert sig["evaluated"] == 1
+    assert sig["universe_reason"].startswith("stale_allowed:source_age:")
+    assert "source_scan_date=" in sig["universe_reason"]
+    assert "stale 허용·예측 미포함" in sent[0]
 
 
 def test_partial_without_optin_is_blocked_with_own_reason(env, monkeypatch):
@@ -305,6 +409,26 @@ def test_ok_universe_full_schema_and_signal(env, monkeypatch):
     assert sig["skipped"][0]["reason"].startswith("insufficient_candles:10<")
 
 
+def test_ok_universe_rejects_old_source_mtime(env, monkeypatch):
+    monkeypatch.setenv("BARRO_AI_SWING_ENABLED", "1")
+    monkeypatch.setattr(
+        daemon, "load_ai_trade_universe",
+        lambda *a, **k: _universe([_item("005930", "삼성전자")]),
+    )
+    monkeypatch.setattr(
+        daemon, "validate_current_sources",
+        lambda **_kw: (False, "source_age:watchlist_2026-07-31.json:13.00h"),
+    )
+    fake = _FakeFetcher({"005930": make_signal_candles()})
+    monkeypatch.setattr(daemon, "build_candle_fetcher", lambda: fake)
+
+    assert daemon.main(["--sleep", "0"]) == 0
+    sig = _read(_sig_path(env))
+    assert sig["evaluated"] == 0
+    assert sig["universe_reason"].startswith("source_age:")
+    assert fake.calls == []
+
+
 def test_no_partial_files_left_behind(env, monkeypatch):
     """원자적 저장 — tmp 잔여물이 남지 않는다."""
     monkeypatch.setenv("BARRO_AI_SWING_ENABLED", "1")
@@ -318,7 +442,8 @@ def test_no_partial_files_left_behind(env, monkeypatch):
     )
     assert daemon.main(["--sleep", "0"]) == 0
     names = sorted(p.name for p in env.iterdir())
-    assert names == [daemon.SIGNALS_FILENAME, daemon.UNIVERSE_FILENAME]
+    assert names == [daemon.HISTORY_DIRNAME, daemon.SIGNALS_FILENAME, daemon.UNIVERSE_FILENAME]
+    assert not list(env.rglob("*.tmp"))
 
 
 # ─── 4. 실패 흡수 ────────────────────────────────────────────────────────────
@@ -362,19 +487,24 @@ def test_missing_kiwoom_keys_records_reason_per_symbol(env, monkeypatch):
     ]
 
 
-def test_unexpected_exception_still_exits_zero(env, monkeypatch):
-    """어떤 예외도 exit 0 으로 흡수하고 사유를 signals 파일에 남긴다."""
+def test_unexpected_exception_exits_one_and_records_error(env, monkeypatch):
+    """hard failure 는 exit 1 + latest/error 이력으로 모니터링할 수 있다."""
     monkeypatch.setenv("BARRO_AI_SWING_ENABLED", "1")
 
     def _explode(*_a, **_k):
         raise ValueError("boom")
 
     monkeypatch.setattr(daemon, "load_ai_trade_universe", _explode)
-    assert daemon.main(["--sleep", "0"]) == 0
+    assert daemon.main(["--sleep", "0"]) == 1
     sig = _read(_sig_path(env))
     assert set(sig) == SIGNALS_KEYS
     assert sig["universe_status"] == "error"
     assert sig["universe_reason"].startswith("daemon_error:ValueError")
+    events = _history(env)
+    assert len(events) == 1
+    assert events[0]["run_status"] == "error"
+    assert events[0]["exit_code"] == 1
+    assert events[0]["signals"] == sig
 
 
 # ─── 5. 관측 대상 필터 (순수 함수) ───────────────────────────────────────────
@@ -438,7 +568,89 @@ def test_top_env_and_cli_limit_observation(env, monkeypatch):
     assert fake.calls == ["000001"]                    # CLI 가 env 를 이긴다
 
 
-# ─── 6. ★주문 심볼 부재 (소스 텍스트 검사) ──────────────────────────────────
+# ─── 6. 실행 이력 + 텔레그램 선정 목록 ──────────────────────────────────────
+def test_history_accumulates_each_run(env, monkeypatch):
+    """latest JSON 은 갱신하되 일자별 JSONL 은 실행별로 계속 누적한다."""
+    monkeypatch.setenv("BARRO_AI_SWING_ENABLED", "1")
+    monkeypatch.setattr(
+        daemon, "load_ai_trade_universe",
+        lambda *a, **k: _universe([_item("005930", "삼성전자")]),
+    )
+    monkeypatch.setattr(
+        daemon, "build_candle_fetcher",
+        lambda: _FakeFetcher({"005930": make_signal_candles()}),
+    )
+
+    assert daemon.main(["--sleep", "0"]) == 0
+    assert daemon.main(["--sleep", "0"]) == 0
+
+    events = _history(env)
+    assert len(events) == 2
+    assert [event["run_status"] for event in events] == ["ok", "ok"]
+    assert [event["exit_code"] for event in events] == [0, 0]
+    assert all(event["selected"][0]["symbol"] == "005930" for event in events)
+    assert all(event["signals"]["signal_count"] == 1 for event in events)
+
+
+def test_summary_lists_every_selected_item_with_signal_state_and_reason():
+    """신호 있음/없음/판정 제외가 점수·사유와 함께 번호 목록으로 보인다."""
+    items = [
+        _item("005930", "삼성전자", scan_score=9.1, pred_score=88.2),
+        _item("000660", "SK하이닉스", scan_score=8.3, pred_score=77.4),
+        _item("035720", "카카오", scan_score=7.2, pred_score=66.5),
+    ]
+    uni = daemon.universe_payload(_universe(items))
+    selected = uni["items"]
+    sig = daemon.signals_payload(
+        universe_status="ok",
+        universe_reason="",
+        evaluated=2,
+        signals=[{
+            "symbol": "005930",
+            "name": "삼성전자",
+            "entry_price": 70100,
+            "score": 6.25,
+            "reason": "Fib < 0.4 반등",
+            "sl_price": 66595,
+            "tp1_price": 84120,
+            "tp2_price": 105150,
+        }],
+        skipped=[{"symbol": "035720", "reason": "insufficient_candles:10<60"}],
+    )
+
+    text = daemon.summary_text(uni, sig, selected)
+
+    assert "단테 교집합 shadow" in text
+    assert "1. 삼성전자 (005930)" in text
+    assert "scan 9.10 / pred 88.20" in text
+    assert "현재 신호: ✅ 있음 · 전략점수 6.25 · Fib &lt; 0.4 반등" in text
+    assert "2. SK하이닉스 (000660)" in text
+    assert "현재 신호: ⭕ 없음 · 현재 진입 조건 미충족" in text
+    assert "3. 카카오 (035720)" in text
+    assert "현재 신호: ⚠️ 판정 제외 · insufficient_candles:10&lt;60" in text
+
+
+def test_send_telegram_uses_html_chunks(monkeypatch):
+    """긴 선정 목록도 잘리지 않도록 기존 notifier 의 chunk 전송을 재사용한다."""
+    from backend.core.notify.telegram import TelegramNotifier
+
+    calls: dict = {}
+
+    class _Notifier:
+        async def send_chunks(self, text: str) -> None:
+            calls["text"] = text
+
+    def _from_env(_cls, **kwargs):
+        calls["kwargs"] = kwargs
+        return _Notifier()
+
+    monkeypatch.setattr(TelegramNotifier, "from_env", classmethod(_from_env))
+    asyncio.run(daemon.send_telegram("선정 목록"))
+
+    assert calls == {"kwargs": {"parse_mode": "HTML"}, "text": "선정 목록"}
+
+
+# ─── 7. ★주문 심볼 부재 (소스 텍스트 검사) ──────────────────────────────────
 def test_source_has_no_execution_symbols():
     """데몬 소스에 매매 체결 관련 심볼이 한 번도 나오면 안 된다 (하드 계약)."""
     src = DAEMON_SRC.read_text(encoding="utf-8")

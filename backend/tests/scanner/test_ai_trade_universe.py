@@ -6,7 +6,8 @@ env 는 monkeypatch 로 매 테스트 격리한다(테스트 간 오염 금지).
 from __future__ import annotations
 
 import json
-from datetime import date
+import os
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from backend.core.scanner.ai_trade_universe import (
     ENV_FALLBACK,
     ENV_MAX_AGE_H,
     load_ai_trade_universe,
+    validate_current_sources,
 )
 
 TODAY = date(2026, 7, 30)
@@ -143,17 +145,60 @@ def test_tie_on_pred_score_falls_back_to_scan_score(tmp_path, monkeypatch):
     assert [i.symbol for i in uni.items] == ["005930", "000660"]
 
 
-def test_stale_when_prediction_file_is_yesterday(tmp_path, monkeypatch):
-    """예측 파일이 전일자 → glob 으로 최근 파일을 찾고 status=stale (교집합은 유지)."""
+def test_today_scan_ignores_yesterday_prediction(tmp_path, monkeypatch):
+    """당일 예측 실패 시 과거 예측을 섞지 않고 partial로 강등한다."""
     _write_scan(tmp_path, TODAY_ISO, [_scan_stock("005930", score=70.0)])
     _write_pred(tmp_path, YESTERDAY_ISO, [_pred_stock("005930", total_score=88.0)])
     monkeypatch.setenv(ENV_DIR, str(tmp_path))
 
     uni = load_ai_trade_universe(today=TODAY)
 
-    assert uni.status == "stale"
+    assert uni.status == "partial"
+    assert uni.reason == "predictions_missing:fallback_disabled"
     assert uni.source_scan_date == TODAY_ISO
-    assert uni.source_pred_date == YESTERDAY_ISO
+    assert uni.source_pred_date == ""
+    assert uni.items == ()
+
+
+def test_scan_only_uses_today_scan_when_yesterday_prediction_exists(tmp_path, monkeypatch):
+    _write_scan(tmp_path, TODAY_ISO, [
+        _scan_stock("005930", score=70.0), _scan_stock("000660", score=90.0),
+    ])
+    _write_pred(tmp_path, YESTERDAY_ISO, [_pred_stock("005930", total_score=99.0)])
+    monkeypatch.setenv(ENV_DIR, str(tmp_path))
+    monkeypatch.setenv(ENV_FALLBACK, "scan_only")
+
+    uni = load_ai_trade_universe(today=TODAY)
+
+    assert uni.status == "partial"
+    assert uni.reason == "predictions_missing:scan_only"
+    assert [i.symbol for i in uni.items] == ["000660", "005930"]
+    assert all(i.pred_score == 0.0 for i in uni.items)
+
+
+def test_scan_only_freshness_requires_only_watchlist(tmp_path, monkeypatch):
+    scan = _write_scan(tmp_path, TODAY_ISO, [_scan_stock("005930", score=70.0)])
+    now = datetime(2026, 7, 30, 3, 0, tzinfo=timezone.utc)
+    os.utime(scan, (now.timestamp(), now.timestamp()))
+    monkeypatch.setenv(ENV_MAX_AGE_H, "12")
+
+    assert validate_current_sources(
+        str(tmp_path), today=TODAY, now=now, require_predictions=False,
+    ) == (True, "")
+    fresh, reason = validate_current_sources(str(tmp_path), today=TODAY, now=now)
+    assert fresh is False
+    assert reason == f"source_missing:predictions_{TODAY_ISO}.json"
+
+
+def test_stale_when_both_sources_are_yesterday(tmp_path, monkeypatch):
+    _write_scan(tmp_path, YESTERDAY_ISO, [_scan_stock("005930", score=70.0)])
+    _write_pred(tmp_path, YESTERDAY_ISO, [_pred_stock("005930", total_score=88.0)])
+    monkeypatch.setenv(ENV_DIR, str(tmp_path))
+
+    uni = load_ai_trade_universe(today=TODAY)
+
+    assert uni.status == "stale"
+    assert (uni.source_scan_date, uni.source_pred_date) == (YESTERDAY_ISO, YESTERDAY_ISO)
     assert [i.symbol for i in uni.items] == ["005930"]
 
 
@@ -323,7 +368,7 @@ def test_base_dir_argument_overrides_env(tmp_path, monkeypatch):
 
 def test_freshness_env_does_not_change_status(tmp_path, monkeypatch):
     """MAX_AGE_H·ALLOW_STALE 는 로더 status 판정에 영향 없음(소비자 몫)."""
-    _write_scan(tmp_path, TODAY_ISO, [_scan_stock("005930", score=70.0)])
+    _write_scan(tmp_path, YESTERDAY_ISO, [_scan_stock("005930", score=70.0)])
     _write_pred(tmp_path, YESTERDAY_ISO, [_pred_stock("005930", total_score=88.0)])
     monkeypatch.setenv(ENV_DIR, str(tmp_path))
     monkeypatch.setenv(ENV_MAX_AGE_H, "999")

@@ -24,12 +24,16 @@ rec = importlib.import_module("ai_swing_recover")
 
 
 def _audit(ts, symbol, *, action="ORDERED", side="buy", sid="ai_swing",
-           price="10000", avg_fill="", order_no="A1") -> dict:
+           price="10000", avg_fill=None, filled_qty=None, qty="10", order_no="A1") -> dict:
+    if avg_fill is None:
+        avg_fill = price
+    if filled_qty is None:
+        filled_qty = qty
     return {
         "ts": ts, "action": action, "side": side, "symbol": symbol,
-        "qty": "10", "price": price, "order_no": order_no, "return_code": "0",
+        "qty": qty, "price": price, "order_no": order_no, "return_code": "0",
         "blocked": "0", "reason": "", "strategy_id": sid,
-        "filled_qty": "10", "avg_fill_price": avg_fill,
+        "filled_qty": filled_qty, "avg_fill_price": avg_fill,
     }
 
 
@@ -58,19 +62,85 @@ def test_parse_audit_excludes_blocked_and_failed():
     assert rec.parse_audit_buys(rows) == {}
 
 
-def test_parse_audit_accepts_dry_run():
-    """DRY_RUN 은 모의 체결이라 장부 정합 확인 목적으로 인정한다."""
+def test_parse_audit_rejects_dry_run():
+    """DRY_RUN 은 브로커 체결이 아니므로 복원 근거가 될 수 없다."""
     rows = [_audit("2026-07-30T01:00:00+00:00", "005930", action="DRY_RUN")]
-    assert "005930" in rec.parse_audit_buys(rows)
+    assert rec.parse_audit_buys(rows) == {}
 
 
-def test_parse_audit_keeps_latest_ts():
-    """같은 종목 여러 건이면 가장 최근 ts (재진입 후 장부 유실 케이스)."""
+def test_parse_audit_rejects_plain_ordered():
+    """ORDERED 접수만 있고 실체결 수량·평단이 없으면 fail-closed."""
+    rows = [_audit(
+        "2026-07-30T01:00:00+00:00", "005930",
+        filled_qty="", avg_fill="",
+    )]
+    assert rec.parse_audit_buys(rows) == {}
+
+
+def test_parse_audit_ordered_then_filled_uses_fill_once():
+    rows = [
+        _audit("2026-07-30T01:00:00+00:00", "005930", order_no="A1",
+               filled_qty="", avg_fill=""),
+        _audit("2026-07-30T01:00:01+00:00", "005930", action="FILLED",
+               order_no="A1", qty="7", filled_qty="7", avg_fill="10250"),
+    ]
+    fill = rec.parse_audit_buys(rows)["005930"]
+    assert fill["filled_qty"] == "7"
+    assert fill["avg_fill_price"] == "10250.0"
+
+
+def test_parse_audit_full_sell_then_reentry_keeps_new_entry():
+    """이전 실체결을 전량 매도한 뒤 재진입하면 새 lot만 남긴다."""
     rows = [
         _audit("2026-07-28T01:00:00+00:00", "005930", price="9000", order_no="OLD"),
+        _audit("2026-07-29T01:00:00+00:00", "005930", side="sell",
+               price="9500", order_no="SELL"),
         _audit("2026-07-30T01:00:00+00:00", "005930", price="11000", order_no="NEW"),
     ]
     assert rec.parse_audit_buys(rows)["005930"]["order_no"] == "NEW"
+
+
+def test_parse_audit_unfilled_cancels_ordered():
+    rows = [
+        _audit("2026-07-30T01:00:00+00:00", "005930", order_no="A1"),
+        _audit("2026-07-30T02:00:00+00:00", "005930", action="UNFILLED",
+               filled_qty="0", avg_fill="", order_no="A1"),
+    ]
+    assert rec.parse_audit_buys(rows) == {}
+
+
+def test_parse_audit_order_number_reuse_is_scoped_to_day():
+    rows = [
+        _audit("2026-07-29T01:00:00+00:00", "005930", order_no="A1"),
+        _audit(
+            "2026-07-29T02:00:00+00:00", "005930", action="UNFILLED",
+            filled_qty="0", avg_fill="", order_no="A1",
+        ),
+        _audit(
+            "2026-07-30T01:00:00+00:00", "005930", action="FILLED",
+            order_no="A1", qty="3", filled_qty="3", avg_fill="10250",
+        ),
+    ]
+    fill = rec.parse_audit_buys(rows)["005930"]
+    assert fill["filled_qty"] == "3"
+    assert fill["avg_fill_price"] == "10250.0"
+
+
+def test_parse_audit_confirmed_sell_offsets_qty():
+    rows = [
+        _audit("2026-07-30T01:00:00+00:00", "005930", qty="10"),
+        _audit("2026-07-30T02:00:00+00:00", "005930", side="sell", qty="4"),
+    ]
+    assert rec.parse_audit_buys(rows)["005930"]["filled_qty"] == "6"
+
+
+def test_parse_audit_plain_sell_after_fill_is_ambiguous():
+    rows = [
+        _audit("2026-07-30T01:00:00+00:00", "005930"),
+        _audit("2026-07-30T02:00:00+00:00", "005930", side="sell",
+               filled_qty="", avg_fill=""),
+    ]
+    assert rec.parse_audit_buys(rows) == {}
 
 
 # ─── find_orphans ─────────────────────────────────────────────────────────
@@ -81,20 +151,55 @@ def test_find_orphans_skips_symbols_in_ledger():
     assert recoverable == [] and unknown == []
 
 
-def test_find_orphans_prefers_avg_fill_price():
-    holdings = {"005930": {"name": "삼성전자", "qty": 10}}
+def test_find_orphans_uses_matching_broker_avg_price():
+    holdings = {
+        "005930": {"name": "삼성전자", "qty": 10, "avg_buy_price": 10255},
+    }
     buys = rec.parse_audit_buys(
         [_audit("2026-07-30T01:00:00+00:00", "005930", price="10000", avg_fill="10250")])
     recoverable, _ = rec.find_orphans(holdings, set(), buys)
-    assert recoverable[0].entry_price == 10250.0
+    assert recoverable[0].entry_price == 10255.0
     assert recoverable[0].entry_time == "2026-07-30T01:00:00+00:00"
 
 
-def test_find_orphans_falls_back_to_price_when_no_fill():
+def test_find_orphans_rejects_missing_broker_avg_price():
     holdings = {"005930": {"name": "삼성전자", "qty": 10}}
+    buys = rec.parse_audit_buys(
+        [_audit("2026-07-30T01:00:00+00:00", "005930", avg_fill="10250")])
+    recoverable, unknown = rec.find_orphans(holdings, set(), buys)
+    assert recoverable == []
+    assert unknown == ["005930"]
+
+
+def test_find_orphans_rejects_broker_avg_mismatch():
+    holdings = {
+        "005930": {"name": "삼성전자", "qty": 10, "avg_buy_price": 20000},
+    }
+    buys = rec.parse_audit_buys(
+        [_audit("2026-07-30T01:00:00+00:00", "005930", avg_fill="10250")])
+    recoverable, unknown = rec.find_orphans(holdings, set(), buys)
+    assert recoverable == []
+    assert unknown == ["005930"]
+
+
+def test_find_orphans_rejects_order_price_without_confirmed_fill_price():
+    holdings = {
+        "005930": {"name": "삼성전자", "qty": 10, "avg_buy_price": 10000},
+    }
     buys = rec.parse_audit_buys([_audit("2026-07-30T01:00:00+00:00", "005930", avg_fill="")])
-    recoverable, _ = rec.find_orphans(holdings, set(), buys)
-    assert recoverable[0].entry_price == 10000.0
+    recoverable, unknown = rec.find_orphans(holdings, set(), buys)
+    assert recoverable == []
+    assert unknown == ["005930"]
+
+
+def test_find_orphans_requires_broker_qty_to_match_net_fills():
+    holdings = {
+        "005930": {"name": "삼성전자", "qty": 9, "avg_buy_price": 10000},
+    }
+    buys = rec.parse_audit_buys([_audit("2026-07-30T01:00:00+00:00", "005930", qty="10")])
+    recoverable, unknown = rec.find_orphans(holdings, set(), buys)
+    assert recoverable == []
+    assert unknown == ["005930"]
 
 
 def test_find_orphans_reports_unknown_without_audit_trace():
@@ -107,7 +212,9 @@ def test_find_orphans_reports_unknown_without_audit_trace():
 
 def test_find_orphans_rejects_market_price_only_row():
     """price 가 'MKT' 뿐이면 진입가 원천이 없다 → 복원 금지."""
-    holdings = {"005930": {"name": "삼성전자", "qty": 10}}
+    holdings = {
+        "005930": {"name": "삼성전자", "qty": 10, "avg_buy_price": 10000},
+    }
     buys = rec.parse_audit_buys(
         [_audit("2026-07-30T01:00:00+00:00", "005930", price="MKT", avg_fill="")])
     recoverable, unknown = rec.find_orphans(holdings, set(), buys)
@@ -117,7 +224,9 @@ def test_find_orphans_rejects_market_price_only_row():
 
 def test_find_orphans_rejects_missing_ts():
     """entry_time 원천이 없으면 복원 금지 (min_hold 리셋 방지)."""
-    holdings = {"005930": {"name": "삼성전자", "qty": 10}}
+    holdings = {
+        "005930": {"name": "삼성전자", "qty": 10, "avg_buy_price": 10100},
+    }
     buys = {"005930": _audit("", "005930", avg_fill="10100")}
     recoverable, unknown = rec.find_orphans(holdings, set(), buys)
     assert recoverable == []
@@ -196,12 +305,20 @@ def test_apply_recovery_uses_ai_swing_sl_env(ledger, monkeypatch):
 # ─── read helpers ─────────────────────────────────────────────────────────
 def test_read_balance_file_accepts_list_and_dict(tmp_path):
     p1 = tmp_path / "list.json"
-    p1.write_text(json.dumps([{"symbol": "005930", "name": "삼성", "qty": 10}]), encoding="utf-8")
-    assert rec.read_balance_file(str(p1))["005930"]["qty"] == 10
+    p1.write_text(json.dumps([{
+        "symbol": "005930", "name": "삼성", "qty": 10, "avg_buy_price": 70100,
+    }]), encoding="utf-8")
+    assert rec.read_balance_file(str(p1))["005930"] == {
+        "name": "삼성", "qty": 10, "avg_buy_price": 70100,
+    }
 
     p2 = tmp_path / "dict.json"
-    p2.write_text(json.dumps({"000660": {"name": "하이닉스", "qty": 5}}), encoding="utf-8")
-    assert rec.read_balance_file(str(p2))["000660"]["qty"] == 5
+    p2.write_text(json.dumps({
+        "000660": {"name": "하이닉스", "qty": 5, "avg_buy_price": 201000},
+    }), encoding="utf-8")
+    assert rec.read_balance_file(str(p2))["000660"] == {
+        "name": "하이닉스", "qty": 5, "avg_buy_price": 201000,
+    }
 
 
 def test_read_audit_rows_absent_file_returns_empty(tmp_path):

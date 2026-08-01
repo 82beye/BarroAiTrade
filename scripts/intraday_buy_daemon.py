@@ -54,6 +54,8 @@ from backend.core.risk.theme_map import load_theme_map
 from backend.core.risk.daily_gate_input import compute_daily_gate_input
 from backend.core.risk.live_order_gate import (
     GatePolicy, LiveOrderGate, DailyOrderLimitExceeded, DailyLossLimitExceeded,
+    InvalidOrderQty, TradingDisabled,
+    _AUDIT_HEADERS, _migrate_audit_csv_header,
 )
 from backend.core.backtester.market_regime import (
     MarketRegime, classify_regime, regime_weights,
@@ -74,6 +76,7 @@ SUPERTREND_OPEN = time(9, 0)
 MIN_HOLD_MINUTES = 15          # 매수 후 최소 보유 (P7 5/20: 10→15, 노이즈 SL 회피)
 MAX_BUY_PER_CYCLE = 2          # 사이클당 최대 매수 2종목
 BUY_REENTRY_COOLDOWN_MIN = 30  # P6 (2026-05-20): 매수 후 동일 종목 재진입 금지 (30분)
+_ORDER_RECONCILE_GRACE_MIN = 5  # 접수 결과 모호/잔고 지연 시 브로커 대사 유예
 HARD_SL_PCT = -5.0             # P7 (2026-05-20): cooldown 안 극한 SL 우회 임계
 # 급등 추격매수 차단 등락률 상한(%). 2026-06-01 25→30 완화(강세장 +29%대 주도주 허용,
 #   상한가만 차단 의도) → [BAR-OPS-38 P0#3] 29.5 로 조정: 상한가 잠김 종목은 등락률이
@@ -86,6 +89,14 @@ _MAX_FLU_RATE = float(os.environ.get("BARRO_MAX_FLU_RATE", "29.5"))
 def _env_truthy(name: str, default: str = "") -> bool:
     """BAR-OPS-37 — env 토글(1/true/yes/on 이면 True)."""
     return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _hard_sl_bypasses_cooldown(signal, pnl_rate, strategy: str = "") -> bool:
+    """STOP_LOSS 중 기존 -5% hard SL과 ai_swing 전략 SL만 cooldown을 우회한다."""
+    key = (strategy or "").replace("_v1", "").replace("_v2", "")
+    return signal == SellSignal.STOP_LOSS and (
+        key == "ai_swing" or float(pnl_rate) <= HARD_SL_PCT
+    )
 
 
 # [6/23 매매복기] 진입 보호·선정 게이트 — 전부 default-OFF(byte-identical), .env.local 로 활성화.
@@ -262,6 +273,22 @@ async def _sync_positions(pos_store: ActivePositionStore, held_symbols: set[str]
             print(f"  [{ts}][SYNC] {sym} {active[sym].name} — 잔고엔 없으나 미체결(접수) 존재 → 보존")
             continue
         pos = active[sym]
+        has_provisional = any(
+            str(getattr(t, "order_no", "") or "").startswith("PENDING:")
+            for t in getattr(pos, "tranches", ())
+        )
+        if has_provisional:
+            try:
+                entered = datetime.fromisoformat(str(pos.entry_time))
+                if entered.tzinfo is None:
+                    entered = entered.replace(tzinfo=timezone.utc)
+                age_min = (datetime.now(timezone.utc) - entered).total_seconds() / 60
+            except (TypeError, ValueError):
+                age_min = 0.0
+            if age_min < _ORDER_RECONCILE_GRACE_MIN:
+                ts = _now_kst().strftime("%H:%M:%S")
+                print(f"  [{ts}][SYNC] {sym} {pos.name} — provisional 주문 대사 유예")
+                continue
         pos_store.remove(sym)
         ts = _now_kst().strftime("%H:%M:%S")
         print(f"  [{ts}][SYNC] {sym} {pos.name} — 잔고에 없음, active_positions 제거")
@@ -273,6 +300,63 @@ async def _sync_positions(pos_store: ActivePositionStore, held_symbols: set[str]
             _append_unfilled_audit(audit_path, pos)
         removed += 1
     return removed
+
+
+def _resolve_pending_order_no(rows: list[dict], pos, side: str, order_no: str) -> str:
+    """주문 전 저장한 PENDING intent를 같은 시도의 실제 주문번호와 연결한다."""
+    if not order_no.startswith("PENDING:"):
+        return order_no
+    entry_ts = str(getattr(pos, "entry_time", "") or "")
+    try:
+        intended_qty = int(pos.filled_qty())
+    except (AttributeError, TypeError, ValueError):
+        intended_qty = sum(
+            int(getattr(t, "qty", 0) or 0)
+            for t in getattr(pos, "tranches", ())
+            if getattr(t, "status", "") == "filled"
+        )
+    def _belongs_to_intent(row: dict) -> bool:
+        row_ts = str(row.get("ts") or "")
+        try:
+            ordered_at = datetime.fromisoformat(row_ts.replace("Z", "+00:00"))
+            entered_at = datetime.fromisoformat(entry_ts.replace("Z", "+00:00"))
+            if ordered_at.tzinfo is None:
+                ordered_at = ordered_at.replace(tzinfo=timezone.utc)
+            if entered_at.tzinfo is None:
+                entered_at = entered_at.replace(tzinfo=timezone.utc)
+            if ordered_at < entered_at:
+                return False
+        except (TypeError, ValueError):
+            if entry_ts and row_ts < entry_ts:
+                return False
+        try:
+            return intended_qty <= 0 or int(float(row.get("qty") or 0)) == intended_qty
+        except (TypeError, ValueError):
+            return False
+
+    def _was_cancelled(row: dict) -> bool:
+        candidate_ts = str(row.get("ts") or "")
+        candidate_no = str(row.get("order_no") or "")
+        return any(
+            (other.get("action") or "").upper() == "UNFILLED"
+            and (other.get("side") or "").lower() == side
+            and (other.get("symbol") or "") == pos.symbol
+            and str(other.get("order_no") or "") == candidate_no
+            and str(other.get("ts") or "") >= candidate_ts
+            for other in rows
+        )
+
+    matched = [
+        row for row in rows
+        if (row.get("action") or "").upper() == "ORDERED"
+        and (row.get("side") or "").lower() == side
+        and (row.get("symbol") or "") == pos.symbol
+        and _belongs_to_intent(row)
+        and str(row.get("strategy_id") or "").replace("_v1", "").replace("_v2", "") == _AI_SWING_SID
+        and (row.get("order_no") or "")
+        and not _was_cancelled(row)
+    ]
+    return str(matched[-1]["order_no"]) if matched else order_no
 
 
 def _append_unfilled_audit(audit_path, pos) -> None:
@@ -290,6 +374,17 @@ def _append_unfilled_audit(audit_path, pos) -> None:
         path = Path(audit_path)
         if not path.exists():
             return  # audit 파일이 없으면(테스트 등) 생성하지 않음 — 게이트가 헤더 소유
+        with path.open("r", encoding="utf-8", newline="") as f:
+            rows = list(_csv.DictReader(f))
+        entry_ts = str(getattr(pos, "entry_time", "") or "")
+        if any(
+            (row.get("action") or "").upper() in {"INTENT", "ORDERED", "FILLED"}
+            and (row.get("side") or "").lower() == "sell"
+            and (row.get("symbol") or "") == pos.symbol
+            and (not entry_ts or (row.get("ts") or "") >= entry_ts)
+            for row in rows
+        ):
+            return  # 매도 시도 후 잔고0은 원 매수 미체결로 단정하지 않는다.
         filled = [t for t in pos.tranches if getattr(t, "status", "") == "filled"]
         if not filled:
             return
@@ -299,12 +394,340 @@ def _append_unfilled_audit(audit_path, pos) -> None:
                 w.writerow([
                     datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     "UNFILLED", "buy", pos.symbol, int(t.qty), "MKT",
-                    getattr(t, "order_no", "") or "", "", "0",
+                    _resolve_pending_order_no(
+                        rows, pos, "buy", str(getattr(t, "order_no", "") or ""),
+                    ), "", "0",
                     "SYNC 퍼지 — 잔고 부재(미체결 추정, 접수 ORDERED 무효)",
                     pos.strategy or "", "0", "",
                 ])
     except Exception as exc:  # noqa: BLE001 — 감사 기록 실패가 SYNC 를 막으면 안 됨
         print(f"  [SYNC] UNFILLED audit 기록 실패: {type(exc).__name__}")
+
+
+def _append_confirmed_fill_audit(audit_path, pos, holding) -> bool:
+    """미체결이 사라지고 잔고에 잡힌 ai_swing 매수를 FILLED 로 한 번만 백필한다."""
+    try:
+        order_no = next(
+            (str(t.order_no) for t in pos.tranches
+             if getattr(t, "status", "") == "filled" and getattr(t, "order_no", "")),
+            "",
+        )
+        qty = int(holding.qty)
+        avg = Decimal(str(holding.avg_buy_price))
+        path = Path(audit_path)
+        fill_ts = str(getattr(pos, "entry_time", "") or "") or datetime.now(
+            timezone.utc
+        ).isoformat(timespec="seconds")
+        entry_day = fill_ts[:10]
+        if (
+            not order_no or qty <= 0 or not avg.is_finite() or avg <= 0
+            or not path.exists() or path.stat().st_size == 0
+        ):
+            return False
+        _migrate_audit_csv_header(path)
+        with path.open("r", encoding="utf-8", newline="") as f:
+            rows = list(_csv.DictReader(f))
+        order_no = _resolve_pending_order_no(rows, pos, "buy", order_no)
+        if any(
+                (row.get("action") or "").upper() == "FILLED"
+                and (row.get("side") or "").lower() == "buy"
+                and (row.get("symbol") or "") == pos.symbol
+                and (row.get("order_no") or "") == order_no
+                and (not entry_day or (row.get("ts") or "").startswith(entry_day))
+                for row in rows
+        ):
+            return False
+        with path.open("a", encoding="utf-8", newline="") as f:
+            _csv.writer(f).writerow([
+                fill_ts,
+                "FILLED", "buy", pos.symbol, qty, "MKT", order_no, "", "0",
+                "브로커 잔고 반영·미체결 없음으로 확정",
+                pos.strategy or "", qty, str(avg),
+            ])
+        return True
+    except Exception as exc:  # noqa: BLE001 — 감사 백필 실패가 청산을 막으면 안 됨
+        print(f"  [FILL-AUDIT] {getattr(pos, 'symbol', '')} 기록 실패: {type(exc).__name__}")
+        return False
+
+
+def _append_sell_intent_audit(
+    audit_path, *, symbol: str, qty: int, strategy: str, signal_name: str,
+) -> str:
+    """ai_swing 매도 호출 전 durable intent. 실패하면 주문도 보내지 않는다."""
+    path = Path(audit_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new_file = not path.exists() or path.stat().st_size == 0
+    if not new_file:
+        _migrate_audit_csv_header(path)
+    ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+    intent_no = f"PENDING-SELL:{symbol}:{ts}"
+    with path.open("a", encoding="utf-8", newline="") as f:
+        writer = _csv.writer(f)
+        if new_file:
+            writer.writerow(_AUDIT_HEADERS)
+        writer.writerow([
+            ts, "INTENT", "sell", symbol, int(qty), "MKT", intent_no,
+            "", "0", f"signal={signal_name}", strategy, "", "",
+        ])
+        f.flush()
+        os.fsync(f.fileno())
+    return intent_no
+
+
+def _cancel_sell_intent_audit(
+    audit_path, *, symbol: str, qty: int, strategy: str, intent_no: str, reason: str,
+) -> None:
+    """확정적 주문 차단은 sell intent를 UNFILLED로 종결한다."""
+    path = Path(audit_path)
+    with path.open("a", encoding="utf-8", newline="") as f:
+        _csv.writer(f).writerow([
+            datetime.now(timezone.utc).isoformat(timespec="microseconds"),
+            "UNFILLED", "sell", symbol, int(qty), "MKT", intent_no,
+            "", "0", reason, strategy, "0", "",
+        ])
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _recent_unresolved_ai_sell_symbols(audit_path, *, now=None) -> set[str]:
+    """최근 매도 intent의 브로커 반영 유예 대상. 읽기 실패는 호출자가 fail-closed한다."""
+    path = Path(audit_path)
+    if not path.exists() or path.stat().st_size == 0:
+        return set()
+    _migrate_audit_csv_header(path)
+    with path.open("r", encoding="utf-8", newline="") as f:
+        rows = list(_csv.DictReader(f))
+    finished = {
+        (
+            str(row.get("symbol") or ""), str(row.get("order_no") or ""),
+            str(row.get("ts") or "")[:10],
+        )
+        for row in rows
+        if (row.get("action") or "").upper() in {"FILLED", "UNFILLED"}
+        and (row.get("side") or "").lower() == "sell"
+    }
+    # 실제 주문번호가 확정 체결/취소된 ORDERED는 바로 앞 durable INTENT를 종결한다.
+    # ORDERED만 있는 동안은 eventual-consistency 중복 주문을 막기 위해 intent를 유지한다.
+    open_intents: dict[tuple[str, int, str], list[int]] = {}
+    linked_intents: set[int] = set()
+    for idx, row in enumerate(rows):
+        if (
+            (row.get("side") or "").lower() != "sell"
+            or str(row.get("strategy_id") or "").replace("_v1", "").replace(
+                "_v2", ""
+            ) != _AI_SWING_SID
+        ):
+            continue
+        try:
+            qty = int(float(row.get("qty") or 0))
+        except (TypeError, ValueError):
+            continue
+        key = (
+            str(row.get("symbol") or ""), qty, str(row.get("ts") or "")[:10],
+        )
+        action = (row.get("action") or "").upper()
+        terminal_key = (
+            key[0], str(row.get("order_no") or ""), key[2],
+        )
+        if action == "INTENT" and terminal_key not in finished:
+            open_intents.setdefault(key, []).append(idx)
+        elif action == "ORDERED" and terminal_key in finished:
+            candidates = open_intents.get(key)
+            if candidates:
+                linked_intents.add(candidates.pop())
+
+    current = now or datetime.now(timezone.utc)
+    recent: set[str] = set()
+    for idx, row in enumerate(rows):
+        if (
+            idx in linked_intents
+            or (row.get("action") or "").upper() not in {"INTENT", "ORDERED"}
+            or (row.get("side") or "").lower() != "sell"
+            or str(row.get("strategy_id") or "").replace("_v1", "").replace(
+                "_v2", ""
+            ) != _AI_SWING_SID
+        ):
+            continue
+        key = (
+            str(row.get("symbol") or ""), str(row.get("order_no") or ""),
+            str(row.get("ts") or "")[:10],
+        )
+        if key in finished:
+            continue
+        try:
+            created = datetime.fromisoformat(str(row.get("ts") or "").replace("Z", "+00:00"))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_min = (current - created).total_seconds() / 60
+        except (TypeError, ValueError):
+            continue
+        if age_min <= _ORDER_RECONCILE_GRACE_MIN:
+            recent.add(key[0])
+    return recent
+
+
+def _append_confirmed_sell_audits(
+    audit_path, holdings: dict[str, object], active_positions: dict, pending_symbols: set[str],
+) -> set[str] | None:
+    """확정 매도를 백필한다. 감사 원장을 읽거나 쓰지 못하면 ``None``."""
+    path = Path(audit_path)
+    ai_positions = {
+        str(sym): pos for sym, pos in active_positions.items()
+        if str(getattr(pos, "strategy", "") or "").replace("_v1", "").replace(
+            "_v2", ""
+        ) == _AI_SWING_SID
+    }
+    try:
+        if not path.exists() or path.stat().st_size == 0:
+            return None if ai_positions else set()
+        with path.open("r", encoding="utf-8", newline="") as f:
+            header = next(_csv.reader(f), [])
+        if not set(_AUDIT_HEADERS[:10]).issubset(header):
+            raise ValueError("invalid audit header")
+        _migrate_audit_csv_header(path)
+        with path.open("r", encoding="utf-8", newline="") as f:
+            reader = _csv.DictReader(f)
+            if not set(_AUDIT_HEADERS).issubset(reader.fieldnames or ()):
+                raise ValueError("incomplete audit header")
+            rows = list(reader)
+        for sym, pos in ai_positions.items():
+            if sym not in holdings:
+                continue  # 0체결 취소는 아래 SYNC가 pending 해소 후 UNFILLED로 퍼지한다.
+            entry_ts = str(getattr(pos, "entry_time", "") or "")
+            confirmed_buy = False
+            for row in rows:
+                if (
+                    (row.get("action") or "").upper() != "FILLED"
+                    or (row.get("side") or "").lower() != "buy"
+                    or str(row.get("symbol") or "") != sym
+                    or (entry_ts and str(row.get("ts") or "") < entry_ts)
+                    or str(row.get("strategy_id") or "").replace(
+                        "_v1", ""
+                    ).replace("_v2", "") != _AI_SWING_SID
+                ):
+                    continue
+                try:
+                    confirmed_buy = int(float(
+                        row.get("filled_qty") or row.get("qty") or 0
+                    )) > 0
+                except (TypeError, ValueError):
+                    confirmed_buy = False
+                if confirmed_buy:
+                    break
+            if not confirmed_buy:
+                return None
+        filled = {
+            ((row.get("symbol") or ""), (row.get("order_no") or ""), (row.get("ts") or ""))
+            for row in rows
+            if (row.get("action") or "").upper() == "FILLED"
+            and (row.get("side") or "").lower() == "sell"
+        }
+        unfilled = {
+            (
+                str(row.get("symbol") or ""), str(row.get("order_no") or ""),
+                str(row.get("ts") or "")[:10],
+            )
+            for row in rows
+            if (row.get("action") or "").upper() == "UNFILLED"
+            and (row.get("side") or "").lower() == "sell"
+        }
+        confirmed: list[list[object]] = []
+        remaining_by_symbol: dict[str, int] = {}
+        book_by_symbol: dict[str, int] = {}
+        partial_symbols = {
+            str(row.get("symbol") or "")
+            for row in rows
+            if (row.get("action") or "").upper() == "FILLED"
+            and (row.get("side") or "").lower() == "sell"
+            and "PARTIAL_TP" in str(row.get("reason") or "")
+            and str(row.get("symbol") or "") in active_positions
+            and not getattr(active_positions[str(row.get("symbol") or "")], "partial_tp_done", False)
+            and (row.get("ts") or "") >= str(
+                getattr(active_positions[str(row.get("symbol") or "")], "entry_time", "") or ""
+            )
+        }
+        # pending 해소 후 잔고 감소는 가장 최근 접수 주문부터 귀속한다.
+        # 과거 0체결 취소 ORDERED가 선행해도 실제 재주문의 partial/full 의도를 보존한다.
+        for row in reversed(rows):
+            sid = str(row.get("strategy_id") or "")
+            if (
+                (row.get("action") or "").upper() not in {"ORDERED", "INTENT"}
+                or (row.get("side") or "").lower() != "sell"
+                or sid.replace("_v1", "").replace("_v2", "") != "ai_swing"
+            ):
+                continue
+            sym = str(row.get("symbol") or "")
+            key = (sym, str(row.get("order_no") or ""), str(row.get("ts") or ""))
+            unfilled_key = (sym, str(row.get("order_no") or ""), str(row.get("ts") or "")[:10])
+            if not sym or key in filled or unfilled_key in unfilled or sym in pending_symbols:
+                continue
+            try:
+                requested = int(float(row.get("qty") or 0))
+            except (TypeError, ValueError):
+                continue
+            pos = active_positions.get(sym)
+            if pos is None:
+                continue
+            if sym not in remaining_by_symbol:
+                holding = holdings.get(sym)
+                broker_qty = int(holding.qty) if holding is not None else 0
+                book_by_symbol[sym] = int(pos.filled_qty())
+                entry_ts = str(getattr(pos, "entry_time", "") or "")
+                audit_net = 0
+                confirmed_buy_seen = False
+                for audit_row in rows:
+                    if (
+                        (audit_row.get("action") or "").upper() != "FILLED"
+                        or (audit_row.get("symbol") or "") != sym
+                        or (audit_row.get("ts") or "") < entry_ts
+                        or str(audit_row.get("strategy_id") or "").replace(
+                            "_v1", ""
+                        ).replace("_v2", "") != _AI_SWING_SID
+                    ):
+                        continue
+                    try:
+                        filled_qty = int(float(
+                            audit_row.get("filled_qty") or audit_row.get("qty") or 0
+                        ))
+                    except (TypeError, ValueError):
+                        continue
+                    if (audit_row.get("side") or "").lower() == "buy":
+                        confirmed_buy_seen = True
+                        audit_net += filled_qty
+                    elif (audit_row.get("side") or "").lower() == "sell":
+                        audit_net -= filled_qty
+                if not confirmed_buy_seen:
+                    continue  # 확정 매수 원장 없이 매도만 추정하지 않는다.
+                remaining_by_symbol[sym] = max(0, audit_net - broker_qty)
+            sold_qty = min(requested, remaining_by_symbol[sym])
+            if sold_qty <= 0:
+                continue
+            is_partial_tp = (
+                "signal=partial_tp" in str(row.get("reason") or "").lower()
+                or requested < book_by_symbol[sym]
+            )
+            confirmed.append([
+                row.get("ts") or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "FILLED", "sell", sym, sold_qty, "MKT", row.get("order_no") or "",
+                "", "0", (
+                    "브로커 잔고 감소·미체결 없음으로 확정 (PARTIAL_TP)"
+                    if is_partial_tp else "브로커 잔고 감소·미체결 없음으로 확정"
+                ), sid, sold_qty, "",
+            ])
+            if is_partial_tp:
+                partial_symbols.add(sym)
+            remaining_by_symbol[sym] -= sold_qty
+            filled.add(key)
+        if not confirmed:
+            return partial_symbols
+        with path.open("a", encoding="utf-8", newline="") as f:
+            _csv.writer(f).writerows(confirmed)
+            f.flush()
+            os.fsync(f.fileno())
+        return partial_symbols
+    except Exception as exc:  # noqa: BLE001 — 호출자가 장부 변경을 fail-closed 처리
+        print(f"  [SELL-FILL-AUDIT] 기록 실패: {type(exc).__name__}")
+        return None
 
 
 def _reconcile_position_qty(pos, broker_qty: int) -> bool:
@@ -349,19 +772,75 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
 
     cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
     account = KiwoomNativeAccountFetcher(oauth=oauth)
+    open_orders = []
+    open_orders_error: Exception | None = None
+    if not args.dry_run:
+        try:
+            # 미체결을 먼저 읽고 잔고를 나중에 읽어야, 두 호출 사이
+            # 매도 완료가 구식 잔고로 다시 주문되는 race를 막는다.
+            open_orders = await account.fetch_open_orders()   # ka10075 oso
+        except Exception as exc:  # noqa: BLE001 — ai_swing 매도는 아래서 fail-closed
+            open_orders_error = exc
     balance = await account.fetch_balance()
 
-    # 브로커 잔고 ↔ active_positions 동기화 (미체결 접수 주문은 보존)
+    # 브로커 잔고 ↔ active_positions 동기화 (미체결 접수 주문은 보존).
+    # DRY_RUN은 판단만 하고 실제 포지션 장부를 절대 바꾸지 않는다.
     pos_store = ActivePositionStore(args.pos_log)
+    positions_before_sync = pos_store.load_all()
     held_symbols = {h.symbol for h in (balance.holdings or [])}
-    try:
-        _open = await account.fetch_open_orders()   # ka10075 oso
-        pending_symbols = {o.symbol for o in _open if o.pending_qty > 0}
-        await _sync_positions(pos_store, held_symbols, pending_symbols,
-                              audit_path=args.audit_log)
-    except Exception as _e:
-        # 미체결 조회 실패 → 접수정체를 잘못 지울 위험. 이번 사이클 SYNC 제거 보류.
-        print(f"  [SYNC-SKIP] 미체결 조회 실패({type(_e).__name__}) — 제거 보류")
+    pending_symbols: set[str] = set()
+    pending_sell_symbols: set[str] = set()
+    open_orders_known = False
+    recent_ai_sell_symbols: set[str] = set()
+    sell_intents_known = args.dry_run
+    if not args.dry_run:
+        if open_orders_error is not None:
+            # 미체결 조회 실패 → 접수정체를 잘못 지울 위험. SYNC 제거 보류.
+            print(
+                f"  [SYNC-SKIP] 미체결 조회 실패({type(open_orders_error).__name__}) "
+                "— 제거 보류"
+            )
+        else:
+            pending_symbols = {o.symbol for o in open_orders if o.pending_qty > 0}
+            pending_sell_symbols = {
+                o.symbol for o in open_orders if o.pending_qty > 0 and o.side == "sell"
+            }
+            open_orders_known = True
+            holdings_by_symbol = {h.symbol: h for h in (balance.holdings or [])}
+            confirmed_partial_symbols = _append_confirmed_sell_audits(
+                args.audit_log, holdings_by_symbol, positions_before_sync, pending_symbols,
+            )
+            if confirmed_partial_symbols is not None:
+                try:
+                    recent_ai_sell_symbols = _recent_unresolved_ai_sell_symbols(args.audit_log)
+                    sell_intents_known = True
+                except Exception as exc:  # noqa: BLE001 — 원장 판별 불가 시 장부 변경도 차단
+                    print(
+                        f"  [SELL-INTENT-READ-ERR] {type(exc).__name__} "
+                        "— ai_swing 장부 변경·매도 보류"
+                    )
+                if sell_intents_known:
+                    for sym in confirmed_partial_symbols:
+                        pos = positions_before_sync[sym]
+                        pos.partial_tp_done = True
+                        pos_store.upsert(pos)
+                    await _sync_positions(
+                        pos_store, held_symbols, pending_symbols, audit_path=args.audit_log,
+                    )
+            else:
+                print("  [SYNC-SKIP] 매도 체결 감사 실패 — 장부 변경 보류")
+
+    active_positions = pos_store.load_all()
+    if not args.dry_run and open_orders_known:
+        for h in balance.holdings or []:
+            pos = active_positions.get(h.symbol)
+            strategy = str(getattr(pos, "strategy", "") or "")
+            if (
+                pos is not None
+                and strategy.replace("_v1", "").replace("_v2", "") == _AI_SWING_SID
+                and h.symbol not in pending_symbols
+            ):
+                _append_confirmed_fill_audit(args.audit_log, pos, h)
 
     if not balance.holdings:
         return 0
@@ -378,7 +857,6 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
         tightened_sl_pct=Decimal(str(cfg.tightened_sl_pct)),
     )
 
-    active_positions = pos_store.load_all()
     contexts: dict[str, PositionContext] = {}
 
     # 2026-05-21 — 단기 고점 매도 평가용 1분봉 fetch (각 보유 종목).
@@ -391,10 +869,21 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     for h in balance.holdings:
         pos = active_positions.get(h.symbol)
         if pos:
+            position_strategy = str(getattr(pos, "strategy", "") or "").replace(
+                "_v1", ""
+            ).replace("_v2", "")
             # [BAR-OPS-38 P0#5] 브로커 보유수량 ↔ 장부 filled 수량 보정 — 브로커가 진실.
             #   부분체결(접수 ORDERED ≠ 체결)·이중매수 잔재(6/10 319660 장부 23 vs 실보유 32)
             #   를 사이클마다 대사해 청산 수량 사고(초과매도/고아 잔량)를 예방.
-            if _reconcile_position_qty(pos, int(h.qty)):
+            if (
+                not args.dry_run
+                and (
+                    position_strategy != _AI_SWING_SID
+                    or (open_orders_known and sell_intents_known)
+                )
+                and h.symbol not in pending_symbols
+                and _reconcile_position_qty(pos, int(h.qty))
+            ):
                 ts_rc = _now_kst().strftime("%H:%M:%S")
                 print(f"  [{ts_rc}][FILL-SYNC] {h.symbol} {h.name} 장부수량 보정 → 브로커 {int(h.qty)}주")
                 pos_store.upsert(pos)
@@ -410,7 +899,7 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
                 pos.trough_pnl_rate = cur_rate
                 pos.trough_updated_at = now_iso
                 dirty = True
-            if dirty:
+            if dirty and not args.dry_run:
                 pos_store.upsert(pos)
 
             # SHORT_TERM_HIGH 평가용 1분봉 — 전략별 partial_tp_pct 도달 시만 fetch
@@ -526,11 +1015,12 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
                 tag = "DRY_RUN" if r.dry_run else "DCA"
                 ts = _now_kst().strftime("%H:%M:%S")
                 print(f"  [{ts}][{tag}] {h.symbol} {h.name} T{tranche.tranche} qty={tranche.qty}")
-                tranche.status = "filled"
-                tranche.order_no = r.order_no
-                tranche.filled_price = cur_price
-                tranche.filled_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-                pos_store.upsert(pos)
+                if not r.dry_run:
+                    tranche.status = "filled"
+                    tranche.order_no = r.order_no
+                    tranche.filled_price = cur_price
+                    tranche.filled_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                    pos_store.upsert(pos)
             except DailyOrderLimitExceeded:
                 ts = _now_kst().strftime("%H:%M:%S")
                 print(f"  [{ts}][DCA] 일일 거래수 한도 도달 — DCA 중단")
@@ -558,7 +1048,7 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
 
     # P7+P9 (2026-05-20) — cooldown 안 매도 정책:
     #   - defensive (STOP_LOSS·BREAKEVEN_STOP·TIME_TIGHTENED_SL) 차단
-    #   - 단 STOP_LOSS rate ≤ -5% (hard SL) 는 우회 (큰 손실 방지)
+    #   - 단 STOP_LOSS rate ≤ -5% 또는 ai_swing 전략 hard SL 은 우회 (큰 손실 방지)
     #   - 익절 (TRAILING_STOP·TAKE_PROFIT·PARTIAL_TP) 는 통과 (P9 — 강세 종목 익절 기회 보장)
     # P7 단독 시 274090 peak +8.1% trail 차단으로 -358k 손실 발생 → P9 보완.
     _DEFENSIVE_SIGNALS = {
@@ -574,9 +1064,9 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
         if d.signal not in _DEFENSIVE_SIGNALS:
             return True
         # defensive 차단 — 단 hard SL 만 우회
-        return (
-            d.signal == SellSignal.STOP_LOSS
-            and float(d.pnl_rate) <= HARD_SL_PCT
+        pos = active_positions.get(d.symbol)
+        return _hard_sl_bypasses_cooldown(
+            d.signal, d.pnl_rate, getattr(pos, "strategy", "") if pos else "",
         )
 
     sell_targets = [
@@ -588,15 +1078,39 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
 
     sold = 0
     for d in sell_targets:
+        _ap = active_positions.get(d.symbol) if isinstance(active_positions, dict) else None
+        _strategy = getattr(_ap, "strategy", None) if _ap else None
+        strategy_key = str(_strategy or "").replace("_v1", "").replace("_v2", "")
+        if (
+            strategy_key == _AI_SWING_SID
+            and not args.dry_run
+            and (not open_orders_known or not sell_intents_known)
+        ):
+            print(
+                f"  [{_now_kst():%H:%M:%S}][SELL-SKIP] {d.symbol} — "
+                "미체결/매도 intent 판별 실패, ai_swing 중복 매도 방지"
+            )
+            continue
+        if strategy_key == _AI_SWING_SID and d.symbol in recent_ai_sell_symbols:
+            print(
+                f"  [{_now_kst():%H:%M:%S}][SELL-SKIP] {d.symbol} — "
+                f"최근 매도 intent {_ORDER_RECONCILE_GRACE_MIN}분 대사 유예"
+            )
+            continue
+        if (
+            d.symbol in pending_sell_symbols
+            or (strategy_key == _AI_SWING_SID and d.symbol in pending_symbols)
+        ):
+            print(f"  [{_now_kst():%H:%M:%S}][SELL-SKIP] {d.symbol} — 미체결 주문 존재")
+            continue
         # partial_tp만 분할, 나머지(손절/트레일링 등)는 전량 매도
         if d.signal == SellSignal.PARTIAL_TP and d.sell_qty > 0:
             sell_qty = d.sell_qty
         else:
             sell_qty = d.qty
+        sell_intent_no = ""
         try:
             # Phase D2.6: strategy_id 전파 — active_positions 메타에서 조회 (없으면 None)
-            _ap = active_positions.get(d.symbol) if isinstance(active_positions, dict) else None
-            _strategy = getattr(_ap, "strategy", None) if _ap else None
             # [BAR-OPS-39 P1] 매도 직전 장부 재확인 — 사이클 시작 스냅샷과 주문 사이에
             #   st 트레이더가 같은 종목을 선청산(remove)하면 중복 매도가 발사돼 브로커
             #   거부 FAILED 가 남는다(6/9 3건·6/11 1건). 스냅샷엔 있었는데 지금 장부에
@@ -605,6 +1119,14 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
                 ts = _now_kst().strftime("%H:%M:%S")
                 print(f"  [{ts}][SELL-SKIP] {d.symbol} — 타 액터 선청산 감지(장부 부재), 중복 매도 회피")
                 continue
+            if strategy_key == _AI_SWING_SID and not args.dry_run:
+                sell_intent_no = _append_sell_intent_audit(
+                    args.audit_log,
+                    symbol=d.symbol,
+                    qty=sell_qty,
+                    strategy=str(_strategy or _AI_SWING_SID),
+                    signal_name=d.signal.value,
+                )
             r = await gate.place_sell(symbol=d.symbol, qty=sell_qty,
                                       strategy_id=_strategy)
             tag = "DRY_RUN" if r.dry_run else "SOLD"
@@ -613,13 +1135,17 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
                 f"  [{ts}][{tag}] {d.symbol} {d.name:<14} qty={sell_qty}/{d.qty} "
                 f"signal={d.signal.value} pnl={d.pnl_rate:+.1f}%"
             )
-            if d.signal == SellSignal.PARTIAL_TP:
-                pos = active_positions.get(d.symbol)
-                if pos:
-                    pos.partial_tp_done = True
-                    pos_store.upsert(pos)
-            elif sell_qty >= d.qty:
-                pos_store.remove(d.symbol)
+            if not r.dry_run:
+                if d.signal == SellSignal.PARTIAL_TP:
+                    pos = active_positions.get(d.symbol)
+                    if pos and strategy_key != _AI_SWING_SID:
+                        pos.partial_tp_done = True
+                        pos_store.upsert(pos)
+                elif sell_qty >= d.qty:
+                    if strategy_key != _AI_SWING_SID:
+                        pos_store.remove(d.symbol)
+                    # ai_swing은 다음 잔고 대사까지 보존한다. 부분체결이면 수량을
+                    # 보정하고, 전량체결이면 SYNC가 제거해 주문접수≠체결 간극을 막는다.
 
             if notifier:
                 try:
@@ -631,10 +1157,36 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
                     pass
             sold += 1
         except DailyOrderLimitExceeded:
+            if sell_intent_no:
+                try:
+                    _cancel_sell_intent_audit(
+                        args.audit_log, symbol=d.symbol, qty=sell_qty,
+                        strategy=str(_strategy or _AI_SWING_SID),
+                        intent_no=sell_intent_no, reason="daily_order_limit",
+                    )
+                except Exception as audit_error:  # noqa: BLE001
+                    print(f"  [SELL-INTENT-ERR] {d.symbol}: {type(audit_error).__name__}")
             ts = _now_kst().strftime("%H:%M:%S")
             print(f"  [{ts}][SELL] 일일 거래수 한도 도달 — 매도 중단")
             break
+        except (DailyLossLimitExceeded, TradingDisabled, InvalidOrderQty) as e:
+            if sell_intent_no:
+                try:
+                    _cancel_sell_intent_audit(
+                        args.audit_log, symbol=d.symbol, qty=sell_qty,
+                        strategy=str(_strategy or _AI_SWING_SID),
+                        intent_no=sell_intent_no, reason=type(e).__name__,
+                    )
+                except Exception as audit_error:  # noqa: BLE001
+                    print(f"  [SELL-INTENT-ERR] {d.symbol}: {type(audit_error).__name__}")
+            print(f"  [SELL-BLOCKED] {d.symbol}: {e}")
         except Exception as e:
+            if sell_intent_no:
+                print(
+                    f"  [SELL-ORDER-UNCERTAIN] {d.symbol}: {type(e).__name__} — "
+                    "intent 보존, 브로커 미체결·잔고 대사 전 추가 매도 중단"
+                )
+                break
             print(f"  [SELL-ERR] {d.symbol}: {e}")
 
     return sold
@@ -783,12 +1335,16 @@ _FORCE_CLOSE_EXEMPT_STRATEGIES = {"swing_38", "ai_swing"}
 def _force_close_skip(symbol: str, strategy: str | None, cb_skip: set[str]) -> bool:
     """EOD 강제청산(carry-limit)에서 해당 보유분을 건너뛸지 판정.
 
-    True 면 청산 제외: ① 종베(closing_bet) 보유분(수동관리 전용) ②다일보유 면제 전략(swing_38).
+    True 면 청산 제외: ① 종베/수동관리 보유분 ②전략 태그 없는 외부·수동 보유분
+    ③ 다일보유 면제 전략(swing_38/ai_swing).
     장중 보유평가의 자체 손절/시간청산과는 무관(여기는 'EOD 강제 트림' 전용 게이트).
     """
     if symbol in cb_skip:
         return True
-    if strategy in _FORCE_CLOSE_EXEMPT_STRATEGIES:
+    normalized = (strategy or "").strip()
+    if not normalized:
+        return True
+    if normalized in _FORCE_CLOSE_EXEMPT_STRATEGIES:
         return True
     return False
 
@@ -800,11 +1356,12 @@ def _force_close_skip(symbol: str, strategy: str | None, cb_skip: set[str]) -> b
 #   (랭킹=당일 급등 상위 N, 교집합=되돌림 대기 종목) 후보를 **별도로 합성해 주입**한다.
 #   합성하지 않으면 ai_swing 은 영구히 진입 0 이다.
 #
-# ★ 4중 default-OFF (§2 S3) — 아래가 전부 열려야 주문 시도가 생긴다:
+# ★ 5중 default-OFF (§2 S3) — 아래가 전부 열려야 주문 시도가 생긴다:
 #     ① zone_strategies 에 "ai_swing" 포함 (BARRO_DAEMON_STRATEGIES 또는 --strategies)
-#     ② BARRO_AI_SWING_ENTRY_ENABLED=1   (기본 0 → 후보 주입 자체를 하지 않음)
-#     ③ BARRO_AI_SWING_BUDGET_RATIO>0    (기본 0.0 → 신호가 나와도 전량 차단)
-#     ④ BARRO_AI_TRADE_DIR 설정 + 산출물 존재 (미설정이면 로더가 no_data)
+#     ② BARRO_AI_SWING_ENABLED=1         (기본 0 → 공통 마스터 차단)
+#     ③ BARRO_AI_SWING_ENTRY_ENABLED=1   (기본 0 → 후보 주입 자체를 하지 않음)
+#     ④ BARRO_AI_SWING_BUDGET_RATIO>0    (기본 0.0 → 신호가 나와도 전량 차단)
+#     ⑤ BARRO_AI_TRADE_DIR 설정 + 산출물 존재 (미설정이면 로더가 no_data)
 #   상위에 LIVE_TRADING_ENABLED(실주문) 와 --no-dry-run 이 별도로 있다.
 #
 # ⚠️ shadow 실측(scripts/ai_swing_daemon.py) 으로 교집합 종목수·진입신호수가 0 이 아님을
@@ -813,8 +1370,11 @@ _AI_SWING_SID = "ai_swing"
 
 
 def _ai_swing_entry_enabled() -> bool:
-    """ai_swing 후보 주입 여부. 기본 OFF."""
-    return _env_truthy("BARRO_AI_SWING_ENTRY_ENABLED", "0")
+    """ai_swing 후보 주입 여부. 마스터와 진입 플래그가 모두 켜져야 한다."""
+    return (
+        _env_truthy("BARRO_AI_SWING_ENABLED", "0")
+        and _env_truthy("BARRO_AI_SWING_ENTRY_ENABLED", "0")
+    )
 
 
 def _ai_swing_caps() -> tuple[float, int]:
@@ -827,26 +1387,55 @@ def _ai_swing_caps() -> tuple[float, int]:
         slots = int(os.environ.get("BARRO_AI_SWING_MAX_POSITIONS", "3") or 3)
     except (TypeError, ValueError):
         slots = 0
-    return max(0.0, ratio), max(0, slots)
+    if not 0.0 <= ratio <= 1.0:
+        ratio = 0.0
+    return ratio, max(0, slots)
 
 
 def _ai_swing_universe_symbols() -> tuple[list, str, str]:
     """단테 교집합 유니버스를 읽어 (items, status, reason) 반환.
 
     실패·부재는 전량 흡수해 ([], "no_data", <사유>) 를 돌린다 — 라이브 무영향(§2 S3).
-    status 가 ok/stale 이 아니면 items 는 비어 있다(로더 계약).
+    실진입은 당일 완전 교집합(status=ok)과 최근 파일만 허용한다.
+    scan_only/partial 및 stale 허용은 관측 데몬 전용이다.
     """
     try:
-        from backend.core.scanner.ai_trade_universe import load_ai_trade_universe
+        from backend.core.scanner.ai_trade_universe import (
+            load_ai_trade_universe,
+            validate_current_sources,
+        )
         uni = load_ai_trade_universe()
         items = list(getattr(uni, "items", []) or [])
         status = str(getattr(uni, "status", "no_data") or "no_data")
         reason = str(getattr(uni, "reason", "") or "")
-        if status not in ("ok", "stale"):
+        if status != "ok":
             return [], status, reason
+
+        fresh, fresh_reason = validate_current_sources(now=_now_kst())
+        if not fresh:
+            fresh_status = "stale" if fresh_reason.startswith("source_age:") else "no_data"
+            return [], fresh_status, fresh_reason
         return items, status, reason
     except Exception as e:  # 로더는 예외를 흡수하지만 import 실패 등 2차 방어
         return [], "no_data", f"loader_error:{type(e).__name__}"
+
+
+def _ai_swing_current_signal(candidate, candles):
+    """관측 데몬과 같은 AiSwingStrategy.analyze()로 최신 일봉 진입을 확인한다."""
+    try:
+        from backend.core.strategy.ai_swing import AiSwingStrategy
+        from backend.models.market import MarketType
+        from backend.models.strategy import AnalysisContext
+
+        ctx = AnalysisContext(
+            symbol=candidate.symbol,
+            name=candidate.name,
+            candles=candles,
+            market_type=MarketType.STOCK,
+        )
+        return AiSwingStrategy().analyze(ctx), ""
+    except Exception as exc:  # 실진입 경계: 판정 실패는 통과가 아니라 차단
+        return None, f"analyze_error:{type(exc).__name__}"
 
 
 async def _ai_swing_extra_candidates(fetcher, items: list, excluded: set[str]) -> list:
@@ -888,6 +1477,38 @@ async def _ai_swing_extra_candidates(fetcher, items: list, excluded: set[str]) -
     return out
 
 
+def _ai_swing_budget_left(pos_store, balance, deposit) -> tuple[float, float]:
+    """(기준자산, ai_swing 잔여예산). 계산 실패는 호출자가 fail-closed 처리한다."""
+    ratio, _ = _ai_swing_caps()
+    held = pos_store.load_all()
+    held_ai = {
+        sym: p for sym, p in held.items()
+        if str(getattr(p, "strategy", "") or "").replace("_v1", "").replace("_v2", "") == _AI_SWING_SID
+    }
+    cash = getattr(deposit, "orderable_cash", None) or getattr(deposit, "cash", 0)
+    est_total = float(cash or 0) + float(getattr(balance, "total_eval", 0) or 0)
+    holdings = {h.symbol: h for h in (getattr(balance, "holdings", None) or [])}
+    used = 0.0
+    for sym, pos in held_ai.items():
+        if sym in holdings:
+            used += float(getattr(holdings[sym], "eval_amount", 0) or 0)
+        else:
+            # 주문 직후 잔고 반영 전에도 장부 주문수량×호가를 예약해 중복 예산 사용을 막는다.
+            used += max(
+                0.0,
+                float(getattr(pos, "entry_price", 0) or 0)
+                * int(getattr(pos, "total_recommended_qty", 0) or 0),
+            )
+    return est_total, ratio * est_total - used
+
+
+def _ai_swing_order_qty(requested_qty: int, price: float, budget_left: float) -> int:
+    """호가 기준 주문금액이 남은 ai_swing 예산을 넘지 않도록 수량을 내림 제한한다."""
+    if requested_qty <= 0 or price <= 0 or budget_left <= 0:
+        return 0
+    return min(int(requested_qty), int(budget_left // price))
+
+
 def _ai_swing_cap_filter(signals: list, pos_store, balance, deposit) -> tuple[list, list]:
     """ai_swing 신호에 슬롯·예산 캡을 적용. (통과신호, [(symbol, 사유)]) 반환.
 
@@ -915,18 +1536,7 @@ def _ai_swing_cap_filter(signals: list, pos_store, balance, deposit) -> tuple[li
         }
         free_slots = max(0, slots - len(held_ai))
 
-        # 예산 = BUDGET_RATIO × 투자기준자산. 현 ai_swing 평가액을 빼 잔여를 구한다.
-        #   기준자산 정의는 balance_gate 관례를 따른다 — 매수가능액(orderable_cash,
-        #   없으면 cash) + 현 보유 평가총액(total_eval). 즉 "현금 + 주식" 근사.
-        _cash = getattr(deposit, "orderable_cash", None) or getattr(deposit, "cash", 0)
-        est_total = float(_cash or 0) + float(getattr(balance, "total_eval", 0) or 0)
-        holdings = {h.symbol: h for h in (getattr(balance, "holdings", None) or [])}
-        used = 0.0
-        for sym in held_ai:
-            h = holdings.get(sym)
-            if h is not None:
-                used += float(getattr(h, "eval_amount", 0) or 0)
-        budget_left = ratio * est_total - used
+        est_total, budget_left = _ai_swing_budget_left(pos_store, balance, deposit)
     except Exception as e:
         for c, _, _ in ai_sig:
             skipped.append((c.symbol, f"캡 계산 실패({type(e).__name__}) — fail-closed 차단"))
@@ -1130,8 +1740,6 @@ async def _scan_and_buy(
     fetcher = KiwoomNativeCandleFetcher(oauth=oauth)
 
     leaders = await picker.pick(top_n=args.top)
-    if not leaders:
-        return 0
     # [6/23] 랭킹 degraded 시 신규진입 차단(BARRO_DEGRADED_BLOCK). ★trade_value 가 실제
     #   채워진 경우(not None)에만 평가 — 미채움이면 판단 불가로 fail-open(전 진입 차단 방지).★
     if _DEGRADED_BLOCK:
@@ -1253,6 +1861,7 @@ async def _scan_and_buy(
                 and not (_excl_etf and _is_etf_or_etn(c.symbol, c.name)))
 
     filtered = [c for c in leaders if _passes_universe_filters(c)]
+    leader_symbols = {c.symbol for c in filtered}
 
     # ── ai_swing 후보 주입 (단테 교집합) — default-OFF ────────────────────────
     #   랭킹 후보와 원천이 달라 별도 합성이 필요하다(위 _ai_swing_extra_candidates 주석).
@@ -1265,12 +1874,15 @@ async def _scan_and_buy(
             if not _ai_items:
                 print(f"  [{ts_a}][AI-SWING] 유니버스 없음 — status={_ai_status} reason={_ai_reason}")
             else:
+                source_symbols = {str(getattr(it, "symbol", "") or "") for it in _ai_items}
                 _extra = await _ai_swing_extra_candidates(
-                    fetcher, _ai_items, excluded | {c.symbol for c in filtered}
+                    fetcher, _ai_items, excluded | leader_symbols
                 )
                 _extra = [c for c in _extra if _passes_universe_filters(c)]
-                ai_swing_symbols = {c.symbol for c in _extra}
                 filtered = filtered + _extra
+                # 기존 리더와 겹친 교집합도 ai_swing 원천으로 인정한다. 기존 코드는
+                # extra 만 집합에 넣어 정상 overlap 종목을 격리 검사에서 버렸다.
+                ai_swing_symbols = source_symbols & {c.symbol for c in filtered}
                 print(
                     f"  [{ts_a}][AI-SWING] status={_ai_status} 교집합={len(_ai_items)} "
                     f"→ 후보주입 {len(_extra)}종목"
@@ -1337,16 +1949,38 @@ async def _scan_and_buy(
         if len(candles) < 60:
             continue
 
-        result = sim.run(candles, symbol=c.symbol, strategies=strategies)
-        # 국면 가중치 적용하여 전략 점수 조정
-        weighted_pnl = {
-            s: float(result.pnl_by_strategy[s]) * weights.get(s, 1.0)
-            for s in result.pnl_by_strategy
-        }
-        best_strategy = max(weighted_pnl, key=lambda s: weighted_pnl[s])
-        best_pnl = weighted_pnl[best_strategy]
+        # ai_swing 은 과거 누적 PnL이 아니라 관측 데몬과 동일한 최신 일봉
+        # analyze() 신호를 진입 권위로 쓴다. 교집합 전용 후보에서 현재 신호가 없으면
+        # 다른 전략으로 바꿔 매수하지 않는다. 리더와 겹친 종목만 일반 전략 폴백 허용.
+        current_ai_signal = None
+        if c.symbol in ai_swing_symbols:
+            current_ai_signal, ai_reason = _ai_swing_current_signal(c, candles)
+            if current_ai_signal is None and c.symbol not in leader_symbols:
+                ts_s = _now_kst().strftime("%H:%M:%S")
+                print(f"  [{ts_s}][SKIP-AI-SWING] {c.symbol} {c.name:<14} — 현재 진입신호 없음 {ai_reason}")
+                continue
 
-        if best_pnl > 0 and len(result.trades) > 0:
+        if current_ai_signal is not None:
+            best_strategy = _AI_SWING_SID
+            ai_result = sim.run(candles, symbol=c.symbol, strategies=[_AI_SWING_SID])
+            best_pnl = float(ai_result.pnl_by_strategy.get(_AI_SWING_SID, 0.0)) * weights.get(_AI_SWING_SID, 1.0)
+            signal_ready = True
+        else:
+            candidate_strategies = [s for s in strategies if s != _AI_SWING_SID]
+            if c.symbol not in leader_symbols or not candidate_strategies:
+                continue
+            result = sim.run(candles, symbol=c.symbol, strategies=candidate_strategies)
+            weighted_pnl = {
+                s: float(result.pnl_by_strategy[s]) * weights.get(s, 1.0)
+                for s in result.pnl_by_strategy
+            }
+            if not weighted_pnl:
+                continue
+            best_strategy = max(weighted_pnl, key=lambda s: weighted_pnl[s])
+            best_pnl = weighted_pnl[best_strategy]
+            signal_ready = best_pnl > 0 and len(result.trades) > 0
+
+        if signal_ready:
             # BEARISH 국면: 가중치 < 1.0 전략은 제외
             if regime == MarketRegime.BEARISH and weights.get(best_strategy, 1.0) < 1.0:
                 continue
@@ -1477,12 +2111,11 @@ async def _scan_and_buy(
             signals.append((c, best_strategy, best_pnl))
             print(f"  [SIGNAL] {c.symbol} {c.name:<14} 전략={best_strategy} PnL={best_pnl:+,.0f} (w={weights.get(best_strategy, 1.0):.1f})")
 
-    # 정제된 시그널을 파일에 저장 (대시보드 노출용) — advisory 필터 이전의 전체 탐지 신호.
-    _save_refined_signals(signals, regime)
-    # 정제 시그널 포착 알림 이벤트 기록(대시보드 알림내역) — default-OFF, 라이브 무영향.
-    _record_alert_events(signals)
-    # 결정적 시장 스냅샷(관측) — writer 가 add-on 신호 생산에 사용. 라이브 무영향.
-    _save_market_snapshot(leaders, balance, regime)
+    if not getattr(args, "entry_only_once", False):
+        # 필드 배선 DRY_RUN은 운영 data 파일도 바꾸지 않는다.
+        _save_refined_signals(signals, regime)
+        _record_alert_events(signals)
+        _save_market_snapshot(leaders, balance, regime)
 
     if not signals:
         return 0
@@ -1550,6 +2183,7 @@ async def _scan_and_buy(
     # ── ai_swing 슬롯·예산 캡 — 슈퍼트렌드와의 자본 격리 ─────────────────────
     #   BUDGET_RATIO 기본 0.0 이라 여기서 전량 차단된다(진입하려면 명시 설정 필요).
     #   캡 계산 실패는 fail-closed(차단) — 다일보유 포지션을 모르는 예산으로 늘리지 않는다.
+    ai_budget_left = 0.0
     if any(s[1] == _AI_SWING_SID for s in signals):
         signals, _ai_skipped = _ai_swing_cap_filter(signals, pos_store, balance, deposit)
         for _sym, _why in _ai_skipped:
@@ -1557,6 +2191,14 @@ async def _scan_and_buy(
             print(f"  [{_ts_k}][AI-SWING-CAP] {_sym} — {_why}")
         if not signals:
             return 0
+        if any(s[1] == _AI_SWING_SID for s in signals):
+            try:
+                _est_total, ai_budget_left = _ai_swing_budget_left(pos_store, balance, deposit)
+            except Exception as _e:
+                print(f"  [{_now_kst():%H:%M:%S}][AI-SWING-CAP] 실제 주문예산 재계산 실패({type(_e).__name__}) — 차단")
+                signals = [s for s in signals if s[1] != _AI_SWING_SID]
+                if not signals:
+                    return 0
 
     candidates_for_gate = [
         (c.symbol, c.name, Decimal(str(c.cur_price))) for c, _, _ in signals
@@ -1595,7 +2237,11 @@ async def _scan_and_buy(
             #    latch: 입력이 당일 기준으로 교체됐으므로 활성(off 는 env=0 명시).
             #    재시도: 매도(청산)만 — 6/8 매도 HTTPStatusError 5분 지연(-509K 악화) 처방.
             daily_loss_latch=_env_truthy("SUPERTREND_AUTO_LOSS_LATCH", "1"),
-            latch_state_path=str(_DATA_DIR / "daily_gate_state.json"),
+            latch_state_path=(
+                str(Path(args.audit_log).with_name("daily_gate_state.json"))
+                if getattr(args, "entry_only_once", False)
+                else str(_DATA_DIR / "daily_gate_state.json")
+            ),
             loss_metric_label="당일실현+보유평가/추정예탁자산",
             order_retry_count=int(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY", "2")),
             order_retry_backoff_sec=float(os.environ.get("SUPERTREND_AUTO_ORDER_RETRY_BACKOFF", "2.0")),
@@ -1608,54 +2254,121 @@ async def _scan_and_buy(
     for r, strategy in buyable[:regime_max_buy]:
         # 시장-맥락 add-on 사이징 배수(테마 soft 축소 × 포트폴리오 throttle). 미설정 시 1.0 → 무변경.
         _sf = _size_factors.get(r.symbol, 1.0) * _global_factor
-        tranche1_qty = max(1, round(r.recommended_qty * 0.6 * _sf))
+        order_qty = max(1, round(r.recommended_qty * 0.6 * _sf))
+        is_ai_swing = strategy == _AI_SWING_SID
+        if is_ai_swing:
+            price = float(r.cur_price)
+            order_qty = _ai_swing_order_qty(order_qty, price, ai_budget_left)
+            if order_qty <= 0:
+                print(f"  [{_now_kst():%H:%M:%S}][AI-SWING-CAP] {r.symbol} — 호가 기준 잔여예산 부족")
+                continue
+        accepted = False
+        provisional = None
+        preserve_provisional = False
+        cleanup_failed = False
+        profile = STRATEGY_EXIT_PROFILES.get(
+            strategy.replace("_v1", "").replace("_v2", ""), {}
+        )
+        sl = float(profile.get("stop_loss_pct", -4.0))
+        leader = next((c for c, _, _ in signals if c.symbol == r.symbol), None)
         try:
+            # ai_swing은 외부 주문보다 먼저 복구 가능한 intent를 원자 저장한다.
+            # 주문 호출 중 프로세스가 죽어도 다음 잔고 대사가 체결/미체결을 판별한다.
+            if is_ai_swing and not args.dry_run:
+                provisional = pos_store.create_from_order(
+                    symbol=r.symbol, name=r.name,
+                    strategy=strategy,
+                    entry_price=float(r.cur_price),
+                    total_recommended_qty=order_qty,
+                    order_no=f"PENDING:{r.symbol}",
+                    sl_pct=sl,
+                    flu_rate=float(leader.flu_rate) if leader else 0.0,
+                    score=float(leader.score) if leader else 0.0,
+                    single_tranche=True,
+                )
+
             # Phase D2.6: strategy_id 전파 (order_audit.csv 신규 컬럼)
-            result = await gate.place_buy(symbol=r.symbol, qty=tranche1_qty,
+            result = await gate.place_buy(symbol=r.symbol, qty=order_qty,
                                           daily_pnl_pct=daily_pnl_pct,
                                           strategy_id=strategy)
+            accepted = True
+            preserve_provisional = True
+            executed += 1
             tag = "DRY_RUN" if result.dry_run else "ORDERED"
             ts = _now_kst().strftime("%H:%M:%S")
             print(
-                f"  [{ts}][{tag}] {r.symbol} {r.name:<14} qty={tranche1_qty}"
+                f"  [{ts}][{tag}] {r.symbol} {r.name:<14} qty={order_qty}"
                 f"(전체 {r.recommended_qty}) strategy={strategy} order_no={result.order_no}"
             )
 
-            # active_positions 저장
-            profile = STRATEGY_EXIT_PROFILES.get(strategy.replace("_v1", "").replace("_v2", ""), {})
-            sl = float(profile.get("stop_loss_pct", -4.0))
-            leader = next((c for c, _, _ in signals if c.symbol == r.symbol), None)
-            pos_store.create_from_order(
-                symbol=r.symbol, name=r.name,
-                strategy=strategy,
-                entry_price=float(r.cur_price),
-                total_recommended_qty=r.recommended_qty,
-                order_no=result.order_no,
-                sl_pct=sl,
-                flu_rate=float(leader.flu_rate) if leader else 0.0,
-                score=float(leader.score) if leader else 0.0,
-            )
-
+            # 주문 접수 직후 먼저 세션·예산을 예약한다. 이후 장부 저장이 실패해도
+            # 같은 프로세스가 중복 주문을 내지 않는다.
             session_bought.add(r.symbol)
-            # P6 — 매수 직후 즉시 cooldown 등록 (recent_buys 인자가 있으면)
             if recent_buys is not None:
                 recent_buys[r.symbol] = _now_kst()
+            if is_ai_swing:
+                ai_budget_left -= order_qty * float(r.cur_price)
 
             if notifier:
                 try:
                     await notifier.send(format_buy_alert(
-                        r.symbol, r.name, tranche1_qty,
+                        r.symbol, r.name, order_qty,
                         result.order_no, result.dry_run,
                     ))
                 except Exception:
                     pass
-            executed += 1
+
+            # DRY_RUN 은 체결이 아니므로 실제 포지션 장부를 오염시키지 않는다.
+            if not result.dry_run:
+                if provisional is not None:
+                    provisional.tranches[0].order_no = (
+                        result.order_no or provisional.tranches[0].order_no
+                    )
+                    pos_store.upsert(provisional)
+                else:
+                    pos_store.create_from_order(
+                        symbol=r.symbol, name=r.name,
+                        strategy=strategy,
+                        entry_price=float(r.cur_price),
+                        total_recommended_qty=r.recommended_qty,
+                        order_no=result.order_no,
+                        sl_pct=sl,
+                        flu_rate=float(leader.flu_rate) if leader else 0.0,
+                        score=float(leader.score) if leader else 0.0,
+                    )
         except DailyOrderLimitExceeded:
             ts = _now_kst().strftime("%H:%M:%S")
             print(f"  [{ts}][BUY] 일일 거래수 한도 도달 — 매수 중단")
             break
-        except Exception as e:
+        except (DailyLossLimitExceeded, TradingDisabled, InvalidOrderQty) as e:
             print(f"  [BLOCKED] {r.symbol}: {e}")
+        except Exception as e:
+            if accepted:
+                print(
+                    f"  [POSITION-ERR] {r.symbol}: 주문 접수 후 후처리 실패({type(e).__name__}) "
+                    "— 세션 예약 유지, 이번 사이클 추가 매수 중단"
+                )
+                break
+            if provisional is not None:
+                preserve_provisional = True
+                print(
+                    f"  [ORDER-UNCERTAIN] {r.symbol}: {type(e).__name__} — "
+                    "provisional 보존, 브로커 미체결·잔고 대사 전 추가 매수 중단"
+                )
+                break
+            print(f"  [BLOCKED] {r.symbol}: {e}")
+        finally:
+            if provisional is not None and not accepted and not preserve_provisional:
+                try:
+                    pos_store.remove(r.symbol)
+                except Exception as cleanup_error:
+                    cleanup_failed = True
+                    print(
+                        f"  [POSITION-CLEANUP-ERR] {r.symbol}: "
+                        f"{type(cleanup_error).__name__} — 주문 미접수 provisional 수동 확인"
+                    )
+        if cleanup_failed:
+            break
 
     return executed
 
@@ -1847,7 +2560,8 @@ async def _eod_carry_limit(args, oauth, notifier) -> int:
             tag = "DRY_RUN" if r.dry_run else "SOLD"
             print(f"  [{ts}][CARRY-LIMIT-{tag}] {h.symbol} {h.name} {int(h.qty)}주 "
                   f"평가 {float(h.eval_amount):,.0f}원 청산")
-            pos_store.remove(h.symbol)
+            if not r.dry_run:
+                pos_store.remove(h.symbol)
             eval_sum -= float(h.eval_amount)
             sold += 1
             if notifier:
@@ -2016,6 +2730,14 @@ async def _daemon(args):
     total_bought = 0
     total_sold = 0
 
+    # ai_swing 필드 배선 확인용: 기존 보유 청산/DCA/EOD 경로를 건드리지 않고
+    # 일반 진입 스캔을 정확히 한 번만 DRY_RUN 한다.
+    if getattr(args, "entry_only_once", False):
+        print("  [ENTRY-ONLY] 매도·DCA·EOD 없이 진입 스캔 1회(DRY_RUN)")
+        total_bought = await _scan_and_buy(args, oauth, session_bought, recent_buys)
+        print(f"== ENTRY-ONLY 종료 (DRY_RUN 매수 후보 {total_bought}건) ==")
+        return
+
     # 슈퍼트렌드 활성 시 데몬 가동 개시를 09:00(개장)로 앞당김 — 09:00~09:05 사이에도
     # supertrend 시그널 진입이 가능하게 한다. 일반 전략은 _scan_and_buy 내부 BUY_START
     # (09:05) 게이트가 그대로 작동하므로 09:05 이전엔 일반 매수가 나가지 않는다.
@@ -2044,8 +2766,9 @@ async def _daemon(args):
 
     print(f"  [{_now_kst().strftime('%H:%M:%S')}] 장중 감시 시작")
 
-    # 장 시작 잔고 스냅샷
-    await _save_balance_snapshot(oauth)
+    # 실제 운영만 잔고·체결 장부를 갱신한다.
+    if not args.dry_run:
+        await _save_balance_snapshot(oauth)
 
     while _daemon_hours():
         ts = _now_kst().strftime("%H:%M:%S")
@@ -2103,12 +2826,13 @@ async def _daemon(args):
         if _daemon_hours():
             await asyncio.sleep(args.interval)
 
-    # 장 마감 잔고 스냅샷
-    await _save_balance_snapshot(oauth)
-    # [BAR-OPS-38 P0#5] 당일 체결(실현) 내역 백필 — ka10073 → fill_audit.csv (브로커 권위 체결가)
-    await _eod_fill_backfill(oauth)
-    # [BAR-OPS-39 P1] EOD 보유 매수평단 스냅샷 — 매도 0건인 날에도 반드시 실행(별도 함수)
-    await _eod_buy_snapshot(oauth)
+    if not args.dry_run:
+        # 장 마감 잔고 스냅샷
+        await _save_balance_snapshot(oauth)
+        # [BAR-OPS-38 P0#5] 당일 체결(실현) 내역 백필 — ka10073 → fill_audit.csv.
+        await _eod_fill_backfill(oauth)
+        # [BAR-OPS-39 P1] EOD 보유 매수평단 스냅샷 — 매도 0건인 날에도 실행.
+        await _eod_buy_snapshot(oauth)
     print(f"\n== 장 마감 — 데몬 종료 (매수 {total_bought}건, 매도 {total_sold}건) ==")
 
 
@@ -2127,6 +2851,10 @@ def main():
     )
     ap.add_argument("--dry-run", action="store_true", default=True)
     ap.add_argument("--no-dry-run", action="store_false", dest="dry_run")
+    ap.add_argument(
+        "--entry-only-once", action="store_true",
+        help="필드 배선 확인: 매도·DCA·EOD 없이 일반 진입 스캔 1회(DRY_RUN 전용)",
+    )
     ap.add_argument("--telegram", action="store_true", help="텔레그램 알림")
     ap.add_argument("--audit-log", default=str(_DATA_DIR / "order_audit.csv"))
     ap.add_argument("--pos-log", default=str(_DATA_DIR / "active_positions.json"))
@@ -2166,6 +2894,8 @@ def main():
              "빈 값/none → 일반 전략 비활성(슈퍼트렌드 단독). 예: --strategies '' --supertrend (슈퍼트렌드만 운영).",
     )
     args = ap.parse_args()
+    if args.entry_only_once and not args.dry_run:
+        ap.error("--entry-only-once 는 --dry-run 전용입니다")
 
     # 일반 매수 전략 파싱 + 슈퍼트렌드 이중가동 가드 (BAR-OPS-10).
     # [2026-07-03] BARRO_DAEMON_STRATEGIES env 오버라이드 — crontab 수정 없이(.env.local 소싱)
