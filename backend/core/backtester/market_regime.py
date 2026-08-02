@@ -35,18 +35,26 @@ class MarketRegime(str, Enum):
 REGIME_WEIGHTS: Mapping[MarketRegime, Mapping[str, float]] = {
     MarketRegime.BULL: {
         "swing_38": 1.5,   # 깊은 되돌림 스윙 — 임펄스 빈번한 강세에서 유리
+        # ai_swing = swing_38 진입 로직 상속(단테 교집합 유니버스). 미등록이면
+        # weights.get(s, 1.0)=1.0 이라 BEARISH 필터(<1.0 차단)를 그냥 통과해
+        # 스윙 전략이 하락장에서 오히려 우대되는 비의도 결과가 난다 → 명시 등록.
+        # BULL 만 swing_38(1.5) 보다 보수적인 1.0(중립): min_score 3.0 완화 스타트로
+        # 시그널 품질이 미검증이라 증폭은 shadow 실측 후 승격 검토.
+        "ai_swing": 1.0,
         "f_zone": 1.2,     # 눌림목 반등 — 강세 종목 조정에서 활용
         "sf_zone": 1.2,    # f_zone 강화판
         "gold_zone": 0.5,  # 과매도 매수 — 강세장엔 신호 드뭄, 비중 축소
     },
     MarketRegime.SIDEWAYS: {
         "swing_38": 0.3,   # 깊은 되돌림 패턴 박스권에서 실패 다발 (5/16 검증)
+        "ai_swing": 0.3,   # 진입 판정 동일 상속 → swing_38 과 동일 적용
         "f_zone": 0.7,     # 임펄스 약한 박스권에서 신호 빈약
         "sf_zone": 0.8,
         "gold_zone": 1.0,  # 박스권 되돌림/과매도 강점 — 기본 유지
     },
     MarketRegime.BEARISH: {
         "swing_38": 0.5,   # 하락 추세에서 임펄스 후 회복 어려움
+        "ai_swing": 0.5,   # swing_38 동일 — <1.0 이라 BEARISH best_strategy 필터에 걸려 차단
         "f_zone": 1.0,     # 하락장 PF 2.76 (BAR-29) — 기본 유지
         "sf_zone": 1.0,
         "gold_zone": 1.5,  # 과매도 매수 — 하락장 반등 활용

@@ -1,7 +1,13 @@
 """BAR-OPS-20 — holding_evaluator 테스트 (적응형 매도 포함)."""
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from decimal import Decimal
+from pathlib import Path
+
+import pytest
 
 from backend.core.gateway.kiwoom_native_account import HoldingPosition
 from backend.core.risk.holding_evaluator import (
@@ -281,6 +287,49 @@ class TestHoldingEvaluatorPhaseC:
         assert d.sell_qty == 0
         assert "min" in d.reason or "최소" in d.reason
 
+    def test_ai_swing_hard_sl_precedes_min_hold(self):
+        """ai_swing -5% hard SL은 진입 1일차에도 min_hold보다 먼저 작동한다."""
+        d = evaluate_holding(
+            self._holding(pnl_rate="-5.0"), ExitPolicy(),
+            self._ctx(strategy="ai_swing_v1", days_ago=1),
+        )
+        assert d.signal == SellSignal.STOP_LOSS
+        assert d.sell_qty == 10
+        assert "하드 손절" in d.reason
+
+    def test_ai_swing_min_hold_still_blocks_non_sl(self):
+        d = evaluate_holding(
+            self._holding(pnl_rate="-4.99"), ExitPolicy(),
+            self._ctx(strategy="ai_swing_v1", days_ago=1),
+        )
+        assert d.signal == SellSignal.HOLD
+        assert d.sell_qty == 0
+
+    def test_ai_swing_trailing_matches_exit_plan_peak_price_math(self):
+        """peak +50%, offset 3%면 가격식 발동선은 +45.5%(단순 47%p가 아님)."""
+        ctx = self._ctx(strategy="ai_swing_v1", days_ago=4)
+        ctx.peak_pnl_rate = 50.0
+        ctx.partial_tp_done = True
+
+        hold = evaluate_holding(
+            self._holding(pnl_rate="46.0"), ExitPolicy(), ctx,
+        )
+        hit = evaluate_holding(
+            self._holding(pnl_rate="45.5"), ExitPolicy(), ctx,
+        )
+
+        assert hold.signal == SellSignal.HOLD
+        assert hit.signal == SellSignal.TRAILING_STOP
+
+    def test_swing_38_min_hold_contract_unchanged_below_sl(self):
+        """hard-SL 우선은 ai_swing만 적용하고 기존 swing_38 계약은 건드리지 않는다."""
+        d = evaluate_holding(
+            self._holding(pnl_rate="-20.0"), ExitPolicy(),
+            self._ctx(strategy="swing_38_v1", days_ago=1),
+        )
+        assert d.signal == SellSignal.HOLD
+        assert d.sell_qty == 0
+
     def test_swing_38_max_hold_forces_sell(self):
         """Phase D2: 보유 20일 차 (max=20 도달) — TIME_TIGHTENED_SL 강제 매도."""
         from backend.core.risk.holding_evaluator import (
@@ -298,3 +347,38 @@ class TestHoldingEvaluatorPhaseC:
         )
         p = resolve_policy(ExitPolicy(), "gold_zone_v1")
         assert p.min_hold_days is None and p.max_hold_days is None
+
+
+@pytest.mark.parametrize("raw", ["not-a-number", "NaN", "-Infinity", "-100", "-150"])
+def test_invalid_ai_swing_sl_env_does_not_crash_import(raw):
+    """외부 env 오타가 holding_evaluator import를 죽이지 않고 -5%로 닫힌다."""
+    repo = Path(__file__).resolve().parents[3]
+    env = dict(os.environ, BARRO_AI_SWING_SL_PCT=raw)
+    proc = subprocess.run(
+        [sys.executable, "-c", (
+            "from decimal import Decimal; "
+            "from backend.core.risk.holding_evaluator import STRATEGY_EXIT_PROFILES; "
+            "assert STRATEGY_EXIT_PROFILES['ai_swing']['stop_loss_pct'] == Decimal('-5.0')"
+        )],
+        cwd=repo, env=env, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_ai_swing_live_profile_tracks_exit_plan_env():
+    """env SL을 바꿔도 ExitPlan과 HoldingEvaluator의 숫자 임계는 같다."""
+    repo = Path(__file__).resolve().parents[3]
+    env = dict(os.environ, BARRO_AI_SWING_SL_PCT="-8.0", RF_STOP_ENABLED="0")
+    proc = subprocess.run(
+        [sys.executable, "-c", (
+            "from decimal import Decimal; "
+            "from backend.core.risk.holding_evaluator import STRATEGY_EXIT_PROFILES; "
+            "from backend.core.strategy.ai_swing import AiSwingParams, build_exit_plan; "
+            "p=STRATEGY_EXIT_PROFILES['ai_swing']; "
+            "plan=build_exit_plan(Decimal('100'), AiSwingParams()); "
+            "assert p['stop_loss_pct'] == p['tightened_sl_pct'] == Decimal('-8.0'); "
+            "assert plan.stop_loss.fixed_pct * 100 == p['stop_loss_pct']"
+        )],
+        cwd=repo, env=env, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr

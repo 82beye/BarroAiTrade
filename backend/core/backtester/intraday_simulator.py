@@ -283,6 +283,21 @@ def _build_strategies(
                 min_atr_pct=0.035,
                 max_hold_days=3,
             ), "closing_bet", params_override)))
+        elif sid == "ai_swing":
+            from backend.core.strategy.ai_swing import AiSwingParams, AiSwingStrategy
+
+            # 단테 교집합 스윙 — 진입 판정은 swing_38 상속, 청산은 build_exit_plan 단일 원천.
+            #   swing_38 분기와 동일한 운영 게이트(일봉 강제·ATR 0.035·진입컷오프 14:00)를
+            #   두되 min_score 는 AiSwingParams 기본값(3.0 완화 스타트)을 그대로 쓴다 —
+            #   단테 교집합(유니버스 축소) + 스윙 이중 게이트로 발화가 0 이 될 위험 때문.
+            # ★ 청산은 _exit_plan_for_strategy 의 ai_swing 분기가 이 인스턴스의 params 를
+            #   읽어 라이브와 동일한 TP/SL/BE/보유기간 게이트를 시뮬에 싣는다(F1 해소).
+            #   min/max_hold_days 는 AiSwingParams(=Swing38Params) 기본값 3/20.
+            out.append(AiSwingStrategy(_ov_params(AiSwingParams(
+                min_atr_pct=0.035,
+                entry_time_cutoff=dtime(14, 0),
+                require_daily_candles=True,
+            ), "ai_swing", params_override)))
         else:
             raise ValueError(f"unknown strategy: {sid}")
     return out
@@ -406,6 +421,7 @@ class IntradaySimulator:
                     current_plan = _exit_plan_for_strategy(
                         sid, entry_price, window,
                         f_zone_atr=self._f_zone_atr, early_tp=self._early_exit_tp,
+                        strategy_obj=strategy,
                     )
                     trades.append(TradeRecord(
                         strategy_id=sid, symbol=symbol, side="buy",
@@ -445,6 +461,7 @@ class IntradaySimulator:
                             current_plan = _exit_plan_for_strategy(
                                 sid, entry_price, window,
                                 f_zone_atr=self._f_zone_atr, early_tp=self._early_exit_tp,
+                                strategy_obj=strategy,
                             )
                             trades.append(TradeRecord(
                                 strategy_id=sid, symbol=symbol, side="buy",
@@ -748,9 +765,11 @@ def _exit_plan_for_strategy(
     time_stages: Optional[list[tuple[int, Decimal]]] = None,
     high_momentum_sl_mult: Optional[Decimal] = None,
     early_tp: bool = False,
+    strategy_obj: Any = None,
 ) -> ExitPlan:
     """전략별 ExitPlan 분기 — '100% 중복은 공유, 나머지는 별도' 원칙.
 
+    - ai_swing: **전략 자신의 build_exit_plan()** (라이브와 동일 임계 — 아래 ★ 참조)
     - sf_zone: ATR 기반 동적 TP·SL (변동성 적응)
     - f_zone + f_zone_atr=True: sf_zone 과 동일 ATR plan (실험 옵션)
     - 그 외 (f_zone 기본, gold_zone, swing_38, scalping_consensus): 고정 +3/+5/+7%, −1.5%
@@ -761,7 +780,22 @@ def _exit_plan_for_strategy(
     - high_momentum_sl_mult: 진입 직전 일봉 change_pct ≥ 15% 시 SL 폭 ×배율 (C)
     - early_tp (BAR-OPS-09 Phase B): TP 첫 tier 임계 절반 + qty 0.30 → 작은 익절 잠금.
       _scaled_exit_plan / _sfzone_atr_exit_plan 두 분기 모두 전파.
+    - strategy_obj (2026-07-30): run() 루프의 전략 인스턴스. ai_swing 분기가 그 params
+      (params_override 스윕 반영본)를 읽기 위해서만 쓴다. None 이면 기존 경로 그대로.
     """
+    # ★ ai_swing — 시뮬 청산을 라이브와 일치시키는 유일한 분기.
+    #   나머지 전략은 시뮬 전용 고정 임계(+3/+5/+7%·-1.5%)로 도는데, 그 결과 swing_38 은
+    #   라이브(TP +20/+50%·SL -15%·min_hold 3·max_hold 20)와 청산 정책이 어긋나 백테스트가
+    #   운영을 대변하지 못했다. ai_swing 은 전략의 build_exit_plan() 을 그대로 써서
+    #   min/max_hold_days 까지 plan 에 실어 보낸다 → ExitEngine 보유기간 게이트가 시뮬에서도
+    #   작동한다(exit_engine.py 의 max_hold→TIME_EXIT / min_hold→평가차단).
+    #   ※ _apply_rf_stop 을 재적용하지 않는다 — build_exit_plan 이 이미 resolve_sl_pct 를
+    #     적용하므로 이중 보정이 된다(결과는 idempotent 이나 의도를 분명히 한다).
+    if strategy_id == "ai_swing" and strategy_obj is not None:
+        from backend.core.strategy.ai_swing import build_exit_plan
+
+        return build_exit_plan(entry_price, strategy_obj.params)
+
     if strategy_id == "sf_zone" or (strategy_id == "f_zone" and f_zone_atr):
         plan = _sfzone_atr_exit_plan(
             entry_price, candles_window,

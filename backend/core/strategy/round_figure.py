@@ -152,7 +152,9 @@ def rf_dry_run() -> bool:
 
 def _max_stop_for(strategy_id: str) -> float:
     key = (strategy_id or "").split("_v")[0]
-    if key.startswith("swing"):
+    # "ai_swing_v1" → key "ai_swing" 은 startswith("swing") 이 False 다 → 명시 매칭이
+    # 없으면 인트라데이 상한(0.04)으로 클램프돼 스윙 SL -15% 가 -4% 로 조여진다.
+    if key.startswith("swing") or key == "ai_swing":
         return _float_env("RF_MAX_STOP_PCT_SWING", 0.15)
     return _float_env("RF_MAX_STOP_PCT_INTRADAY", 0.04)
 

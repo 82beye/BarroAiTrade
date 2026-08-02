@@ -20,6 +20,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
 from backend.core.gateway.kiwoom_native_account import HoldingPosition
+from backend.core.strategy.ai_swing import AiSwingParams, _sl_fraction_from_env
 from backend.core.strategy.round_figure import resolve_sl_pct
 
 if TYPE_CHECKING:  # 런타임 미import (backtester ↔ risk 순환 회피). 훅은 duck-typing 사용.
@@ -103,6 +104,9 @@ class ExitPolicy:
 #
 #   swing_38 (Phase D2 multi-day) 는 ExitEngine SL=-15% 와 본 profile SL=-15%
 #   가 동일 — 의도된 격차는 intraday 단타 전략에만 적용.
+_AI_SWING_PARAMS = AiSwingParams()
+_AI_SWING_SL_PCT = _sl_fraction_from_env(_AI_SWING_PARAMS.sl_pct) * Decimal("100")
+
 STRATEGY_EXIT_PROFILES: dict[str, dict] = {
     "f_zone": {
         "stop_loss_pct": Decimal("-4.0"),
@@ -168,6 +172,30 @@ STRATEGY_EXIT_PROFILES: dict[str, dict] = {
         "tightened_sl_pct": Decimal("-3.0"),
         "min_hold_days": 1,
         "max_hold_days": 3,
+    },
+    # 단테 교집합 스윙(ai_swing) — swing_38 프로파일 계승, SL env 만 분리.
+    # resolve_policy() 가 strategy.replace("_v1","") 하므로 "ai_swing_v1" → "ai_swing"
+    # 으로 매칭된다. 값은 swing_38 Phase D2 그리드 최적(S6 2D + S7 필터) 복제이며,
+    # SL env 만 BARRO_AI_SWING_SL_PCT 로 분리해 swing_38 운영 튜닝이 ai_swing 청산을
+    # 오염시키지 않게 했다 (backend/core/strategy/ai_swing.py 와 동일 기준).
+    # ai_swing 포지션(strategy_id=ai_swing_v1)이 생겨야 매칭 — 그 전엔 inert(라이브 무영향).
+    # 2026-07-30 그리드 실측 최적 적용 (사용자 승인). 초기값은 swing_38 계승
+    # (SL -15 / trail 20·5) 이었으나 27/27 PASS · 3-seed 평균 +2.172%(계승값 +0.309%)
+    # 조합으로 교체했다. 숫자 임계는 아래에서 AiSwingParams 로부터 직접 만든다 —
+    # 라이브는 두 경로(ExitEngine=분봉 plan / HoldingEvaluator=브로커 pnl_rate)로 청산을
+    # 평가하므로 복제 리터럴이 어긋나면 경로에 따라 청산 시점이 달라진다.
+    # 실측: docs/04-report/features/2026-07-30-ai-swing-p0.report.md §3-4
+    "ai_swing": {
+        "stop_loss_pct": _AI_SWING_SL_PCT,
+        "take_profit_pct": _AI_SWING_PARAMS.tp2_pct * Decimal("100"),
+        "partial_tp_pct": _AI_SWING_PARAMS.tp1_pct * Decimal("100"),
+        "partial_tp_ratio": _AI_SWING_PARAMS.tp1_qty,
+        "trailing_start_pct": _AI_SWING_PARAMS.trail_start_pct * Decimal("100"),
+        "trailing_offset_pct": _AI_SWING_PARAMS.trail_offset_pct * Decimal("100"),
+        "breakeven_trigger_pct": _AI_SWING_PARAMS.be_pct * Decimal("100"),
+        "tightened_sl_pct": _AI_SWING_SL_PCT,
+        "min_hold_days": _AI_SWING_PARAMS.min_hold_days,
+        "max_hold_days": _AI_SWING_PARAMS.max_hold_days,
     },
 }
 
@@ -292,9 +320,16 @@ def evaluate_holding(
     peak = Decimal(str(ctx.peak_pnl_rate))
     days = _hold_days(ctx.entry_time)
 
+    # ExitPlan 과 같은 SL 원천(전략 profile + round-figure 보정)을 한 번만 계산한다.
+    base_sl = policy.stop_loss_pct
+    if ctx.strategy:
+        base_sl = resolve_sl_pct(
+            ctx.strategy, float(h.avg_buy_price), base_sl,
+            unit="percent", symbol=h.symbol)
+
     # ── 0-α. BAR-OPS-09 Phase C (2026-05-27) — 보유 기간 게이트 (swing 전략) ──
     # max_hold_days 도달 시 강제 매도 (손익 무관, 우선순위 최고)
-    # min_hold_days 미달 시 모든 청산 평가 차단 (HOLD 반환)
+    # ai_swing hard SL 은 min_hold 보다 먼저 평가하고, 나머지는 기존 계약을 보존한다.
     if policy.max_hold_days is not None and days >= policy.max_hold_days:
         return HoldingDecision(
             symbol=h.symbol, name=h.name, qty=qty, sell_qty=qty,
@@ -302,6 +337,15 @@ def evaluate_holding(
             pnl=h.pnl, pnl_rate=rate,
             signal=SellSignal.TIME_TIGHTENED_SL,
             reason=f"swing 최대 보유 {days}일 ≥ max {policy.max_hold_days}일 → 강제 매도",
+        )
+    strategy_key = (ctx.strategy or "").replace("_v1", "").replace("_v2", "")
+    if strategy_key == "ai_swing" and rate <= base_sl:
+        return HoldingDecision(
+            symbol=h.symbol, name=h.name, qty=qty, sell_qty=qty,
+            avg_buy_price=h.avg_buy_price, cur_price=h.cur_price,
+            pnl=h.pnl, pnl_rate=rate,
+            signal=SellSignal.STOP_LOSS,
+            reason=f"AI스윙 하드 손절: 수익률 {float(rate):.1f}% <= SL {float(base_sl):.1f}%",
         )
     if policy.min_hold_days is not None and days < policy.min_hold_days:
         return HoldingDecision(
@@ -350,7 +394,20 @@ def evaluate_holding(
     # ── 1. 트레일링 스톱 (고점 추적 매도) ──────────────────────────
     # peak이 trailing_start 이상 도달했었고,
     # 현재 수익률이 peak에서 offset만큼 하락했으면 매도
-    if peak >= policy.trailing_start_pct and rate < peak - policy.trailing_offset_pct:
+    trail_threshold = peak - policy.trailing_offset_pct
+    if strategy_key == "ai_swing":
+        # ExitPlan은 peak 가격에서 offset%를 곱해 내린다. 수익률 %p 차감은
+        # 고수익 구간에서 더 타이트해지므로 같은 가격식으로 환산한다.
+        trail_threshold = (
+            (Decimal("1") + peak / Decimal("100"))
+            * (Decimal("1") - policy.trailing_offset_pct / Decimal("100"))
+            - Decimal("1")
+        ) * Decimal("100")
+    trail_hit = (
+        rate <= trail_threshold if strategy_key == "ai_swing"
+        else rate < trail_threshold
+    )
+    if peak >= policy.trailing_start_pct and trail_hit:
         return HoldingDecision(
             symbol=h.symbol, name=h.name, qty=qty, sell_qty=qty,
             avg_buy_price=h.avg_buy_price, cur_price=h.cur_price,
@@ -358,7 +415,7 @@ def evaluate_holding(
             signal=SellSignal.TRAILING_STOP,
             reason=(
                 f"트레일링 스톱: 고점 {float(peak):.1f}% → 현재 {float(rate):.1f}% "
-                f"(하락폭 {float(peak - rate):.1f}% > 허용 {float(policy.trailing_offset_pct):.1f}%)"
+                f"(발동선 {float(trail_threshold):.1f}%, offset {float(policy.trailing_offset_pct):.1f}%)"
             ),
         )
 
@@ -412,11 +469,6 @@ def evaluate_holding(
     #   3) fallback → stop_loss_pct
     # 라운드피겨 손절 보정(RF) — default OFF. 진입단가 기준 라운드 지지선 아래로 base SL 을
     # 넓힘. 단 보유기간 강화(tightened)·시간단계(sl_time_stages)는 그대로 우선(더 엄격 우선).
-    base_sl = policy.stop_loss_pct
-    if ctx.strategy:
-        base_sl = resolve_sl_pct(
-            ctx.strategy, float(h.avg_buy_price), base_sl,
-            unit="percent", symbol=h.symbol)
     effective_sl = base_sl
     time_note = ""
     if days >= policy.hold_days_tighten:
