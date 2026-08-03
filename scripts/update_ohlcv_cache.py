@@ -32,9 +32,12 @@ from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger(__name__)
+# 전종목 갱신 시 httpx의 요청별 INFO 1,000여 줄은 진행률을 묻어버린다.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # repo_root/data/ohlcv_cache — 이 파일: <repo_root>/scripts/update_ohlcv_cache.py
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+_DEFAULT_SYMBOL_MASTER = _REPO_ROOT / "data" / "stock_names.json"
 
 
 def _default_cache_dir() -> str:
@@ -59,6 +62,17 @@ def _build_oauth() -> KiwoomNativeOAuth:
     )
 
 
+def safe_base_date(now: datetime | None = None) -> date:
+    """장중에는 미완성 당일봉을 피하고 직전 평일을 ka10081 기준일로 사용."""
+    current = (now or datetime.now(KST)).astimezone(KST)
+    candidate = current.date()
+    if current.time() < dtime(15, 30):
+        candidate -= timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate -= timedelta(days=1)
+    return candidate
+
+
 def load_cache_file(filepath: str) -> list[dict] | None:
     try:
         with open(filepath, "r", encoding="utf-8") as f:
@@ -80,7 +94,7 @@ def get_gap_days(records: list[dict]) -> int:
     dates = [r["date"] for r in records]
     latest = max(dates)  # YYYYMMDD string
     latest_dt = datetime.strptime(latest, "%Y%m%d").date()
-    return (date.today() - latest_dt).days
+    return (datetime.now(KST).date() - latest_dt).days
 
 
 def merge_records(existing: list[dict], new_ohlcv: list) -> list[dict]:
@@ -101,14 +115,45 @@ def merge_records(existing: list[dict], new_ohlcv: list) -> list[dict]:
     return sorted(by_date.values(), key=lambda r: r["date"])
 
 
-async def run(cache_dir: str) -> None:
+def load_symbols(cache_dir: str, symbol_master: str | None = None) -> list[str]:
+    """기존 캐시와 종목명 마스터의 합집합으로 동기화 대상을 만든다.
+
+    과거 구현은 캐시에 이미 존재하는 파일만 갱신해, 새 저장소의 빈 캐시가 영원히
+    2종목에 머무는 부트스트랩 결함이 있었다. ka10099로 생성한 stock_names.json을
+    함께 읽으면 첫 EOD 실행부터 전종목 캐시를 만들 수 있다.
+    """
+    existing = {
+        f.removesuffix(".json")
+        for f in os.listdir(cache_dir)
+        if f.endswith(".json") and f != "meta.json"
+    }
+    master_path = Path(symbol_master) if symbol_master else _DEFAULT_SYMBOL_MASTER
+    master: set[str] = set()
+    try:
+        with open(master_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if isinstance(payload, dict):
+            master = {
+                str(symbol).split("_", 1)[0].strip()
+                for symbol in payload if str(symbol).strip()
+            }
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        logger.warning("종목명 마스터 로드 실패 — 기존 캐시 종목만 갱신: %s", master_path)
+    return sorted(existing | master)
+
+
+async def run(
+    cache_dir: str, symbol_master: str | None = None,
+    base_date: date | None = None,
+) -> None:
     oauth = _build_oauth()
     fetcher = KiwoomNativeCandleFetcher(oauth=oauth, rate_limit_seconds=0.55)
+    resolved_base_date = base_date or safe_base_date()
+    base_dt = resolved_base_date.strftime("%Y%m%d")
 
-    # 캐시 디렉토리에서 종목 코드 목록 추출
-    json_files = [f for f in os.listdir(cache_dir) if f.endswith(".json") and f != "meta.json"]
-    symbols = [f.replace(".json", "") for f in json_files]
-    logger.info(f"캐시 종목 수: {len(symbols)}")
+    # 캐시 파일 + 종목명 마스터 합집합. 빈/부분 캐시도 첫 실행에 부트스트랩한다.
+    symbols = load_symbols(cache_dir, symbol_master)
+    logger.info(f"동기화 대상 종목 수: {len(symbols)}")
 
     updated = 0
     skipped = 0
@@ -147,7 +192,7 @@ async def run(cache_dir: str) -> None:
                 )
 
         try:
-            candles = await fetcher.fetch_daily(symbol)
+            candles = await fetcher.fetch_daily(symbol, base_dt=base_dt)
             if not candles:
                 failed += 1
                 continue
@@ -167,7 +212,7 @@ async def run(cache_dir: str) -> None:
 
     # meta.json 업데이트
     meta = {
-        "updated": date.today().isoformat(),
+        "updated": datetime.now(KST).date().isoformat(),
         "count": updated,
         "total_requested": len(symbols),
         "failed": failed,
@@ -175,6 +220,7 @@ async def run(cache_dir: str) -> None:
         "new_days_added": new_days,
         "elapsed_seconds": round(elapsed, 1),
         "api_method": "ka10081",
+        "data_as_of": resolved_base_date.isoformat(),
     }
     meta_path = os.path.join(cache_dir, "meta.json")
     with open(meta_path, "w", encoding="utf-8") as f:
@@ -193,12 +239,17 @@ def main():
         default=_default_cache_dir(),
         help="OHLCV 캐시 디렉토리 (기본: BARRO_OHLCV_CACHE_DIR 또는 <repo_root>/data/ohlcv_cache)",
     )
+    ap.add_argument(
+        "--symbol-master",
+        default=str(_DEFAULT_SYMBOL_MASTER),
+        help="부트스트랩 종목 마스터 JSON (기본: data/stock_names.json)",
+    )
     args = ap.parse_args()
 
     if not os.path.isdir(args.cache_dir):
         raise SystemExit(f"캐시 디렉토리 없음: {args.cache_dir}")
 
-    asyncio.run(run(args.cache_dir))
+    asyncio.run(run(args.cache_dir, args.symbol_master))
 
 
 if __name__ == "__main__":

@@ -73,6 +73,19 @@ def start_scheduler() -> AsyncIOScheduler:
         misfire_grace_time=300,  # 5분 내 실행 지연 허용
     )
 
+    # 개장 전 종목 스캔 + 팀 상승예측 + 전략 최적화 브리핑 (평일 08:25 KST).
+    # 데이터 성격상 하루 1회이며 실패할 때만 subprocess 내부에서 5분 재시도한다.
+    try:
+        from backend.core.scheduler.premarket_briefing_jobs import (
+            register_premarket_briefing_jobs,
+        )
+
+        _premarket_ids = register_premarket_briefing_jobs(_scheduler)
+        if _premarket_ids:
+            logger.info("개장 전 Telegram 브리핑 잡 등록: %s", _premarket_ids)
+    except Exception as e:
+        logger.warning("개장 전 Telegram 브리핑 잡 등록 실패: %s", e)
+
     # 테마 스냅숏 잡 (10:00/12:30/15:35 KST) — BARRO_THEME_SNAPSHOT_ENABLED=1 일 때만
     # 등록(기본 OFF). 관측용 add-on 이며 실패해도 라이브 경로 무영향(선택적 기능).
     try:
