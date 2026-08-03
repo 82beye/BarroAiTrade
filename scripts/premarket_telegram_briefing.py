@@ -370,6 +370,8 @@ def main() -> int:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    # httpx INFO에는 Telegram bot token이 포함된 요청 URL이 기록될 수 있다.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     parser = argparse.ArgumentParser(description="개장 전 Telegram 종목/예측/전략 브리핑")
     parser.add_argument("--dry-run", action="store_true", help="생성·출력만 하고 Telegram 미발송")
     parser.add_argument("--force", action="store_true", help="당일 중복 방지 상태를 무시하고 재발송")
