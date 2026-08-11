@@ -188,6 +188,9 @@ export const api = {
   getThemeMarketAggregates: (limit?: number) =>
     apiClient.get('/api/themes/market-aggregates/latest', { params: { limit } }),
 
+  // ai_swing 전략 활성화 현황 (읽기 전용 — 주문 경로 미접촉)
+  getAiSwingStatus: () => apiClient.get<AiSwingStatus>('/api/ai-swing/status'),
+
   // ── 티마 P1 — 알림센터 / 스냅숏 / 종목상세 / 티커 ──
   getAlertsHistory: (strategy?: string, limit?: number) =>
     apiClient.get('/api/alerts/history', { params: { strategy, limit } }),
@@ -551,4 +554,99 @@ export interface RealizedPnlResponse {
     total_tax: number;
     trading_days: number;
   };
+}
+
+// ── ai_swing 전략 활성화 현황 (GET /api/ai-swing/status — 읽기 전용) ──
+// 백엔드는 어떤 실패에도 200 + status 강등으로 답한다. 프론트는 값을 만들어 내지 않고
+// status/reason 을 그대로 표시한다(§8).
+export interface AiSwingGate {
+  id: string;
+  label: string;
+  env: string;
+  value: string;
+  ok: boolean;
+}
+
+export interface AiSwingUniverseItem {
+  symbol: string;
+  name: string;
+  rank_combined: number;
+  scan_score: number;
+  pred_score: number;
+  pred_rank: number;
+  confidence: number;
+  consensus_level: string;
+  blue_line_status: string;
+  volume_ratio: number;
+  watermelon_signal: boolean;
+}
+
+export interface AiSwingPosition {
+  symbol: string;
+  name: string;
+  entry_price: number;
+  entry_time: string;
+  filled_qty: number;
+  total_recommended_qty: number;
+  sl_pct: number;
+  peak_pnl_rate: number;
+}
+
+export interface AiSwingSignal {
+  symbol: string;
+  name: string;
+  entry_price: number;
+  sl_price: number;
+  tp1_price: number;
+  score: number;
+  reason: string;
+}
+
+export interface AiSwingStatus {
+  /** ok = 정상 · disabled = 대시보드 플래그 OFF · no_data = 설정/데이터 강등 */
+  status: 'ok' | 'disabled' | 'no_data';
+  as_of: string;
+  reason?: string;
+  /** 5중 게이트 + LIVE_TRADING 이 전부 열렸는가 */
+  entry_active?: boolean;
+  gates?: AiSwingGate[];
+  config?: {
+    budget_ratio: number;
+    max_positions: number;
+    max_age_h: number;
+    allow_stale: boolean;
+    fallback: string;
+    live_trading: boolean;
+    broker_mode: 'mock' | 'real' | 'unknown';
+  };
+  config_source?: { path: string; as_of: string; reason: string };
+  /** `.env.local`(다음 데몬 실행값) 과 백엔드 프로세스 env 의 차이 */
+  config_mismatch?: { env: string; env_local: string; process: string }[];
+  universe?: {
+    status: string;
+    reason: string;
+    as_of?: string;
+    scan_date?: string;
+    pred_date?: string;
+    scan_count?: number;
+    pred_count?: number;
+    intersect_count?: number;
+    items: AiSwingUniverseItem[];
+    truncated?: boolean;
+  };
+  /** 오늘 원본 신선도 게이트 — 실진입 허용 여부 */
+  entry_ready?: { ok: boolean; reason: string };
+  positions?: { status: string; reason: string; items: AiSwingPosition[]; total_positions?: number };
+  shadow?: {
+    status: string;
+    reason: string;
+    as_of?: string;
+    universe_status?: string;
+    universe_reason?: string;
+    evaluated?: number;
+    signal_count?: number;
+    skipped_count?: number;
+    signals: AiSwingSignal[];
+  };
+  shadow_history_days?: number;
 }

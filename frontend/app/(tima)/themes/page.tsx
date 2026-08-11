@@ -4,6 +4,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Disclaimer } from '@/components/layout/disclaimer';
 import { ThemeCardView } from '@/components/themes/theme-card';
 import {
+  AiSwingDock,
+  AiSwingDrawer,
+  AiSwingDrawerButton,
+  useAiSwingStatus,
+} from '@/components/ai-swing/ai-swing-panel';
+import {
   api,
   type ThemeStockItem,
   type ThemeSnapshot,
@@ -315,8 +321,12 @@ export default function ThemesPage() {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [showAiSwing, setShowAiSwing] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadingRef = useRef(false);
+
+  // ai_swing 현황은 여기서 1회만 폴링하고 도크·드로어가 같은 결과를 공유한다.
+  const aiSwing = useAiSwingStatus();
 
   const rankedThemes = useMemo(
     () => buildThemeCardItems(themes, themeStocks, aggregates),
@@ -404,14 +414,21 @@ export default function ThemesPage() {
 
   return (
     <div className="p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <button
-          onClick={() => setShowTimeline(true)}
-          className="flex items-center gap-1 rounded-full border border-tima-line bg-white px-3 py-1 text-xs font-semibold text-tima-text"
-        >
-          🕐 타임라인
-        </button>
-        <span className="text-[11px] text-tima-sub">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setShowTimeline(true)}
+            className="flex items-center gap-1 rounded-full border border-tima-line bg-white px-3 py-1 text-xs font-semibold text-tima-text"
+          >
+            🕐 타임라인
+          </button>
+          {/* xl 미만에서만 노출 — xl 이상은 우측 도크가 상시 표시 */}
+          <AiSwingDrawerButton
+            onClick={() => setShowAiSwing(true)}
+            active={aiSwing.data?.entry_active === true}
+          />
+        </div>
+        <span className="shrink-0 text-[11px] text-tima-sub">
           {lastUpdated ? `${lastUpdated.toLocaleTimeString('ko-KR')} · 15초 갱신` : '15초 자동 갱신'}
         </span>
       </div>
@@ -440,6 +457,10 @@ export default function ThemesPage() {
       <Disclaimer />
 
       {showTimeline && <TimelineModal onClose={() => setShowTimeline(false)} />}
+
+      {/* ai_swing 활성화 현황 — 데스크톱 우측 도크 + 좁은 화면 드로어 */}
+      <AiSwingDock {...aiSwing} />
+      <AiSwingDrawer open={showAiSwing} onClose={() => setShowAiSwing(false)} {...aiSwing} />
     </div>
   );
 }
