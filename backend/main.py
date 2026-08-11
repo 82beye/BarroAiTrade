@@ -108,6 +108,7 @@ from backend.api.routes.screener import router as screener_router  # tima P0
 from backend.api.routes.alerts import router as alerts_router  # tima P1
 from backend.api.routes.search import router as search_router  # tima P2
 from backend.api.routes.stocks import router as stocks_router  # 티마 종목상세
+from backend.api.routes.ai_swing import router as ai_swing_router  # ai_swing 현황(읽기 전용)
 
 app.include_router(signals_router, prefix="/api")
 app.include_router(risk_router, prefix="/api")
@@ -121,6 +122,9 @@ app.include_router(logs_router, prefix="/api")
 app.include_router(screener_router, prefix="/api")  # tima P0: 스크리너 + 차트 기준선
 app.include_router(alerts_router, prefix="/api")  # tima P1: 알림내역 + Push 설정
 app.include_router(search_router, prefix="/api")  # tima P2: 통합검색 (종목/테마)
+# ai_swing 활성화 현황 (읽기 전용·주문 경로 미접촉). 라우트는 항상 등록하되 응답은
+# BARRO_AI_SWING_DASHBOARD_ENABLED 로 default-OFF (§2 S3) — 미설정 시 status="disabled".
+app.include_router(ai_swing_router, prefix="/api")
 # themes/calendar/news 라우트는 경로에 /api/ 포함 — prefix 없이 등록
 app.include_router(tcn_router)
 # admin 라우터는 APIRouter(prefix="/api/admin") 내장 — 추가 prefix 불필요
