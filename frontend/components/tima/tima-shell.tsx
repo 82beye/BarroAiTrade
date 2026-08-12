@@ -117,6 +117,12 @@ export function TimaShell({ children }: { children: ReactNode }) {
   const [clock, setClock] = useState('');
   const showBottomTicker = !pathname.startsWith('/stocks/');
   const showSearch = pathname === '/themes';
+  // ai_swing 도크는 테마 보드에서만 렌더된다(`/themes/[id]` 상세 제외). 도크가 있는
+  // 화면에서만 바깥 컨테이너 오른쪽에 도크 자리(336px)를 비워, 프레임의 `mx-auto`
+  // 가운데 정렬이 결과적으로 프레임을 왼쪽으로 밀게 한다. 폭·오프셋 유도와
+  // "transform 을 쓰지 않는 이유"는 components/ai-swing/ai-swing-panel.tsx 상단 참조.
+  // 336px 은 그쪽 도크 폭(320)+간격(16)과 함께 움직인다 — 하나만 바꾸지 말 것.
+  const reserveDockSlot = pathname === '/themes';
 
   // 시각 1분 갱신 (SSR 불일치 회피 위해 마운트 후 세팅)
   useEffect(() => {
@@ -131,7 +137,11 @@ export function TimaShell({ children }: { children: ReactNode }) {
   }, [pathname]);
 
   return (
-    <div className="tima-viewport bg-neutral-900">
+    <div
+      className={`tima-viewport bg-neutral-900 ${
+        reserveDockSlot ? 'min-[800px]:pr-[336px]' : ''
+      }`}
+    >
       <div className="tima-viewport-frame relative mx-auto flex w-full max-w-[430px] flex-col overflow-hidden bg-tima-bg text-tima-text shadow-2xl">
         {/* ── 상단 고정 셸 ── */}
         <header
