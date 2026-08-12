@@ -533,9 +533,25 @@ function PanelHeader({ data, onClose }: { data: AiSwingStatus | null; onClose?: 
   );
 }
 
+/* ── 도크 배치 상수 (여기가 단일 진실원천) ───────────────────────────────────
+ * 폰 프레임을 왼쪽으로 밀고 도크를 그 오른쪽에 나란히 둔다. 프레임을 옮기는 일은
+ * `TimaShell` 이 바깥 컨테이너의 padding-right 로 도크 자리를 비워서 한다 —
+ * 프레임의 `mx-auto` 가 남은 폭 안에서 가운데 정렬되므로 결과적으로 왼쪽으로 밀린다.
+ *
+ *   프레임 F=430 · 간격 G=16 · 도크 D=320  →  최소 요구 폭 F+G+D = 766px
+ *   TimaShell padding-right = D + G           = 336px   (min-[800px]:pr-[336px])
+ *   도크 left               = 50% + (F-D+G)/2 = 50% + 63px
+ *   ⇒ 좌우 여백 = V/2 - 383 로 좌우 대칭. 800px 에서 양옆 17px 확보.
+ *
+ * ★ transform(translateX)으로 프레임을 밀지 않는다 — 조상에 transform 이 생기면
+ *   position:fixed 인 이 도크의 기준이 뷰포트가 아니라 그 조상이 되어 배치가 깨진다.
+ * ★ 아래 320px/63px 과 TimaShell 의 336px 은 함께 움직인다. 하나만 바꾸지 말 것.
+ *   (backend/tests 가 아닌 육안 검증 대상 — 폭 800/1000/1792px 에서 확인한다)
+ * ─────────────────────────────────────────────────────────────────────────── */
+
 /**
- * 데스크톱 도크 — 폰 프레임(430px) 오른쪽 여백에 고정. xl(1280px) 미만에서는 숨기고
- * 그 아래 폭에서는 `AiSwingDrawer` 로 연다(모바일 레이아웃 무영향).
+ * 데스크톱 도크 — 프레임 오른쪽에 나란히 고정. 800px 미만에서는 자리가 물리적으로
+ * 안 나오므로(766px 필요) 숨기고 `AiSwingDrawer` 로 연다(모바일 레이아웃 무영향).
  */
 export function AiSwingDock(props: {
   data: AiSwingStatus | null;
@@ -544,8 +560,8 @@ export function AiSwingDock(props: {
 }) {
   return (
     <aside
-      className="fixed top-4 bottom-4 z-40 hidden w-[330px] flex-col overflow-hidden rounded-xl border border-tima-line bg-white shadow-2xl xl:flex"
-      style={{ left: 'calc(50% + 231px)' }}
+      className="fixed bottom-4 top-4 z-40 hidden w-[320px] flex-col overflow-hidden rounded-xl border border-tima-line bg-white shadow-2xl min-[800px]:flex"
+      style={{ left: 'calc(50% + 63px)' }}
       aria-label="ai_swing 활성화 현황"
     >
       <PanelHeader data={props.data} />
@@ -571,7 +587,7 @@ export function AiSwingDrawer({
   const close = useCallback(() => onClose(), [onClose]);
   if (!open) return null;
   return (
-    <div className="absolute inset-0 z-50 xl:hidden" onClick={close}>
+    <div className="absolute inset-0 z-50 min-[800px]:hidden" onClick={close}>
       <div className="absolute inset-0 bg-black/40" />
       <div
         className="absolute right-0 top-0 flex h-full w-[85%] max-w-[340px] flex-col bg-white shadow-2xl"
@@ -586,7 +602,7 @@ export function AiSwingDrawer({
   );
 }
 
-/** 드로어 열기 버튼 — 테마 보드 상단바용. xl 이상에서는 도크가 상시 보이므로 숨긴다. */
+/** 드로어 열기 버튼 — 테마 보드 상단바용. 800px 이상에서는 도크가 상시 보이므로 숨긴다. */
 export function AiSwingDrawerButton({
   onClick,
   active,
@@ -597,7 +613,7 @@ export function AiSwingDrawerButton({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold xl:hidden ${
+      className={`flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold min-[800px]:hidden ${
         active
           ? 'border-tima-teal bg-tima-teal text-black'
           : 'border-tima-line bg-white text-tima-text'
