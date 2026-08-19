@@ -241,6 +241,40 @@ def _manual_hold_held() -> set[str]:
         return set()
 
 
+def _skip_untagged_autosell() -> bool:
+    """전략 태그 없는 수동매매 보유분을 장중 자동 손절에서 뺄지 (기본 0 = 기존 동작).
+
+    [2026-08-20 사용자 지시] 장부(active_positions.json)에 전략이 없는 보유분은 사용자가
+    직접 산 종목이다. 데몬의 EOD 강제트림(`_force_close_skip` ②)과 evaluate_holdings 의
+    SL 평가는 이미 이 종목들을 빼는데, **장중 자동 손절 경로만 빠져 있었다** — 그래서
+    수동매매 종목이 시스템 기본 정책 SL 로 팔려나갈 수 있었다. 그 구멍을 막는다.
+
+    `manual_hold_symbols.json`(명시 목록)과 목적은 같으나 대상이 다르다: 저쪽은 사람이
+    직접 적어 넣은 종목, 이쪽은 "장부에 없으니 시스템이 산 게 아니다"로 자동 판별한다.
+    """
+    return os.environ.get("BARRO_SKIP_UNTAGGED_AUTOSELL", "0").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _untagged_symbols(holdings, active_positions) -> set[str]:
+    """장부에 전략 태그가 없는 보유 심볼 = 시스템이 사지 않은 수동매매 종목.
+
+    "없다"의 판정은 두 가지다 — ① 장부에 항목 자체가 없다 ② 항목은 있으나 strategy 가
+    빈 문자열/None 이다. 둘 다 자동 전략의 소유가 아니므로 같게 취급한다
+    (evaluate_holdings.py 의 동일 판정과 규칙을 맞춘다).
+    """
+    out: set[str] = set()
+    for h in (holdings or []):
+        sym = str(getattr(h, "symbol", "") or "")
+        if not sym:
+            continue
+        pos = (active_positions or {}).get(sym)
+        if not pos or not str(getattr(pos, "strategy", "") or "").strip():
+            out.add(sym)
+    return out
+
+
 def _build_oauth() -> KiwoomNativeOAuth:
     app_key = os.environ.get("KIWOOM_APP_KEY", "")
     app_secret = os.environ.get("KIWOOM_APP_SECRET", "")
@@ -940,6 +974,17 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     decisions = evaluate_all(balance.holdings, policy, contexts)
     # [사용자 요청 2026-06-18] 종베 보유분 + [2026-06-22] 수동관리 보유분(예스티 등)은 자동청산 제외 — 수동매도 전용.
     _no_autosell = _closing_bet_held() | _manual_hold_held()
+    # [2026-08-20 사용자 지시] 전략 태그 없는 수동매매 보유분도 자동 손절 대상에서 뺀다.
+    #   BARRO_SKIP_UNTAGGED_AUTOSELL=1 일 때만 (기본 0 → 집합이 그대로라 동작 바이트 동일).
+    if _skip_untagged_autosell():
+        _untagged = _untagged_symbols(balance.holdings, active_positions)
+        if _untagged:
+            _no_autosell |= _untagged
+            _ts_u = _now_kst().strftime("%H:%M:%S")
+            print(
+                f"  [{_ts_u}][SKIP-MANUAL-SL] 전략없음(수동매매) {len(_untagged)}종목"
+                f" 자동 손절 제외: {', '.join(sorted(_untagged))}"
+            )
     if _no_autosell:
         decisions = [d for d in decisions if d.symbol not in _no_autosell]
 

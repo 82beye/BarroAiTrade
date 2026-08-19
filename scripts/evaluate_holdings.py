@@ -82,6 +82,22 @@ def _eod_force_close_disabled(force_mode: bool, env: dict | None = None) -> bool
     return bool(force_mode and truthy)
 
 
+def _include_untagged_in_eval(tp: float, sl: float, env: dict | None = None) -> bool:
+    """전략 태그 없는 수동매매 보유분을 평가 대상에 넣을지.
+
+    [2026-08-20 사용자 지시] 자동 손절에서는 항상 빼고, **강제청산에서만** 넣는다.
+    force_mode(= CLI 로 TP/SL 을 명시 지정한 호출 = 15:20 전량청산) 이면서
+    BARRO_EVAL_INCLUDE_MANUAL 이 truthy 일 때만 True.
+    일반 TP/SL 평가(force_mode=False)에서는 env 와 무관하게 항상 False 다.
+    """
+    e = env if env is not None else os.environ
+    force_mode = (tp != 5.0 or sl != -4.0)
+    truthy = (e.get("BARRO_EVAL_INCLUDE_MANUAL", "") or "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    return bool(force_mode and truthy)
+
+
 def _build_oauth() -> KiwoomNativeOAuth:
     app_key = os.environ.get("KIWOOM_APP_KEY", "")
     app_secret = os.environ.get("KIWOOM_APP_SECRET", "")
@@ -154,17 +170,20 @@ async def _run(args) -> int:
     #   장부(active_positions.json)에 전략 태그가 없는 브로커 보유분까지 청산 평가에
     #   포함시키기 위한 사용자 지시 토글. 미설정이면 바이트 동일 동작이다.
     #   되돌리기 = .env.local 의 BARRO_EVAL_INCLUDE_MANUAL 를 0 으로 두거나 줄 삭제.
-    _include_manual = os.environ.get("BARRO_EVAL_INCLUDE_MANUAL", "0").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
+    #
+    # ★ [2026-08-20 후속 지시] 이 포함은 **강제청산(force_mode)에서만** 적용한다.
+    #   수동매매 종목을 자동 손절에서 빼달라는 요구와, 15:20 전량청산에는 포함하라는 요구를
+    #   동시에 만족시키는 유일한 경계다. force_mode 판정식은 아래 본 정의와 동일하게 둔다
+    #   (CLI 로 TP/SL 을 명시 지정한 호출 = 강제청산).
+    _include_manual = _include_untagged_in_eval(args.tp, args.sl)
     _all_active = ActivePositionStore(args.pos_log).load_all()
     _manual_syms = {
         h.symbol for h in holdings
         if not (_all_active.get(h.symbol) and (_all_active[h.symbol].strategy or "").strip())
     }
     if _manual_syms and _include_manual:
-        print(f"[포함] 전략없음(수동매매) {len(_manual_syms)}종목 평가 포함"
-              f" (BARRO_EVAL_INCLUDE_MANUAL=1): {', '.join(sorted(_manual_syms))}")
+        print(f"[포함] 전략없음(수동매매) {len(_manual_syms)}종목 강제청산 포함"
+              f" (BARRO_EVAL_INCLUDE_MANUAL=1·force_mode): {', '.join(sorted(_manual_syms))}")
     elif _manual_syms:
         holdings = [h for h in holdings if h.symbol not in _manual_syms]
         print(f"[제외] 전략없음(수동매매) {len(_manual_syms)}종목 SL 평가 제외: {', '.join(sorted(_manual_syms))}")
