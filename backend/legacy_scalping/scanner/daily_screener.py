@@ -63,6 +63,10 @@ class DailyScreener:
         # OHLCV 캐시
         cache_dir = self.scanner_config.get('cache_dir', './data/ohlcv_cache')
         self.cache = OHLCVCache(cache_dir)
+        # 금요일 EOD 캐시를 월요일 개장 전에도 재사용할 수 있도록 호출자가
+        # 허용 기간을 조정할 수 있다. 기존 실행의 기본값(3일)은 그대로 보존한다.
+        self.cache_max_age_days = self.scanner_config.get(
+            'cache_max_age_days', 3)
 
         # 시장 상태 분석기
         self.market_analyzer = MarketConditionAnalyzer(config)
@@ -96,7 +100,7 @@ class DailyScreener:
         # 4. 지표 계산 및 종목 분석
         results = []
         fail_count = 0
-        cache_used = self.cache.is_recent(max_days=3)
+        cache_used = self.cache.is_recent(max_days=self.cache_max_age_days)
         if not cache_used:
             logger.warning("OHLCV 캐시 없음/만료 → API 직접 조회 (속도 저하 예상)")
         for i, stock in enumerate(filtered_codes):
@@ -198,7 +202,7 @@ class DailyScreener:
         """단일 종목 지표 분석"""
         # 캐시가 최근 3일 이내이면 캐시에서 로드, 아니면 API 조회
         df = None
-        if self.cache.is_recent(max_days=3):
+        if self.cache.is_recent(max_days=self.cache_max_age_days):
             df = self.cache.load(code)
 
         if df is None:

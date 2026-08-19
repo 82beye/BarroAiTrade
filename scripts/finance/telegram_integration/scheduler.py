@@ -9,6 +9,7 @@ FastAPI lifespan에서 start_scheduler() / stop_scheduler()를 호출하여 사�
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -63,15 +64,38 @@ def start_scheduler() -> AsyncIOScheduler:
     global _scheduler
     _scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
 
-    # 매일 오후 6시 KST — 일일 리포트 (거래 종료 1시간 후)
-    _scheduler.add_job(
-        _daily_report_job,
-        CronTrigger(hour=18, minute=0, timezone="Asia/Seoul"),
-        id="daily_report",
-        name="일일 리포트 전송",
-        replace_existing=True,
-        misfire_grace_time=300,  # 5분 내 실행 지연 허용
-    )
+    # 매일 오후 6시 KST — 일일 리포트 (거래 종료 1시간 후).
+    # [2026-08-19] BARRO_DAILY_REPORT_ENABLED=1 일 때만 등록(기본 OFF).
+    #   BAR-44 다중사용자 SaaS 템플릿이라 현 단일계좌 운영에서는 전 항목 0 +
+    #   하드코딩 TOP3 자리만 나가는 빈 리포트가 매일 텔레그램으로 발송됐다.
+    #   되돌리기 = .env.local 에 BARRO_DAILY_REPORT_ENABLED=1 + 백엔드 재기동.
+    if os.environ.get("BARRO_DAILY_REPORT_ENABLED", "0").strip().lower() in {
+        "1", "true", "yes", "on",
+    }:
+        _scheduler.add_job(
+            _daily_report_job,
+            CronTrigger(hour=18, minute=0, timezone="Asia/Seoul"),
+            id="daily_report",
+            name="일일 리포트 전송",
+            replace_existing=True,
+            misfire_grace_time=300,  # 5분 내 실행 지연 허용
+        )
+        logger.info("일일 리포트 잡 등록: 매일 18:00 KST")
+    else:
+        logger.info("일일 리포트 잡 미등록 (BARRO_DAILY_REPORT_ENABLED=0)")
+
+    # 개장 전 종목 스캔 + 팀 상승예측 + 전략 최적화 브리핑 (평일 08:25 KST).
+    # 데이터 성격상 하루 1회이며 실패할 때만 subprocess 내부에서 5분 재시도한다.
+    try:
+        from backend.core.scheduler.premarket_briefing_jobs import (
+            register_premarket_briefing_jobs,
+        )
+
+        _premarket_ids = register_premarket_briefing_jobs(_scheduler)
+        if _premarket_ids:
+            logger.info("개장 전 Telegram 브리핑 잡 등록: %s", _premarket_ids)
+    except Exception as e:
+        logger.warning("개장 전 Telegram 브리핑 잡 등록 실패: %s", e)
 
     # 테마 스냅숏 잡 (10:00/12:30/15:35 KST) — BARRO_THEME_SNAPSHOT_ENABLED=1 일 때만
     # 등록(기본 OFF). 관측용 add-on 이며 실패해도 라이브 경로 무영향(선택적 기능).
@@ -161,7 +185,7 @@ def start_scheduler() -> AsyncIOScheduler:
         logger.warning("테마 뉴스발굴 잡 등록 실패 (선택적 기능): %s", e)
 
     _scheduler.start()
-    logger.info("스케줄러 시작: 매일 18:00 KST 일일 리포트 전송")
+    logger.info("스케줄러 시작 (등록 잡 %d개)", len(_scheduler.get_jobs()))
     return _scheduler
 
 
