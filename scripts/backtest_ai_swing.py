@@ -76,6 +76,10 @@ _RAW_FIELDS = {
     "max_hold": ("max_hold_days", int),
     "min_score": ("min_score", float),
     "tp1_qty": ("tp1_qty", Decimal),
+    # [2026-09-02] 진입 변동성 하한(percent 입력 → float 소수). 시뮬 0.035 vs 라이브 0.03
+    #   괴리(§2)의 효과를 측정하기 위한 축. ★ float 로 캐스팅한다 — `min_atr_pct` 는 float
+    #   필드라 Decimal 을 넣으면 `atr < p.min_atr_pct` 비교에서 TypeError 가 난다.
+    "min_atr": ("min_atr_pct", lambda v: float(v) / 100.0),
 }
 
 

@@ -153,3 +153,24 @@ def test_reuses_oos_machinery():
 
 def test_sid_is_ai_swing():
     assert bt.SID == "ai_swing"
+
+
+# ─── min_atr 축 (2026-09-02 추가) ──────────────────────────────────────────
+def test_parse_grid_min_atr_is_float_not_decimal():
+    """★ `min_atr_pct` 는 float 필드다 — Decimal 을 넣으면 진입 판정의
+    `atr < p.min_atr_pct` 비교에서 TypeError 가 난다. percent → float 소수여야 한다.
+    """
+    combos = bt.parse_grid("min_atr=3.0,3.5")
+    assert combos == [{"min_atr_pct": 0.03}, {"min_atr_pct": 0.035}]
+    for c in combos:
+        assert isinstance(c["min_atr_pct"], float)
+
+
+def test_parse_grid_min_atr_feeds_params():
+    """파싱 결과가 AiSwingParams 에 그대로 들어가고 비교가 성립해야 한다."""
+    from backend.core.strategy.ai_swing import AiSwingParams
+
+    (combo,) = bt.parse_grid("min_atr=3.5")
+    p = AiSwingParams(**combo)
+    assert p.min_atr_pct == 0.035
+    assert (0.04 < p.min_atr_pct) is False   # TypeError 없이 비교되어야 한다

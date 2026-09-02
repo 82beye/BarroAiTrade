@@ -21,7 +21,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import time as dtime
 from decimal import Decimal
 from typing import Optional
 
@@ -162,6 +163,75 @@ def build_exit_plan(
     )
 
 
+# ── 라이브 진입 게이트 정렬 (2026-09-02) ────────────────────────────────────
+# ★ 발견: 백테스트 시뮬(`IntradaySimulator` ai_swing 분기)은 `min_atr_pct=0.035` +
+#   `entry_time_cutoff=14:00` 으로 돌리는데, 라이브는 `AiSwingStrategy()` 를 무인자로
+#   만들어 Swing38Params 기본값(0.03 / 컷오프 없음)을 쓴다. 즉 **백테스트가 보고한
+#   수익률은 라이브보다 엄격한 진입 조건에서 나온 값**이고, 라이브는 시뮬이 한 번도
+#   모델링하지 않은 느슨한 진입까지 집어간다.
+#
+# 기본값은 **현재 라이브값 그대로**다 — env 미설정이면 동작이 바이트 동일하다(§2 S3).
+# `.env.local` 에서 시뮬과 같은 값으로 올려야 백테스트 근거가 라이브에 그대로 적용된다.
+_ENV_MIN_ATR = "BARRO_AI_SWING_MIN_ATR_PCT"      # 예: 3.5 (percent)
+_ENV_CUTOFF = "BARRO_AI_SWING_ENTRY_CUTOFF"      # 예: 14:00 (HH:MM), 빈값=비활성
+_ENV_MIN_SCORE = "BARRO_AI_SWING_MIN_SCORE"      # 예: 5.0
+
+
+def _float_from_env(name: str, default: float, env: dict | None = None) -> float:
+    """percent 문자열 → 소수. 오타·빈값·음수는 default 로 흡수한다(라이브 무영향, §2 S3)."""
+    raw = (env if env is not None else os.environ).get(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        v = float(str(raw).strip()) / 100.0
+    except (TypeError, ValueError):
+        return default
+    return v if 0.0 < v < 1.0 else default
+
+
+def _score_from_env(name: str, default: float, env: dict | None = None) -> float:
+    """진입 점수 임계(0~10 스케일). 범위를 벗어나면 default."""
+    raw = (env if env is not None else os.environ).get(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        v = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return v if 0.0 <= v <= 10.0 else default
+
+
+def _cutoff_from_env(name: str, default, env: dict | None = None):
+    """`HH:MM` → datetime.time. 빈 문자열은 **명시적 비활성**(None) 으로 해석한다."""
+    raw = (env if env is not None else os.environ).get(name)
+    if raw is None:
+        return default
+    txt = str(raw).strip()
+    if not txt:
+        return None
+    try:
+        hh, mm = txt.split(":", 1)
+        return dtime(int(hh), int(mm))
+    except (TypeError, ValueError):
+        return default
+
+
+def live_params(base: Optional[AiSwingParams] = None,
+                env: dict | None = None) -> AiSwingParams:
+    """env 를 반영한 라이브 진입 파라미터. 미설정이면 base 를 그대로 돌려준다.
+
+    백테스트는 `IntradaySimulator` 가 파라미터를 **명시로** 넣으므로 이 함수를 타지
+    않는다 — 그리드 스윕이 env 에 오염되지 않는다.
+    """
+    p = base or AiSwingParams()
+    return replace(
+        p,
+        min_atr_pct=_float_from_env(_ENV_MIN_ATR, p.min_atr_pct, env),
+        min_score=_score_from_env(_ENV_MIN_SCORE, p.min_score, env),
+        entry_time_cutoff=_cutoff_from_env(_ENV_CUTOFF, p.entry_time_cutoff, env),
+    )
+
+
 class AiSwingStrategy(Swing38Strategy):
     """AI 스윙 — 단테 교집합 종목에 swing_38 진입 판정 + 파라미터화된 스윙 청산.
 
@@ -172,7 +242,8 @@ class AiSwingStrategy(Swing38Strategy):
     STRATEGY_ID = "ai_swing_v1"
 
     def __init__(self, params: Optional[AiSwingParams] = None) -> None:
-        self.params: AiSwingParams = params or AiSwingParams()
+        # 무인자 생성(=라이브)만 env 를 반영한다. 시뮬은 params 를 명시로 넣어 그대로 쓴다.
+        self.params: AiSwingParams = params if params is not None else live_params()
 
     def _analyze_v2(self, ctx: AnalysisContext) -> Optional[EntrySignal]:
         """부모 진입 판정 결과의 `signal_type` 만 "ai_swing" 으로 교체.

@@ -2006,6 +2006,21 @@ async def _scan_and_buy(
                 continue
 
         if current_ai_signal is not None:
+            # [2026-09-02] 진입 점수를 남긴다 — 관측 전용(동작 변경 0).
+            #   min_score 임계는 지금까지 **랜덤 유니버스 백테스트**로만 근거를 댔는데,
+            #   라이브의 실제 유니버스는 단테 교집합이라 점수 분포가 다를 수 있다.
+            #   이 로그가 쌓이면 임계를 실제 분포로 정할 수 있다(추정 → 관측 전환).
+            _sc = getattr(current_ai_signal, "score", None)
+            try:
+                from backend.core.strategy.ai_swing import live_params as _lp
+                _thr = _lp().min_score
+            except Exception:  # 관측 로그가 진입 경로를 죽이면 안 된다
+                _thr = "?"
+            _ts_sc = _now_kst().strftime("%H:%M:%S")
+            print(
+                f"  [{_ts_sc}][AI-SWING-SCORE] {c.symbol} {c.name:<14}"
+                f" score={_sc if _sc is not None else 'n/a'} (임계 {_thr})"
+            )
             best_strategy = _AI_SWING_SID
             ai_result = sim.run(candles, symbol=c.symbol, strategies=[_AI_SWING_SID])
             best_pnl = float(ai_result.pnl_by_strategy.get(_AI_SWING_SID, 0.0)) * weights.get(_AI_SWING_SID, 1.0)
