@@ -12,6 +12,7 @@ tags: [index, report]
 
 | 피처 | 문서 | 날짜 | 상태 |
 |------|------|------|------|
+| 🔥 **ai_swing 수익 일관성 튜닝** — 시뮬↔라이브 진입 게이트 괴리 발견 + min_score 그리드 | [[features/2026-09-02-ai-swing-consistency-tuning.report\|보기]] | 2026-09-02 | ✅ 완료 |
 | 📑 **5/17~5/21 세션 종합 요약 (P1~P10 + 매도 + 1분봉/5분봉 F존)** | [[features/2026-05-21-session-summary\|보기]] | 2026-05-21 | ✅ 완료 |
 | 🆕 **1분봉 F존 + 단기 고점 매도 모듈 (이미지 패턴 코드화)** | [[features/2026-05-21-intraday-fzone-short-term-exit\|보기]] | 2026-05-21 | ✅ 완료 |
 | 🔥 **5/20 실거래 검증 + P6~P9 시뮬 효과 +906k (3일 누적 +3.9M)** | [[features/2026-05-21-0520-live-trade-verification\|보기]] | 2026-05-21 | ✅ 완료 |
