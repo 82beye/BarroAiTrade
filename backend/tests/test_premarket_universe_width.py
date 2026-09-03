@@ -161,3 +161,39 @@ def test_child_env_absorbs_unreadable_file(tmp_path, monkeypatch):
     monkeypatch.setenv("BARRO_PREMARKET_TOP_N", "20")
 
     assert jobs._child_env()["BARRO_PREMARKET_TOP_N"] == "20"
+
+
+# ── 스캐너의 watchlist 저장이 출력 디렉토리를 따른다 ────────────────────────
+# 예전에는 ./logs 를 하드코딩해서, 측정·검증 목적으로 스캐너를 돌리기만 해도 라이브
+# watchlist 파일을 덮었다. 실제로 유니버스 폭 측정 중 당일 파일이 20→50종목으로 바뀌었다.
+
+def test_load_config_sets_watchlist_dir_from_output_env(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    from scripts.premarket_telegram_briefing import _load_config
+
+    monkeypatch.setenv("BARRO_PREMARKET_OUTPUT_DIR", str(tmp_path))
+    cfg = _load_config(Path("data/ohlcv_cache"))
+    assert cfg["scanner"]["watchlist_dir"] == str(tmp_path)
+
+
+def test_load_config_watchlist_dir_defaults_to_repo_logs(monkeypatch):
+    from pathlib import Path
+
+    from scripts.premarket_telegram_briefing import _load_config
+
+    monkeypatch.delenv("BARRO_PREMARKET_OUTPUT_DIR", raising=False)
+    cfg = _load_config(Path("data/ohlcv_cache"))
+    assert cfg["scanner"]["watchlist_dir"].endswith("/logs")
+
+
+def test_screener_saves_to_configured_dir(tmp_path):
+    """★ 핵심 계약 — watchlist_dir 을 주면 그쪽에만 쓴다(라이브 ./logs 오염 없음)."""
+    from backend.legacy_scalping.scanner.daily_screener import DailyScreener
+
+    screener = DailyScreener.__new__(DailyScreener)          # __init__ 우회(외부 의존 회피)
+    screener.scanner_config = {"watchlist_dir": str(tmp_path)}
+    screener._save_watchlist([])
+
+    written = list(tmp_path.glob("watchlist_*.json"))
+    assert len(written) == 1, f"지정 디렉토리에 저장되어야 한다: {written}"

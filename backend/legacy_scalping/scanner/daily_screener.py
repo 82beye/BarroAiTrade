@@ -227,9 +227,17 @@ class DailyScreener:
         return analyze_stock(code, name, df, self.indicator_config)
     
     def _save_watchlist(self, watchlist: List[IndicatorResult]):
-        """감시 리스트를 JSON 파일로 저장"""
+        """감시 리스트를 JSON 파일로 저장.
+
+        ★ [2026-09-03] 저장 위치를 `scanner.watchlist_dir` 로 받는다(기본 `./logs` = 기존 동작).
+          예전에는 `./logs/` 를 하드코딩해서, 측정·검증 목적으로 스캐너를 돌리기만 해도
+          **라이브 watchlist 파일을 덮어썼다**. 실제로 유니버스 폭 측정 중에 당일 파일이
+          20종목 → 50종목으로 바뀌어 ai_swing 후보가 바뀌는 사고가 났다.
+          출력 디렉토리를 돌려도 이 저장만 라이브를 향하던 것이 원인이다.
+        """
         today = date.today().isoformat()
-        filepath = f"./logs/watchlist_{today}.json"
+        out_dir = str(self.scanner_config.get("watchlist_dir") or "./logs")
+        filepath = f"{out_dir.rstrip('/')}/watchlist_{today}.json"
         
         data = {
             "date": today,
