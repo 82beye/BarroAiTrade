@@ -23,6 +23,30 @@ def _enabled() -> bool:
     return os.environ.get(_FLAG_ENV, "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _child_env() -> dict:
+    """브리핑 자식 프로세스의 env — `.env.local` 을 **매 실행 다시 읽는다**.
+
+    ★ [2026-09-03] 백엔드는 기동 시 env 를 1회만 소싱한다. 그래서 `.env.local` 을 고쳐도
+      이 subprocess 는 **기동 시점의 stale 값**을 물려받았다 — 유니버스 폭 설정
+      (`BARRO_PREMARKET_MAX_WATCHLIST` / `_TOP_N`)을 바꿔도 백엔드를 재기동하기 전까지
+      브리핑에 반영되지 않는다. cron 데몬은 매 실행 `set -a && . .env.local` 을 하므로 같은
+      문제가 없다 — 그 규약을 여기에도 맞춘다.
+
+    파일이 진실원천이므로 `.env.local` 이 상속 env 를 **덮는다**. 읽기 실패는 전량 흡수하고
+    상속 env 를 그대로 쓴다(= 기존 동작) — 이 함수 때문에 브리핑이 죽으면 안 된다.
+    """
+    env = dict(os.environ)
+    path = _REPO_ROOT / ".env.local"
+    try:
+        if path.exists():
+            from dotenv import dotenv_values
+
+            env.update({k: v for k, v in dotenv_values(path).items() if v is not None})
+    except Exception:
+        logger.warning(".env.local 재읽기 실패 — 상속 env 로 진행", exc_info=True)
+    return env
+
+
 async def _run_premarket_briefing_job() -> None:
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -31,6 +55,7 @@ async def _run_premarket_briefing_job() -> None:
             "--attempts", "3",
             "--retry-delay", "300",
             cwd=str(_REPO_ROOT),
+            env=_child_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
