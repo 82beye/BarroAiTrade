@@ -139,6 +139,12 @@ def _load_config(cache_dir: Path) -> dict[str, Any]:
     #   일평균 1.08종목(0인 날이 다수)까지 떨어져 진입 기회 자체가 병목이었다.
     #   실측(2026-09-03): 스캔 top20 × 예측 top20 → 0종목 / 각 top50 → 9종목.
     #   근거: docs/04-report/features/2026-09-03-ai-swing-universe-widening.report.md
+    # [2026-09-03] 스캐너의 watchlist 저장도 브리핑 출력 디렉토리를 따르게 한다.
+    #   이게 없으면 BARRO_PREMARKET_OUTPUT_DIR 을 돌려도 스캐너만 ./logs 로 써서
+    #   측정·검증 실행이 라이브 파일을 덮는다(실제로 겪었다).
+    config["scanner"]["watchlist_dir"] = str(
+        os.environ.get("BARRO_PREMARKET_OUTPUT_DIR") or (REPO_ROOT / "logs")
+    )
     raw_mw = (os.environ.get("BARRO_PREMARKET_MAX_WATCHLIST") or "").strip()
     if raw_mw:
         try:
