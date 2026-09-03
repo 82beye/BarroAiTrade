@@ -65,18 +65,28 @@ _PRED_AGENT_ORDER = (
 
 def format_prediction_message(
     results: Iterable[Any], *, generated_at: datetime | None = None,
+    display_limit: int = 20,
 ) -> str:
-    """첨부 예시와 같은 팀 에이전트 상승 예측 Telegram HTML 메시지."""
-    rows = list(results)
+    """첨부 예시와 같은 팀 에이전트 상승 예측 Telegram HTML 메시지.
+
+    ★ [2026-09-03] `display_limit` 추가 — 산출물(JSON)과 메시지를 분리한다.
+      ai_swing 의 진입 후보는 `watchlist ∩ predictions` 인데 양쪽이 top20 이라 교집합이
+      일평균 1.08종목(관측일에 따라 0)까지 떨어졌다. 이를 풀려면 **파일에 실리는 예측 수**를
+      늘려야 하는데, 이 포매터에는 상한이 없어 그대로 늘리면 텔레그램 메시지가 100줄이 된다.
+      데이터는 넓히고 메시지는 읽을 수 있게 유지하기 위한 분리다.
+      기본 20 이라 기존 호출(20종목)에서는 출력이 바이트 동일하다.
+    """
+    all_rows = list(results)
+    rows = all_rows[:display_limit] if display_limit > 0 else all_rows
     now = (generated_at or datetime.now(KST)).astimezone(KST).strftime("%H:%M")
     lines = [
         f"<b>팀 에이전트 상승 예측</b> ({now})",
-        f"예측 종목: {len(rows)}개",
+        f"예측 종목: {len(all_rows)}개",
         "",
     ]
 
     counts: dict[str, int] = {}
-    for row in rows:
+    for row in all_rows:
         label = str(_value(row, "consensus_level", ""))
         counts[label] = counts.get(label, 0) + 1
     lines.extend([" | ".join(f"{_html(k)}:{v}" for k, v in counts.items()), ""])
@@ -105,6 +115,9 @@ def format_prediction_message(
             lines.append(f"   {' | '.join(score_parts)}")
         for reason in list(_value(row, "top_reasons", []) or [])[:2]:
             lines.append(f"   {_html(reason)}")
+    remaining = len(all_rows) - len(rows)
+    if remaining > 0:
+        lines.extend(["", f"... 외 {remaining}종목"])
     return "\n".join(lines)
 
 

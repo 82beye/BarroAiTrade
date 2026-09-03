@@ -134,6 +134,19 @@ def _load_config(cache_dir: Path) -> dict[str, Any]:
     config.setdefault("risk", {}).setdefault("market_condition", {})["enabled"] = False
     # 금요일 EOD 캐시를 월요일 08:25에도 재사용할 수 있게 한다.
     config["scanner"]["cache_max_age_days"] = 7
+    # [2026-09-03] 스캔 유니버스 크기 env 제어 — 미설정이면 settings.yaml 값(20) 그대로다.
+    #   ai_swing 진입 후보는 `watchlist ∩ predictions` 인데 양쪽이 top20 이라 교집합이
+    #   일평균 1.08종목(0인 날이 다수)까지 떨어져 진입 기회 자체가 병목이었다.
+    #   실측(2026-09-03): 스캔 top20 × 예측 top20 → 0종목 / 각 top50 → 9종목.
+    #   근거: docs/04-report/features/2026-09-03-ai-swing-universe-widening.report.md
+    raw_mw = (os.environ.get("BARRO_PREMARKET_MAX_WATCHLIST") or "").strip()
+    if raw_mw:
+        try:
+            mw = int(raw_mw)
+        except ValueError:
+            mw = 0
+        if mw > 0:
+            config["scanner"]["max_watchlist"] = mw
     return config
 
 
