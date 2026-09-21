@@ -37,6 +37,33 @@ def test_off_config_never_blocks():
 
 
 # ── 환경변수 파싱 ───────────────────────────────────────────────────
+def test_reentry_lookback_default_is_bounded():
+    """무제한이면 존 전략이 건드린 종목이 영구 차단돼 유니버스가 고갈된다."""
+    cfg = ZoneGateConfig()
+    assert cfg.reentry_lookback_days == 60
+    assert cfg.reentry_lookback_days > 0
+
+
+def test_env_parses_reentry_lookback():
+    cfg = config_from_env({"BARRO_ZONE_REENTRY_LOOKBACK_DAYS": "30"})
+    assert cfg.reentry_lookback_days == 30
+
+
+def test_env_reentry_lookback_zero_means_unbounded():
+    cfg = config_from_env({"BARRO_ZONE_REENTRY_LOOKBACK_DAYS": "0"})
+    assert cfg.reentry_lookback_days == 0
+
+
+def test_env_reentry_lookback_rejects_negative():
+    cfg = config_from_env({"BARRO_ZONE_REENTRY_LOOKBACK_DAYS": "-5"})
+    assert cfg.reentry_lookback_days == 0
+
+
+def test_env_reentry_lookback_falls_back_on_garbage():
+    cfg = config_from_env({"BARRO_ZONE_REENTRY_LOOKBACK_DAYS": "abc"})
+    assert cfg.reentry_lookback_days == 60
+
+
 def test_env_parses_flags_and_margin():
     cfg = config_from_env({
         "BARRO_ZONE_TREND_GATE_ENABLED": "1",

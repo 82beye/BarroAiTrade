@@ -32,6 +32,7 @@
   BARRO_ZONE_TREND_GATE_ENABLED=1     # ① 정배열 요구
   BARRO_ZONE_TREND_GATE_MARGIN=0.0    # MA5 가 MA20 보다 최소 N% 위여야 통과
   BARRO_ZONE_REENTRY_GUARD_ENABLED=1  # ② 같은 종목 재진입 차단
+  BARRO_ZONE_REENTRY_LOOKBACK_DAYS=60 # ② 조회 기간(일). 0 = 무제한(권장하지 않음)
   BARRO_ZONE_GATE_SHADOW=1            # 측정 전용 — 차단하지 않고 로그만(권장 1주)
 
 모든 플래그 미설정 시 `ZoneGateConfig.any_enabled()` 가 False → 호출부가 평가 자체를
@@ -49,6 +50,7 @@ ZONE_STRATEGIES = frozenset({"f_zone", "sf_zone", "gold_zone"})
 ENV_TREND_ENABLED = "BARRO_ZONE_TREND_GATE_ENABLED"
 ENV_TREND_MARGIN = "BARRO_ZONE_TREND_GATE_MARGIN"
 ENV_REENTRY_ENABLED = "BARRO_ZONE_REENTRY_GUARD_ENABLED"
+ENV_REENTRY_LOOKBACK = "BARRO_ZONE_REENTRY_LOOKBACK_DAYS"
 ENV_SHADOW = "BARRO_ZONE_GATE_SHADOW"
 
 _TRUTHY = {"1", "true", "yes", "on", "y"}
@@ -77,6 +79,11 @@ class ZoneGateConfig:
     trend_enabled: bool = False
     trend_margin_pct: float = 0.0
     reentry_enabled: bool = False
+    # 재진입 차단 조회 기간(일). 무제한이면 존 전략이 한 번이라도 건드린 종목이
+    # 영구 차단돼 유니버스가 단조 감소한다(2026-09-22 개장 전 발견: 67종목 영구차단).
+    # 실측 재진입 간격은 중앙 12일·p90 41일·**최대 49일** — 60일이면 유해 재진입
+    # 22건을 전부 포착하면서 윈도우가 유계다(당일 차단 67 → 23종목).
+    reentry_lookback_days: int = 60
     shadow: bool = False
 
     def any_enabled(self) -> bool:
@@ -89,6 +96,7 @@ def config_from_env(env: Optional[dict] = None) -> ZoneGateConfig:
         trend_enabled=_truthy(e, ENV_TREND_ENABLED),
         trend_margin_pct=_float(e, ENV_TREND_MARGIN, 0.0),
         reentry_enabled=_truthy(e, ENV_REENTRY_ENABLED),
+        reentry_lookback_days=max(0, int(_float(e, ENV_REENTRY_LOOKBACK, 60.0))),
         shadow=_truthy(e, ENV_SHADOW),
     )
 
