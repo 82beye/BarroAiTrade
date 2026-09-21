@@ -315,11 +315,24 @@ def load_sim_predictions(date_str: str) -> dict:
 
 async def fetch_1m_prices(symbols: list[str]) -> dict:
     """종목별 {분(naive KST): close} + (low,high) 당일 범위는 호출측에서 date 필터."""
-    for line in open(_REPO / ".env.local"):
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k, v.strip().strip('"').strip("'"))
+    # [2026-09-22] 직접 파싱하던 것을 python-dotenv 로 교체.
+    #   기존 `line.split("=", 1)` 는 **인라인 주석을 값에 포함**시켜,
+    #   `BARRO_CHART_429_RETRY=5   # 차트 429 재시도` 같은 줄에서
+    #   int('5   # 차트 429 재시도') → ValueError 로 이 스크립트가 통째로 죽었다.
+    #   dotenv 는 인라인 주석·따옴표·escape 를 규격대로 처리한다.
+    from dotenv import dotenv_values
+
+    env_path = _REPO / ".env.local"
+    if env_path.exists():
+        for k, v in dotenv_values(env_path).items():
+            if v is not None:
+                os.environ.setdefault(k, v)
+    if not os.environ.get("KIWOOM_APP_KEY") or not os.environ.get("KIWOOM_APP_SECRET"):
+        # 종전에는 여기서 KeyError 로 죽어 원인이 드러나지 않았다.
+        raise RuntimeError(
+            f"KIWOOM_APP_KEY/SECRET 미설정 — {env_path} 부재이거나 값이 비어 있다. "
+            "1분봉 체결가 추정이 필요 없으면 --source fill 대신 캐시 기반 경로를 쓸 것."
+        )
     from pydantic import SecretStr
     from backend.core.gateway.kiwoom_native_candles import KiwoomNativeCandleFetcher
     from backend.core.gateway.kiwoom_native_oauth import KiwoomNativeOAuth
