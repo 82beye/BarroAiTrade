@@ -61,6 +61,10 @@ from backend.core.backtester.market_regime import (
     MarketRegime, classify_regime, regime_weights,
 )
 from backend.core.strategy.trap_guard import TrapGuardConfig, evaluate_trap_guard
+from backend.core.strategy.zone_entry_gates import (
+    config_from_env as _zone_gate_config_from_env,
+    evaluate_zone_gates as _evaluate_zone_gates,
+)
 from backend.core.supertrend_auto_trader import (
     SupertrendAutoTrader, SupertrendAutoConfig,
 )
@@ -1657,6 +1661,43 @@ _DAEMON_TRAP = TrapGuardConfig(
     gap_atr_mult=_TRAP_GAP_ATR_MULT, gap_abs_max_pct=_TRAP_GAP_ABS_MAX_PCT,
 )
 
+# [2026-09-22] 존 3전략(f/sf/gold) 진입 게이트 — ★default-OFF★.
+#   실측(fill_audit×order_audit 75RT): 존 통합 PF 0.47. 청산 스윕은 실패(SL 조일수록
+#   악화) → 병목은 진입. 정배열(MA5≥MA20)+첫진입 두 게이트로 PF 1.04(n=20, 탈락군 0.28).
+#   ※ 표본 20건·후반부 PF 0.78·f_zone 은 통과해도 0.46 → 확신 아님. 측정용으로 둔다.
+#   활성화: BARRO_ZONE_TREND_GATE_ENABLED / _REENTRY_GUARD_ENABLED (+ _SHADOW=1 권장)
+#   설계·근거: backend/core/strategy/zone_entry_gates.py docstring
+_ZONE_GATES = _zone_gate_config_from_env()
+
+
+def _zone_prior_symbols(audit_path) -> set[str]:
+    """존 전략으로 과거 매수한 적 있는 종목 집합 (재진입 게이트 입력).
+
+    order_audit.csv 를 읽는다. 실패하면 **빈 집합**을 돌려준다(fail-open) —
+    파일 사고가 매수를 통째로 멈추면 안 된다.
+    """
+    out: set[str] = set()
+    if not _ZONE_GATES.reentry_enabled:
+        return out
+    try:
+        import csv as _csv
+        from backend.core.strategy.zone_entry_gates import is_zone_strategy
+        with open(audit_path, newline="", encoding="utf-8") as fh:
+            for r in _csv.DictReader(fh):
+                if r.get("side") != "buy":
+                    continue
+                if r.get("action") not in ("ORDERED", "FILLED"):
+                    continue
+                if is_zone_strategy((r.get("strategy_id") or "").strip()):
+                    sym = (r.get("symbol") or "").strip()
+                    if sym:
+                        out.add(sym)
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        print(f"  [ZONE-GATE-WARN] 재진입 이력 로드 실패({type(exc).__name__}) — 게이트 무시")
+        return set()
+    return out
+
+
 
 def _build_reval_strategy(strategy_id: str):
     """진입 재검증용 분봉 전략 인스턴스 (분봉 min_atr 0.01)."""
@@ -1979,6 +2020,8 @@ async def _scan_and_buy(
     sim = IntradaySimulator()
     strategies = zone_strategies
     signals = []
+    # [2026-09-22] 존 진입 게이트 입력 — 사이클당 1회만 읽는다(default-OFF 면 빈 집합).
+    _zone_prior = _zone_prior_symbols(getattr(args, "audit_log", ""))
 
     for c in filtered:
         # [6/23] 동전주 진입 하한가(BARRO_MIN_ENTRY_PRICE) — 저가·저유동 동전주 배제.
@@ -2056,6 +2099,25 @@ async def _scan_and_buy(
                     f"등락률 +{float(c.flu_rate):.1f}% ≥ {_ZONE_MAX_FLU}% — 갭상승 추격 차단"
                 )
                 continue
+            # [2026-09-22] 존 진입 게이트(정배열·재진입) — ★default-OFF★.
+            #   플래그 전부 미설정 → any_enabled()=False → 평가 자체를 건너뛴다(동작 동일).
+            #   평가 실패는 통과로 처리한다(fail-open) — 게이트가 매수를 멈추면 안 된다.
+            if _ZONE_GATES.any_enabled():
+                try:
+                    _zb, _zr = _evaluate_zone_gates(
+                        best_strategy, c.symbol, candles, _zone_prior, _ZONE_GATES)
+                except Exception as exc:  # noqa: BLE001 — fail-open
+                    _zb, _zr = False, f"eval_error:{type(exc).__name__}"
+                if _zr:
+                    ts_z = _now_kst().strftime("%H:%M:%S")
+                    _tag = "SKIP-ZONE-GATE" if _zb else "SHADOW-ZONE-GATE"
+                    _sfx = "" if _zb else " [측정·미차단]"
+                    print(
+                        f"  [{ts_z}][{_tag}] {c.symbol} {c.name:<14} 전략={best_strategy}"
+                        f" — {_zr}{_sfx}"
+                    )
+                if _zb:
+                    continue
             # [2026-06-21] 트랩가드 후처리(default-OFF) — 일봉 후보 + 실 flu_rate 로 가짜돌파/개미꼬시기
             #   차단(전 전략, swing_38 포함). 과확장·윗꼬리·시초갭(flu_rate). env BARRO_TRAP_* 미설정→무동작.
             if _DAEMON_TRAP.any_enabled():
