@@ -1679,6 +1679,9 @@ def _zone_prior_symbols(audit_path) -> set[str]:
     out: set[str] = set()
     if not _ZONE_GATES.reentry_enabled:
         return out
+    cutoff = None
+    if _ZONE_GATES.reentry_lookback_days > 0:
+        cutoff = _now_kst() - timedelta(days=_ZONE_GATES.reentry_lookback_days)
     try:
         import csv as _csv
         from backend.core.strategy.zone_entry_gates import is_zone_strategy
@@ -1688,10 +1691,20 @@ def _zone_prior_symbols(audit_path) -> set[str]:
                     continue
                 if r.get("action") not in ("ORDERED", "FILLED"):
                     continue
-                if is_zone_strategy((r.get("strategy_id") or "").strip()):
-                    sym = (r.get("symbol") or "").strip()
-                    if sym:
-                        out.add(sym)
+                if not is_zone_strategy((r.get("strategy_id") or "").strip()):
+                    continue
+                if cutoff is not None:
+                    try:
+                        ts = datetime.fromisoformat(r.get("ts", ""))
+                    except (TypeError, ValueError):
+                        continue           # 시각 불명 → 차단 대상에서 제외(fail-open)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    if ts.astimezone(KST) < cutoff:
+                        continue           # 조회 기간 밖 — 차단하지 않는다
+                sym = (r.get("symbol") or "").strip()
+                if sym:
+                    out.add(sym)
     except Exception as exc:  # noqa: BLE001 — fail-open
         print(f"  [ZONE-GATE-WARN] 재진입 이력 로드 실패({type(exc).__name__}) — 게이트 무시")
         return set()
