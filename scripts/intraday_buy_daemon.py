@@ -1820,16 +1820,27 @@ async def _scan_and_buy(
         print(f"  [{_now_kst():%H:%M:%S}][CLOSE-RUSH-YIELD] 종가러시 — 신규진입 스캔 보류(종베 API 우선)")
         return 0
     # [6/23] 개장러시 군집진입 방지 — 첫 N분 신규진입 보류(BARRO_OPEN_HOLD_HHMM=HHMM).
+    #   [2026-09-22] 로그 추가 — 종전에는 조용히 return 0 해서 "보류 중"과 "데몬 행"을
+    #   로그로 구분할 수 없었다(실사례: 09:05~09:30 무출력을 행으로 오진).
     if (_OPEN_HOLD_HHMM and len(_OPEN_HOLD_HHMM) == 4 and _OPEN_HOLD_HHMM.isdigit()
             and _now_kst().time() < time(int(_OPEN_HOLD_HHMM[:2]), int(_OPEN_HOLD_HHMM[2:]))):
+        print(
+            f"  [{_now_kst():%H:%M:%S}][OPEN-HOLD] 개장러시 보류 — "
+            f"신규진입 스캔 {_OPEN_HOLD_HHMM[:2]}:{_OPEN_HOLD_HHMM[2:]} 부터"
+        )
         return 0
     # 일반 매수 전략 비활성(--strategies 빈 값) → 스캔 자체를 건너뜀(슈퍼트렌드 단독 운영).
     zone_strategies = getattr(args, "zone_strategies", DEFAULT_ZONE_STRATEGIES)
     if not zone_strategies:
+        print(f"  [{_now_kst():%H:%M:%S}][SCAN-SKIP] 일반 매수 전략 없음 — 스캔 생략")
         return 0
     # [BAR-OPS-39 P0] 진입 컷오프 — 컷오프 경과 + 면제 전략(swing_38) 미운영이면 스캔 자체 생략
     #   (API 호출 절약). 면제 전략 운영 중이면 시그널 단계에서 전략별로 차단.
     if _zone_entry_cutoff_passed() and not (set(zone_strategies) & _CUTOFF_EXEMPT_STRATEGIES):
+        print(
+            f"  [{_now_kst():%H:%M:%S}][SCAN-SKIP] 진입 컷오프({_ZONE_ENTRY_CUTOFF}) 경과 "
+            f"· 면제 전략 미운영 — 스캔 생략"
+        )
         return 0
 
     cfg = PolicyConfigStore(str(_DATA_DIR / "policy.json")).load()
