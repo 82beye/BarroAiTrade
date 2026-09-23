@@ -2047,19 +2047,31 @@ async def _scan_and_buy(
     # [2026-09-22] 존 진입 게이트 입력 — 사이클당 1회만 읽는다(default-OFF 면 빈 집합).
     _zone_prior = _zone_prior_symbols(getattr(args, "audit_log", ""))
 
+    # [2026-09-23] 후보 퍼널 카운터 — 아래 continue 들이 전부 무로그라
+    #   "왜 후보가 0개인지" 를 볼 수 없었다. 실사례: picker 상위 5가 전부 급등주라
+    #   추격가드(BARRO_CHASE_FLU_PCT=10%)에 조용히 전멸 → 시그널 0 → 게이트 미도달.
+    #   종목별로 찍으면 하루 수천 줄이라 **사이클당 1줄 요약**으로 남긴다.
+    _fn = {"입력": len(filtered), "동전주": 0, "추격가드": 0, "캔들부족": 0,
+           "캔들실패": 0, "시뮬대상": 0}
+
     for c in filtered:
         # [6/23] 동전주 진입 하한가(BARRO_MIN_ENTRY_PRICE) — 저가·저유동 동전주 배제.
         if _MIN_ENTRY_PRICE > 0 and float(getattr(c, "cur_price", 0) or 0) < _MIN_ENTRY_PRICE:
+            _fn["동전주"] += 1
             continue
         # [6/23] 추격매수 가드(BARRO_CHASE_FLU_PCT) — 당일급등 추격을 전 전략(swing_38 포함) 차단.
         if _CHASE_FLU_PCT > 0 and float(getattr(c, "flu_rate", 0) or 0) >= _CHASE_FLU_PCT:
+            _fn["추격가드"] += 1
             continue
         try:
             candles = await fetcher.fetch_daily(symbol=c.symbol)
         except Exception:
+            _fn["캔들실패"] += 1
             continue
         if len(candles) < 60:
+            _fn["캔들부족"] += 1
             continue
+        _fn["시뮬대상"] += 1
 
         # ai_swing 은 과거 누적 PnL이 아니라 관측 데몬과 동일한 최신 일봉
         # analyze() 신호를 진입 권위로 쓴다. 교집합 전용 후보에서 현재 신호가 없으면
@@ -2256,6 +2268,16 @@ async def _scan_and_buy(
                 continue
             signals.append((c, best_strategy, best_pnl))
             print(f"  [SIGNAL] {c.symbol} {c.name:<14} 전략={best_strategy} PnL={best_pnl:+,.0f} (w={weights.get(best_strategy, 1.0):.1f})")
+
+    # [2026-09-23] 후보 퍼널 요약 — 탈락이 있었을 때만 1줄. 진입이 0 인 이유를
+    #   로그만으로 추적할 수 있게 한다(종전에는 전부 무로그라 불가능했다).
+    if _fn["입력"] and _fn["시뮬대상"] < _fn["입력"]:
+        _drop = " ".join(f"{k}={v}" for k, v in _fn.items()
+                         if k not in ("입력", "시뮬대상") and v)
+        print(
+            f"  [{_now_kst():%H:%M:%S}][CAND-FUNNEL] 후보 {_fn['입력']}→시뮬 {_fn['시뮬대상']}"
+            f"  탈락({_drop or '-'})"
+        )
 
     if not getattr(args, "entry_only_once", False):
         # 필드 배선 DRY_RUN은 운영 data 파일도 바꾸지 않는다.
