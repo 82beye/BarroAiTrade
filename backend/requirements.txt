@@ -45,3 +45,4 @@ cryptography>=43.0
 
 # BAR-OPS-02: bcrypt 비밀번호 해싱 (sha256 prehash)
 bcrypt>=4.0
+holidays>=0.50          # KRX 휴장일 캘린더 (음력 명절 자동 계산) — market_calendar.py

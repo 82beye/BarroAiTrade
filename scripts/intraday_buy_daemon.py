@@ -65,6 +65,12 @@ from backend.core.strategy.zone_entry_gates import (
     config_from_env as _zone_gate_config_from_env,
     evaluate_zone_gates as _evaluate_zone_gates,
 )
+from backend.core.market_session.market_calendar import (
+    calendar_available as _cal_available,
+    is_market_holiday as _is_market_holiday,
+    next_trading_day as _next_trading_day,
+    skip_enabled as _holiday_skip_enabled,
+)
 from backend.core.supertrend_auto_trader import (
     SupertrendAutoTrader, SupertrendAutoConfig,
 )
@@ -2922,6 +2928,28 @@ async def _save_balance_snapshot(oauth) -> None:
 
 async def _daemon(args):
     print(f"== 실시간 포지션 관리 데몬 (interval={args.interval}s, top={args.top}) ==")
+    # [2026-09-24] 휴장일 사전 판정 — 캘린더로 오늘이 휴장이면 매매하지 않고 종료한다.
+    #   cron 이 평일 08:58 에 매일 띄우므로 종료해도 다음 개장일에 자동 재기동된다.
+    #   실사례: 추석 연휴(9/24)에 종일 스캔하며 주문마다 RC4010 을 맞았고, 그보다
+    #   "진입 0건" 을 전략 문제로 오독하게 만들어 성과 판정을 왜곡했다.
+    #   ★판정 불가·예외는 개장으로 본다(fail-open)★ — 캘린더 오류로 정상 거래일의
+    #   매매를 멈추는 것이 가장 비싼 실패다. BARRO_HOLIDAY_SKIP_ENABLED=0 으로 끈다.
+    #   dry_run 은 실주문이 없으므로 막지 않는다 — 배선 검증용 드라이런(entry_only_once 등)이
+    #   휴장일에 실행 불가가 되면 안 되고, 테스트가 실행 날짜에 의존하게 된다.
+    if _holiday_skip_enabled() and not getattr(args, "dry_run", False):
+        _hol, _why = _is_market_holiday()
+        if _hol:
+            _nxt = _next_trading_day()
+            print(
+                f"  [{_now_kst():%H:%M:%S}][HOLIDAY] 휴장일({_why}) — 매매 대기."
+                f" 다음 개장일 {_nxt or '판정불가'}"
+            )
+            if not _cal_available():
+                print("  [HOLIDAY] 주의: holidays 패키지 미설치 — 주말만 판정하는 축약 모드")
+            return
+        if not _cal_available():
+            print("  [HOLIDAY-WARN] holidays 패키지 미설치 — 공휴일 판정 불가(주말만). "
+                  "pip install holidays 권장")
     oauth = _build_oauth()
     notifier = TelegramNotifier.from_env() if args.telegram else None
     session_bought: set[str] = set()
