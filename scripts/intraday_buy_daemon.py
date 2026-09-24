@@ -1669,6 +1669,18 @@ _DAEMON_TRAP = TrapGuardConfig(
 #   설계·근거: backend/core/strategy/zone_entry_gates.py docstring
 _ZONE_GATES = _zone_gate_config_from_env()
 
+# [2026-09-24] 휴장일 감지 — 데몬에 휴장일 인식이 전혀 없어 휴장일에도 하루 종일
+#   스캔하며 주문마다 `RC4010:모의투자 영업일이 아닙니다` 를 맞는다(9/24 추석 연휴 실사례).
+#   브로커가 거부하므로 원치 않는 매매는 없으나, API·429 를 낭비하고 무엇보다
+#   **"진입 0건" 을 전략 문제로 오독**하게 만든다.
+#   신호: 라이브 `fetch_daily` 의 마지막 봉 날짜가 오늘(KST)이 아니면 휴장.
+#     거래일에는 당일 봉이 포함된다(9/23 09:47 조회 시 마지막 봉 = 2026-09-23 확인).
+#   오탐(정상일 거래 중단) 방지: **최소 2종목 합의**를 요구하고, 기본은 로그 전용.
+#   BARRO_MARKET_CLOSED_SKIP=1 이면 감지 시 해당 사이클 스캔을 건너뛴다(기본 0).
+_MARKET_CLOSED_MIN_AGREE = max(2, int(os.environ.get("BARRO_MARKET_CLOSED_MIN_AGREE", "2") or 2))
+_MARKET_CLOSED_SKIP = os.environ.get("BARRO_MARKET_CLOSED_SKIP", "0").strip().lower() in (
+    "1", "true", "yes", "on")
+
 
 def _zone_prior_symbols(audit_path) -> set[str]:
     """존 전략으로 과거 매수한 적 있는 종목 집합 (재진입 게이트 입력).
@@ -2053,6 +2065,7 @@ async def _scan_and_buy(
     #   종목별로 찍으면 하루 수천 줄이라 **사이클당 1줄 요약**으로 남긴다.
     _fn = {"입력": len(filtered), "동전주": 0, "추격가드": 0, "캔들부족": 0,
            "캔들실패": 0, "시뮬대상": 0}
+    _no_today_bar = 0          # 당일 봉이 없는 후보 수 (휴장 감지용)
 
     for c in filtered:
         # [6/23] 동전주 진입 하한가(BARRO_MIN_ENTRY_PRICE) — 저가·저유동 동전주 배제.
@@ -2071,6 +2084,12 @@ async def _scan_and_buy(
         if len(candles) < 60:
             _fn["캔들부족"] += 1
             continue
+        # [2026-09-24] 휴장 감지 집계 — 판정만 하고 흐름은 바꾸지 않는다.
+        try:
+            if candles[-1].timestamp.astimezone(KST).date() != _now_kst().date():
+                _no_today_bar += 1
+        except Exception:  # noqa: BLE001 — 집계 실패가 스캔을 막지 않는다
+            pass
         _fn["시뮬대상"] += 1
 
         # ai_swing 은 과거 누적 PnL이 아니라 관측 데몬과 동일한 최신 일봉
@@ -2271,6 +2290,18 @@ async def _scan_and_buy(
 
     # [2026-09-23] 후보 퍼널 요약 — 탈락이 있었을 때만 1줄. 진입이 0 인 이유를
     #   로그만으로 추적할 수 있게 한다(종전에는 전부 무로그라 불가능했다).
+    # [2026-09-24] 휴장 감지 — 조회된 후보 중 당일 봉이 있는 것이 하나도 없고
+    #   합의 하한을 넘으면 휴장으로 본다. 기본은 로그만(동작 변경 0).
+    if _fn["시뮬대상"] >= _MARKET_CLOSED_MIN_AGREE and _no_today_bar == _fn["시뮬대상"]:
+        _tag = "MARKET-CLOSED" if _MARKET_CLOSED_SKIP else "SHADOW-MARKET-CLOSED"
+        _sfx = " — 스캔 생략" if _MARKET_CLOSED_SKIP else " [측정·미차단]"
+        print(
+            f"  [{_now_kst():%H:%M:%S}][{_tag}] 조회 {_fn['시뮬대상']}종목 전부 당일 봉 없음"
+            f" — 휴장 추정{_sfx}"
+        )
+        if _MARKET_CLOSED_SKIP:
+            return 0
+
     if _fn["입력"] and _fn["시뮬대상"] < _fn["입력"]:
         _drop = " ".join(f"{k}={v}" for k, v in _fn.items()
                          if k not in ("입력", "시뮬대상") and v)
