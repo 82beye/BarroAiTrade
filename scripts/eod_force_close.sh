@@ -22,10 +22,17 @@ RETRY_WAIT="${EOD_CLOSE_RETRY_WAIT:-90}"
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
+# [2026-09-28] --exclude-strategy 에 swing_38,ai_swing 추가 — 다일보유 전략 보호.
+#   왜: evaluate_holdings.py 는 force_mode(--tp/--sl 지정)에서 PositionContext 를
+#   만들지 않아(L229 `if not force_mode:`) ctx=None → _evaluate_basic() 가 돌고
+#   전략 override(SL −8%)·min_hold 3일이 **전부 무시**된다. 실측: −4.0% ai_swing 보유가
+#   `signal=take_profit 매도수량=100` 으로 전량 청산됐다(재현 확인).
+#   데몬 내부 트림은 이미 _FORCE_CLOSE_EXEMPT_STRATEGIES={swing_38,ai_swing} 로 면제하는데
+#   이 크론 경로만 누락돼 있었다. 되돌리기 = 아래 목록에서 ,swing_38,ai_swing 제거.
 for try in $(seq 1 "$MAX_TRY"); do
   echo "==== [$(ts)] EOD 강제청산 시도 $try/$MAX_TRY ===="
   "$PY" "$REPO/scripts/evaluate_holdings.py" \
-      --exclude-strategy supertrend,limit_up_chase \
+      --exclude-strategy supertrend,limit_up_chase,swing_38,ai_swing \
       --tp -100 --sl 100 --auto-sell --no-dry-run --telegram \
       --audit-log "$REPO/data/order_audit.csv" \
       --pos-log "$REPO/data/active_positions.json"

@@ -361,8 +361,13 @@ def test_evaluate_holdings_default_excludes_limit_up():
     ap = m._build_argparser() if hasattr(m, "_build_argparser") else None
     if ap is None:
         # argparser 가 main 내부 구성이면 소스에서 default 문자열 확인(방어적).
+        #   완전일치로 묶지 않는다 — 제외 목록에는 다일보유 전략(ai_swing 등)이
+        #   추가될 수 있고, 이 테스트의 의도는 limit_up_chase 가 기본 제외인지다.
+        import re as _re
         src = p.read_text(encoding="utf-8")
-        assert 'default="supertrend,limit_up_chase"' in src
+        _m = _re.search(r'"--exclude-strategy",\s*default="([^"]*)"', src)
+        assert _m, "--exclude-strategy default 를 찾지 못했다"
+        assert "limit_up_chase" in _m.group(1).split(",")
     else:
         ns = ap.parse_args([])
         assert "limit_up_chase" in ns.exclude_strategy
