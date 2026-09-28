@@ -61,6 +61,10 @@ from backend.core.backtester.market_regime import (
     MarketRegime, classify_regime, regime_weights,
 )
 from backend.core.strategy.trap_guard import TrapGuardConfig, evaluate_trap_guard
+from backend.core.strategy.ai_swing_factor_gate import (  # noqa: E402
+    FactorGateConfig,
+    evaluate_factor_gate,
+)
 from backend.core.strategy.zone_entry_gates import (
     config_from_env as _zone_gate_config_from_env,
     evaluate_zone_gates as _evaluate_zone_gates,
@@ -1519,6 +1523,17 @@ async def _ai_swing_extra_candidates(fetcher, items: list, excluded: set[str]) -
             continue
         if cur <= 0:
             continue
+        # 팩터 게이트 — default-OFF. 추가 TR 없이 위에서 받은 일봉을 재사용한다.
+        #   근거·한계는 backend/core/strategy/ai_swing_factor_gate.py 문서화 참조.
+        try:
+            _fg_ok, _fg_why = evaluate_factor_gate(candles, _AI_SWING_FACTOR_GATE)
+        except Exception:
+            _fg_ok, _fg_why = True, ""      # 게이트 결함이 후보 공급을 끊지 않게 한다
+        if _fg_why:
+            _tag = "SHADOW-AI-FACTOR" if _fg_ok else "SKIP-AI-FACTOR"
+            print(f"  [{_now_kst():%H:%M:%S}][{_tag}] {sym} — {_fg_why}")
+        if not _fg_ok:
+            continue
         out.append(LeaderCandidate(
             symbol=sym,
             name=str(getattr(it, "name", "") or sym),
@@ -1674,6 +1689,7 @@ _DAEMON_TRAP = TrapGuardConfig(
 #   활성화: BARRO_ZONE_TREND_GATE_ENABLED / _REENTRY_GUARD_ENABLED (+ _SHADOW=1 권장)
 #   설계·근거: backend/core/strategy/zone_entry_gates.py docstring
 _ZONE_GATES = _zone_gate_config_from_env()
+_AI_SWING_FACTOR_GATE = FactorGateConfig.from_env()
 
 # [2026-09-24] 휴장일 감지 — 데몬에 휴장일 인식이 전혀 없어 휴장일에도 하루 종일
 #   스캔하며 주문마다 `RC4010:모의투자 영업일이 아닙니다` 를 맞는다(9/24 추석 연휴 실사례).
