@@ -1572,11 +1572,39 @@ def _ai_swing_budget_left(pos_store, balance, deposit) -> tuple[float, float]:
     return est_total, ratio * est_total - used
 
 
+def _ai_swing_max_value_per_pos() -> float:
+    """ai_swing 종목당 주문금액 상한(원). 0 또는 미설정 = 상한 없음.
+
+    왜 별도 레버가 필요한가 — 종목당 금액은 `balance_gate.evaluate_risk_gate` 의
+    `even_slot = 현금 × max_total_position ÷ max_concurrent_positions` 가 정하고,
+    그 값은 `data/policy.json` 에 있어 **존 3전략과 공유**된다(기본 현금의 8%).
+    ai_swing 만 작게 가져가려면 공용 설정을 건드리지 않는 전용 상한이 필요하다.
+    `BARRO_AI_SWING_BUDGET_RATIO` 는 ai_swing **총예산**만 제한해 종목당은 못 줄인다.
+    """
+    raw = (os.environ.get("BARRO_AI_SWING_MAX_VALUE_PER_POS") or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        v = float(raw)
+    except ValueError:
+        return 0.0
+    return v if v > 0 else 0.0
+
+
 def _ai_swing_order_qty(requested_qty: int, price: float, budget_left: float) -> int:
-    """호가 기준 주문금액이 남은 ai_swing 예산을 넘지 않도록 수량을 내림 제한한다."""
+    """호가 기준 주문금액이 남은 ai_swing 예산·종목당 상한을 넘지 않도록 내림 제한한다.
+
+    종목당 상한은 `BARRO_AI_SWING_MAX_VALUE_PER_POS`(0=무제한). ai_swing 전용 경로라
+    다른 전략의 수량 산정에는 영향이 없다. DCA 2차 트랜치도 이 함수가 돌려준 수량을
+    `total_recommended_qty` 로 저장하므로(호출부) 상한을 넘겨 추가매수하지 않는다.
+    """
     if requested_qty <= 0 or price <= 0 or budget_left <= 0:
         return 0
-    return min(int(requested_qty), int(budget_left // price))
+    qty = min(int(requested_qty), int(budget_left // price))
+    cap = _ai_swing_max_value_per_pos()
+    if cap > 0:
+        qty = min(qty, int(cap // price))
+    return max(0, qty)
 
 
 def _ai_swing_cap_filter(signals: list, pos_store, balance, deposit) -> tuple[list, list]:
