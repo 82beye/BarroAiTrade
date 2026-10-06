@@ -104,6 +104,24 @@ class ExitPolicy:
 #
 #   swing_38 (Phase D2 multi-day) 는 ExitEngine SL=-15% 와 본 profile SL=-15%
 #   가 동일 — 의도된 격차는 intraday 단타 전략에만 적용.
+def _dec_env(name: str, default: str) -> Decimal:
+    """env → Decimal. 오타·빈값·비수치는 default 로 폴백한다.
+
+    라이브 청산 임계를 정하는 경로라 `Decimal(os.environ.get(...))` 를 그대로 쓰면
+    env 오타 하나가 **모듈 임포트를 깨뜨려** 데몬 전체가 죽는다. 외부 입력은 전량
+    흡수한다(§2 S3). 음수 허용(손절 임계) — 범위 검증은 호출부 책임.
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return Decimal(default)
+    try:
+        return Decimal(raw)
+    except (ArithmeticError, ValueError, TypeError):
+        import warnings
+        warnings.warn(f"env {name}={raw!r} 파싱 실패 — default {default} 사용", stacklevel=2)
+        return Decimal(default)
+
+
 _AI_SWING_PARAMS = AiSwingParams()
 _AI_SWING_SL_PCT = _sl_fraction_from_env(_AI_SWING_PARAMS.sl_pct) * Decimal("100")
 
@@ -131,8 +149,15 @@ STRATEGY_EXIT_PROFILES: dict[str, dict] = {
     "gold_zone": {
         "stop_loss_pct": Decimal("-4.0"),
         "take_profit_pct": Decimal("4.0"),
-        "partial_tp_pct": Decimal("2.0"),
-        "partial_tp_ratio": Decimal("0.5"),
+        # [2026-10-06] 부분익절 env tunable — default 는 기존 값(2.0 / 0.5) 유지라
+        #   머지만으로는 라이브 거동이 바뀌지 않는다(§2 S3). `.env.local` 로 조정·즉시 롤백.
+        #   근거: 실제 포지션 8건을 5분봉 실경로로 재현한 청산 프로파일 스윕에서
+        #   현행(+2%×50%) PF 0.71 → +3%×70% PF 0.96 으로 개선. 방향이 단조라
+        #   (+2 < +3, 비중 30% < 50% < 70%) 단일 최적점 과적합 위험은 낮다.
+        #   참고: f_zone 은 이미 partial_tp_pct=3.0 이라 정합성도 개선된다.
+        #   한계: 표본 8건 · 5분봉 없는 3종목(최대손실 2건 포함) 제외로 낙관 편향.
+        "partial_tp_pct": _dec_env("BARRO_GOLDZONE_PARTIAL_TP_PCT", "2.0"),
+        "partial_tp_ratio": _dec_env("BARRO_GOLDZONE_PARTIAL_TP_RATIO", "0.5"),
         "trailing_start_pct": Decimal("3.0"),
         "trailing_offset_pct": Decimal("1.0"),
         "breakeven_trigger_pct": Decimal("2.5"),
