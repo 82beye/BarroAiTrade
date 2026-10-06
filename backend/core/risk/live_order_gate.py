@@ -157,13 +157,18 @@ class LiveOrderGate:
 
     def _preflight(self, side: OrderSide, daily_pnl_pct: Decimal) -> None:
         # 1) ENV flag 강제 (실전 host 의 안전망)
-        if self._policy.require_env_flag and not self._executor._dry_run:
-            flag = os.environ.get(self._policy.env_flag_name, "").lower()
-            if flag not in {"1", "true", "yes", "on"}:
-                raise TradingDisabled(
-                    f"{self._policy.env_flag_name}=truthy 필요 (현재: {flag!r}). "
-                    f"DRY_RUN 모드는 ok. 실전 진입 시 명시적 활성화 필수."
-                )
+        # [2026-07-27] 사용자 지시로 주석 처리(비활성).
+        #   사유: mock-live(KIWOOM_BASE_URL=mockapi, 실금 0) 운영 중 LIVE_TRADING_ENABLED
+        #         플래그 의존을 제거해 달라는 요청. 이 블록은 실전 host 진입 전 마지막
+        #         안전망(플래그 미설정 시 TradingDisabled)이므로, 재활성 전까지 non-dry_run
+        #         주문이 env flag 없이도 통과함 — 실전 api 전환 시 반드시 원복할 것.
+        # if self._policy.require_env_flag and not self._executor._dry_run:
+        #     flag = os.environ.get(self._policy.env_flag_name, "").lower()
+        #     if flag not in {"1", "true", "yes", "on"}:
+        #         raise TradingDisabled(
+        #             f"{self._policy.env_flag_name}=truthy 필요 (현재: {flag!r}). "
+        #             f"DRY_RUN 모드는 ok. 실전 진입 시 명시적 활성화 필수."
+        #         )
 
         # 2) 일일 손실 한도 — 임시 비활성화. 매도는 원래도 손절 가능해야 한다.
         if side == OrderSide.BUY and self._policy.daily_loss_order_block_enabled:
