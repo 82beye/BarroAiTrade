@@ -61,6 +61,13 @@ from backend.core.backtester.market_regime import (
     MarketRegime, classify_regime, regime_weights,
 )
 from backend.core.strategy.trap_guard import TrapGuardConfig, evaluate_trap_guard
+from backend.core.strategy.ai_swing_open_entry import (  # noqa: E402
+    OpenEntryConfig,
+    evaluate_open_entry,
+    in_open_entry_window,
+    read_reco_codes,
+    select_universe,
+)
 from backend.core.strategy.ai_swing_factor_gate import (  # noqa: E402
     FactorGateConfig,
     evaluate_factor_gate,
@@ -1718,6 +1725,7 @@ _DAEMON_TRAP = TrapGuardConfig(
 #   설계·근거: backend/core/strategy/zone_entry_gates.py docstring
 _ZONE_GATES = _zone_gate_config_from_env()
 _AI_SWING_FACTOR_GATE = FactorGateConfig.from_env()
+_AI_SWING_OPEN_ENTRY = OpenEntryConfig.from_env()
 
 # [2026-09-24] 휴장일 감지 — 데몬에 휴장일 인식이 전혀 없어 휴장일에도 하루 종일
 #   스캔하며 주문마다 `RC4010:모의투자 영업일이 아닙니다` 를 맞는다(9/24 추석 연휴 실사례).
@@ -1884,15 +1892,35 @@ async def _scan_and_buy(
     # [6/23] 개장러시 군집진입 방지 — 첫 N분 신규진입 보류(BARRO_OPEN_HOLD_HHMM=HHMM).
     #   [2026-09-22] 로그 추가 — 종전에는 조용히 return 0 해서 "보류 중"과 "데몬 행"을
     #   로그로 구분할 수 없었다(실사례: 09:05~09:30 무출력을 행으로 오진).
+    # ai_swing 개장 진입(default-OFF) — 추천 엣지는 09:05 진입에 있고 09:30 부터 감쇠한다
+    #   (ai_swing_open_entry.py 측정표 참조). 존 3전략의 개장러시 보류는 그대로 유지하고
+    #   이 창에서는 **ai_swing 만** 스캔한다 — 9/22 개장 휩쏘 방어를 깨지 않는다.
+    _open_entry_now = False
     if (_OPEN_HOLD_HHMM and len(_OPEN_HOLD_HHMM) == 4 and _OPEN_HOLD_HHMM.isdigit()
             and _now_kst().time() < time(int(_OPEN_HOLD_HHMM[:2]), int(_OPEN_HOLD_HHMM[2:]))):
+        try:
+            _open_entry_now = (
+                _AI_SWING_SID in getattr(args, "zone_strategies", DEFAULT_ZONE_STRATEGIES)
+                and _ai_swing_entry_enabled()
+                and in_open_entry_window(_now_kst(), _AI_SWING_OPEN_ENTRY, BUY_START)
+            )
+        except Exception:
+            _open_entry_now = False      # 판정 실패는 기존 보류 거동으로 폴백
+        if not _open_entry_now:
+            print(
+                f"  [{_now_kst():%H:%M:%S}][OPEN-HOLD] 개장러시 보류 — "
+                f"신규진입 스캔 {_OPEN_HOLD_HHMM[:2]}:{_OPEN_HOLD_HHMM[2:]} 부터"
+            )
+            return 0
         print(
-            f"  [{_now_kst():%H:%M:%S}][OPEN-HOLD] 개장러시 보류 — "
-            f"신규진입 스캔 {_OPEN_HOLD_HHMM[:2]}:{_OPEN_HOLD_HHMM[2:]} 부터"
+            f"  [{_now_kst():%H:%M:%S}][OPEN-ENTRY] ai_swing 개장 진입 창 "
+            f"(~{_AI_SWING_OPEN_ENTRY.until_hhmm[:2]}:{_AI_SWING_OPEN_ENTRY.until_hhmm[2:]}) "
+            f"· 유니버스={_AI_SWING_OPEN_ENTRY.universe} — ai_swing 단독 스캔"
         )
-        return 0
     # 일반 매수 전략 비활성(--strategies 빈 값) → 스캔 자체를 건너뜀(슈퍼트렌드 단독 운영).
     zone_strategies = getattr(args, "zone_strategies", DEFAULT_ZONE_STRATEGIES)
+    if _open_entry_now:
+        zone_strategies = [_AI_SWING_SID]      # 개장 창에서는 존 3전략을 진입시키지 않는다
     if not zone_strategies:
         print(f"  [{_now_kst():%H:%M:%S}][SCAN-SKIP] 일반 매수 전략 없음 — 스캔 생략")
         return 0
@@ -2039,7 +2067,43 @@ async def _scan_and_buy(
     #   랭킹 후보와 원천이 달라 별도 합성이 필요하다(위 _ai_swing_extra_candidates 주석).
     #   ENTRY_ENABLED=0(기본)이면 로더조차 호출하지 않아 라이브에 완전 무영향.
     ai_swing_symbols: set[str] = set()
-    if _AI_SWING_SID in zone_strategies and _ai_swing_entry_enabled():
+    if _open_entry_now:
+        # 개장 진입 모드 — 진입 권위가 팩터 게이트다(패턴 판정 우회). fail-closed.
+        try:
+            _day = _now_kst().strftime("%Y-%m-%d")
+            _scan, _pred, _why = read_reco_codes(_day)
+            _cands = select_universe(_AI_SWING_OPEN_ENTRY, _scan, _pred)
+            _ts_o = _now_kst().strftime("%H:%M:%S")
+            if not _cands:
+                print(f"  [{_ts_o}][OPEN-ENTRY] 추천 유니버스 없음 — reason={_why or 'empty'}")
+            else:
+                _pass, _blocked = [], 0
+                for _sym in _cands:
+                    if _sym in excluded or _sym in leader_symbols:
+                        continue
+                    try:
+                        _cs = await fetcher.fetch_daily(symbol=_sym)
+                    except Exception:
+                        continue
+                    _ok, _rsn = evaluate_open_entry(_cs, _AI_SWING_OPEN_ENTRY)
+                    if not _ok:
+                        _blocked += 1
+                        continue
+                    _pass.append(_sym)
+                _extra = await _ai_swing_extra_candidates(
+                    fetcher,
+                    [type("_It", (), {"symbol": s_, "name": s_, "pred_score": 0.0})() for s_ in _pass],
+                    excluded | leader_symbols,
+                )
+                _extra = [c for c in _extra if _passes_universe_filters(c)]
+                filtered = filtered + _extra
+                ai_swing_symbols = set(_pass) & {c.symbol for c in filtered}
+                print(f"  [{_ts_o}][OPEN-ENTRY] 유니버스 {len(_cands)} → 게이트통과 {len(_pass)} "
+                      f"(차단 {_blocked}) → 후보주입 {len(_extra)}종목")
+        except Exception as _e:
+            print(f"  [OPEN-ENTRY-ERR] {type(_e).__name__}: {_e} — 개장 진입 건너뜀")
+            ai_swing_symbols = set()
+    elif _AI_SWING_SID in zone_strategies and _ai_swing_entry_enabled():
         try:
             _ai_items, _ai_status, _ai_reason = _ai_swing_universe_symbols()
             ts_a = _now_kst().strftime("%H:%M:%S")
@@ -2146,7 +2210,11 @@ async def _scan_and_buy(
         # analyze() 신호를 진입 권위로 쓴다. 교집합 전용 후보에서 현재 신호가 없으면
         # 다른 전략으로 바꿔 매수하지 않는다. 리더와 겹친 종목만 일반 전략 폴백 허용.
         current_ai_signal = None
-        if c.symbol in ai_swing_symbols:
+        if _open_entry_now and c.symbol in ai_swing_symbols:
+            # 개장 진입: 팩터 게이트가 진입 권위라 패턴(impulse/fib/bounce) 판정을 건너뛴다.
+            #   근거 — 패턴은 추천 유니버스에서 43거래일 3건만 발화해 엣지를 수확 못 한다.
+            pass
+        elif c.symbol in ai_swing_symbols:
             current_ai_signal, ai_reason = _ai_swing_current_signal(c, candles)
             if current_ai_signal is None and c.symbol not in leader_symbols:
                 ts_s = _now_kst().strftime("%H:%M:%S")
