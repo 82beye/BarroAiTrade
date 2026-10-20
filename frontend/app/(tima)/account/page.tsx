@@ -17,12 +17,50 @@ import { Disclaimer } from '@/components/layout/disclaimer';
 import {
   api,
   type AccountBalance,
+  type AccountHolding,
   type BalanceHistoryPoint,
   type RealizedPnlResponse,
 } from '@/lib/api';
 
 // ── 티마 계좌 화면 (라이트 셸 · 보유종목/실현손익/총괄) ──
 // 키움 키 미연동 개발 환경에선 API 가 빈/에러 → 모든 뷰가 "미연동" 빈 상태로 강등.
+
+// ── 목표가 셀 — 진입 시 확정된 손절·익절·추가매수가를 보여준다 ──
+//   원천은 백엔드 position_targets(라이브 실효 STRATEGY_EXIT_PROFILES 기반).
+//   표시 전용이며 청산 판정에는 쓰이지 않는다. 목표가가 없는 포지션(백필 전·
+//   산출 실패)은 조용히 비우지 않고 "미설정"으로 드러낸다.
+function TargetCell({ h }: { h: AccountHolding }) {
+  const t = h.targets;
+  if (!t) {
+    return <span className="text-[10px] text-tima-sub">목표가 미설정</span>;
+  }
+  const prog = h.targets_progress ?? {};
+  const toSl = prog.to_stop_loss_pct;
+  const toTp = prog.to_partial_tp_pct;
+  const dca = (t.dca_prices ?? []).map((d) => fmtNum(d.price)).join(' / ');
+  return (
+    <div className="space-y-0.5 text-right">
+      <div className="font-mono text-[11px] text-tima-down">
+        손절 {fmtNum(t.stop_loss)}
+        {typeof toSl === 'number' && (
+          <span className="ml-1 text-[9px] text-tima-sub">({toSl.toFixed(1)}%)</span>
+        )}
+      </div>
+      <div className="font-mono text-[11px] text-tima-up">
+        익절 {fmtNum(t.partial_tp)}
+        {typeof toTp === 'number' && (
+          <span className="ml-1 text-[9px] text-tima-sub">({toTp.toFixed(1)}%)</span>
+        )}
+      </div>
+      {dca && (
+        <div className="font-mono text-[9px] text-tima-sub">추매 {dca}</div>
+      )}
+      {t.max_hold_until && (
+        <div className="text-[9px] text-tima-sub">~{t.max_hold_until.slice(5)}</div>
+      )}
+    </div>
+  );
+}
 
 type AccountTab = 'overview' | 'holdings' | 'pnl';
 
@@ -330,6 +368,7 @@ export default function AccountPage() {
                       <th className="p-2.5 text-right text-xs font-semibold">수량·평단</th>
                       <th className="p-2.5 text-right text-xs font-semibold">현재가·평가</th>
                       <th className="p-2.5 text-right text-xs font-semibold">손익률</th>
+                      <th className="p-2.5 text-right text-xs font-semibold">목표가</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -368,6 +407,9 @@ export default function AccountPage() {
                           <div className="text-[10px]">
                             <SignedKRW v={h.pnl} />
                           </div>
+                        </td>
+                        <td className="p-2.5 text-right whitespace-nowrap">
+                          <TargetCell h={h} />
                         </td>
                       </tr>
                     ))}
