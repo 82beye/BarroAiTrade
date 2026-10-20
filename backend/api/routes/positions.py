@@ -63,9 +63,21 @@ async def get_balance() -> dict:
         eval_total = float(balance.total_eval)
         total = float(balance.estimated_deposit)
 
+        # [2026-10-20] 진입 시 확정한 목표가를 보유종목에 합성한다 —
+        #   대시보드에서 "지금 어디까지 가면 익절 / 어디서 손절"을 볼 수 있게.
+        #   장부(active_positions.json) 읽기 전용. 부재·실패는 targets=None 으로
+        #   강등하고 잔고 조회 자체는 절대 깨뜨리지 않는다(§8).
+        book: dict = {}
+        try:
+            from backend.core.journal.active_positions import ActivePositionStore
+            book = ActivePositionStore().load_all() or {}
+        except Exception as exc:
+            logger.warning("목표가 장부 로드 실패(잔고는 정상 반환): %s", exc)
+            book = {}
+
         holdings = []
         for h in (balance.holdings or []):
-            holdings.append({
+            row = {
                 "symbol": h.symbol,
                 "name": h.name,
                 "qty": h.qty,
@@ -74,7 +86,24 @@ async def get_balance() -> dict:
                 "eval_amount": float(h.eval_amount),
                 "pnl": float(h.pnl),
                 "pnl_rate": float(h.pnl_rate),
-            })
+            }
+            pos = book.get(h.symbol)
+            tgt = getattr(pos, "targets", None) if pos is not None else None
+            row["strategy"] = getattr(pos, "strategy", "") if pos is not None else ""
+            row["entry_time"] = getattr(pos, "entry_time", "") if pos is not None else ""
+            row["targets"] = tgt or None
+            if tgt:
+                # 현재가 대비 각 목표까지 거리(%) — 표시 전용, 판정에 쓰지 않는다
+                try:
+                    from backend.core.strategy.position_targets import PositionTargets, progress
+                    row["targets_progress"] = progress(
+                        PositionTargets(**{k: v for k, v in tgt.items()
+                                           if k in PositionTargets.__dataclass_fields__}),
+                        float(h.cur_price),
+                    )
+                except Exception:
+                    row["targets_progress"] = {}
+            holdings.append(row)
 
         from datetime import datetime, timezone, timedelta
         now_kst = datetime.now(timezone(timedelta(hours=9)))
