@@ -501,6 +501,27 @@ export interface FundamentalResponse {
 }
 
 // ── 티마 계좌(account) 타입 — 잔고 / 보유종목 / 실현손익 / 자산추이 ──
+/** 진입 시점에 확정된 목표가 — 백엔드 position_targets.build_targets() 산출물.
+ *  표시·추적 전용이며 청산 판정에는 쓰이지 않는다. 진입 전 생성된 포지션은 null. */
+export interface PositionTargets {
+  entry: number;
+  stop_loss: number;
+  stop_loss_pct: number;
+  partial_tp: number;
+  partial_tp_pct: number;
+  partial_tp_ratio: number;
+  take_profit: number;
+  take_profit_pct: number;
+  trailing_start: number;
+  trailing_start_pct: number;
+  trailing_offset_pct: number;
+  dca_prices: { tranche: number; drop_pct: number; price: number }[];
+  min_hold_days: number;
+  max_hold_days: number;
+  min_hold_until: string;
+  max_hold_until: string;
+}
+
 export interface AccountHolding {
   symbol: string;
   name?: string | null;
@@ -510,6 +531,12 @@ export interface AccountHolding {
   eval_amount: number;
   pnl: number;
   pnl_rate: number;
+  strategy?: string | null;
+  entry_time?: string | null;
+  /** 목표가. 백필 전 포지션·산출 실패 시 null — UI 는 "미설정"으로 표시한다. */
+  targets?: PositionTargets | null;
+  /** 현재가 대비 각 목표까지 거리(%). 표시 전용. */
+  targets_progress?: Record<string, number> | null;
 }
 
 export interface AccountBalance {
