@@ -79,6 +79,11 @@ class ActivePosition:
     # 2026-05-19 P2 fix — DCA 폴링 사이 일중 low 도달 추적용.
     # daemon 60s 폴링이 cur_price 만 보면 폴링 사이 low 놓침 → DCA trigger 미발동
     # (5/18 069500 L -6.4% 도달했어도 T2 pending 영구).
+    # [2026-10-20] 진입 시점에 확정한 목표가 — 추가매수·손절·익절·트레일링·보유기간.
+    #   산출 원천은 라이브 실효 STRATEGY_EXIT_PROFILES 다(전략 exit_plan() 아님 —
+    #   그건 라이브에서 호출되지 않아 화면과 실제 청산이 어긋난다).
+    #   판정에는 쓰지 않는다. 표시·추적 전용이며 비어 있어도 청산 로직은 무영향.
+    targets: dict = field(default_factory=dict)
     trough_pnl_rate: float = 0.0          # 보유 기간 중 최저 수익률 (음수)
     trough_updated_at: str = ""           # trough 갱신 시점
 
@@ -177,6 +182,7 @@ class ActivePositionStore:
                 flu_rate=float(d.get("flu_rate", 0)),
                 score=float(d.get("score", 0)),
                 tranches=tranches,
+                targets=d.get("targets") or {},
                 # 2026-05-19 P1 fix — 적응형 매도 추적 필드 read 누락 버그.
                 # upsert 로 저장 되어도 다음 load 시 default 로 reset 되어
                 # partial_tp_done=False 영구 유지 → PARTIAL_TP 매 사이클 재발동
@@ -374,12 +380,24 @@ class ActivePositionStore:
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         tranches = _build_tranches(total_recommended_qty, entry_price, order_no, now,
                                    single_tranche=single_tranche)
+        # [2026-10-20] 진입 시점 목표가 확정 — 추가매수·손절·익절·트레일링·보유기간.
+        #   산출 실패는 전량 흡수한다(§2 S3) — 목표가가 없어도 청산 로직은 무영향이며
+        #   진입 자체를 막아선 안 된다.
+        targets: dict = {}
+        try:
+            from backend.core.strategy.position_targets import build_targets
+            t = build_targets(symbol, strategy, entry_price, entry_time=now)
+            if t is not None:
+                targets = t.to_dict()
+        except Exception:
+            targets = {}
         pos = ActivePosition(
             symbol=symbol, name=name, strategy=strategy,
             entry_price=entry_price, entry_time=now,
             total_recommended_qty=total_recommended_qty,
             sl_pct=sl_pct, flu_rate=flu_rate, score=score,
             tranches=tranches,
+            targets=targets,
         )
         self.upsert(pos)
         return pos
