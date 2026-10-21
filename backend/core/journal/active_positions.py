@@ -112,8 +112,15 @@ class ActivePosition:
 
 
 def _build_tranches(total_qty: int, entry_price: float, order_no: str, filled_at: str,
-                    single_tranche: bool = False) -> list[Tranche]:
+                    single_tranche: bool = False,
+                    split: Optional[tuple[float, float]] = None,
+                    trigger_drop_pct: Optional[float] = None,
+                    equal_amount: bool = False) -> list[Tranche]:
     """2분할 트랜치 생성 — T1 60% 즉시, T2 40% at -1.5% (SL -4% 전 완료).
+
+    split/trigger_drop_pct 를 주면 비율·발동가를 덮어쓴다(ai_swing 50/50 등).
+    equal_amount=True 면 T2 수량을 '발동가에서 T1 과 같은 금액'이 되도록 환산한다 —
+    하락 후 매수이므로 같은 금액이면 수량은 T1 보다 많아진다.
 
     BAR-OPS-35: single_tranche=True 면 전량을 단일 filled tranche 로 생성한다.
     supertrend 등 '전량 단일주문' 진입 경로에서 178/118 분할 모델링이 broker 보유와
@@ -128,18 +135,25 @@ def _build_tranches(total_qty: int, entry_price: float, order_no: str, filled_at
                 order_no=order_no, filled_price=entry_price, filled_at=now,
             ),
         ]
-    q1 = round(total_qty * 0.6)
+    r1, r2 = split if split else (0.6, 0.4)
+    drop = -1.5 if trigger_drop_pct is None else float(trigger_drop_pct)
+    q1 = round(total_qty * r1)
     q2 = total_qty - q1  # 나머지 전부 T2로
+    if equal_amount and q1 > 0 and entry_price > 0:
+        # 같은 '금액'으로 2회 — 발동가(=entry*(1+drop/100))에서 T1 과 동일 금액이 되는 수량.
+        trig_price = entry_price * (1 + drop / 100.0)
+        if trig_price > 0:
+            q2 = max(1, round(q1 * entry_price / trig_price))
 
     return [
         Tranche(
-            tranche=1, ratio=0.6, qty=q1,
+            tranche=1, ratio=r1, qty=q1,
             trigger_drop_pct=0.0, status="filled",
             order_no=order_no, filled_price=entry_price, filled_at=now,
         ),
         Tranche(
-            tranche=2, ratio=0.4, qty=q2,
-            trigger_drop_pct=-1.5, status="pending",
+            tranche=2, ratio=r2, qty=q2,
+            trigger_drop_pct=drop, status="pending",
         ),
     ]
 
@@ -371,6 +385,9 @@ class ActivePositionStore:
         flu_rate: float = 0.0,
         score: float = 0.0,
         single_tranche: bool = False,
+        split: Optional[tuple[float, float]] = None,
+        trigger_drop_pct: Optional[float] = None,
+        equal_amount: bool = False,
     ) -> ActivePosition:
         """매수 주문 직후 호출 — 분할 트랜치 생성 후 저장.
 
@@ -379,7 +396,9 @@ class ActivePositionStore:
         """
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         tranches = _build_tranches(total_recommended_qty, entry_price, order_no, now,
-                                   single_tranche=single_tranche)
+                                   single_tranche=single_tranche,
+                                   split=split, trigger_drop_pct=trigger_drop_pct,
+                                   equal_amount=equal_amount)
         # [2026-10-20] 진입 시점 목표가 확정 — 추가매수·손절·익절·트레일링·보유기간.
         #   산출 실패는 전량 흡수한다(§2 S3) — 목표가가 없어도 청산 로직은 무영향이며
         #   진입 자체를 막아선 안 된다.
@@ -390,9 +409,13 @@ class ActivePositionStore:
             )
             # single_tranche 포지션은 pending 트랜치가 없어 DCA 루프가 돌지 않는다
             # (ai_swing·supertrend). 실행되지 않는 추매가를 표시하면 오정보다(§8).
+            pending_drops = tuple(
+                float(tr.trigger_drop_pct) for tr in tranches
+                if (tr.status or "") != "filled"
+            )
             t = build_targets(
                 symbol, strategy, entry_price, entry_time=now,
-                dca_drops=() if single_tranche else DEFAULT_DCA_DROPS,
+                dca_drops=pending_drops,
             )
             if t is not None:
                 targets = t.to_dict()

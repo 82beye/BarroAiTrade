@@ -165,4 +165,36 @@ def test_single_tranche_position_has_no_dca_targets(tmp_path):
         entry_price=11480.0, total_recommended_qty=217,
         order_no="PENDING:101360", single_tranche=False,
     )
-    assert [d["tranche"] for d in multi.targets["dca_prices"]] == [2, 3]
+    # 장부의 실제 pending 트랜치는 T2(-1.5%) 하나뿐 — 목표가도 그것만 표시해야 한다.
+    # (이전에는 실재하지 않는 T3 까지 표시했다.)
+    dca = multi.targets["dca_prices"]
+    assert [d["tranche"] for d in dca] == [2]
+    assert dca[0]["drop_pct"] == -1.5
+
+
+def test_ai_swing_two_tranche_equal_amount(tmp_path):
+    """ai_swing 2분할 50/50 '같은 금액' — T2 는 발동가에서 T1 과 동일 금액이 되는 수량."""
+    from backend.core.journal.active_positions import ActivePositionStore
+
+    store = ActivePositionStore(path=str(tmp_path / "ap.json"))
+    entry, total, drop = 11480.0, 216, -3.0
+    pos = store.create_from_order(
+        symbol="300080", name="플리토", strategy="ai_swing",
+        entry_price=entry, total_recommended_qty=total,
+        order_no="PENDING:300080",
+        single_tranche=False, split=(0.5, 0.5),
+        trigger_drop_pct=drop, equal_amount=True,
+    )
+    t1, t2 = pos.tranches
+    assert t1.status == "filled" and t1.qty == 108      # 정확히 절반
+    assert t2.status == "pending" and t2.trigger_drop_pct == drop
+
+    # 같은 금액: 발동가 × T2수량 ≈ 진입가 × T1수량 (1% 이내)
+    trig = entry * (1 + drop / 100.0)
+    assert abs(t2.qty * trig - t1.qty * entry) / (t1.qty * entry) < 0.01
+    assert t2.qty > t1.qty                              # 싸졌으니 수량은 더 많다
+
+    # 목표가의 추매가는 실제 pending 트랜치와 같은 발동가를 써야 한다(표시=실행).
+    dca = pos.targets["dca_prices"]
+    assert len(dca) == 1 and dca[0]["drop_pct"] == drop
+    assert dca[0]["price"] == float(int(entry * (1 + drop / 100.0)))
