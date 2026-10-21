@@ -1353,6 +1353,9 @@ _MEANREV_STRATEGIES = {"gold_zone"}
 # [2026-07-30] ai_swing 추가 — Swing38Strategy 를 상속해 add_on_signal(자체 2차 분할진입)을
 #   그대로 물려받으므로 swing_38 과 동일한 이중 분할 위험이 있다.
 _NO_DCA_STRATEGIES = {"swing_38", "supertrend", "ai_swing"}
+# ai_swing 2분할이 켜지면 데몬 DCA 가 T2 를 집행해야 하므로 스킵 대상에서 뺀다.
+if _env_truthy("BARRO_AI_SWING_DCA_ENABLED", "0"):
+    _NO_DCA_STRATEGIES = _NO_DCA_STRATEGIES - {"ai_swing"}
 
 # [BAR-OPS-38 P0#3] 되돌림(gold)·눌림(f) 전략 시초갭 상한(%) — 갭상승 폭등주에는 바닥/눌림
 #   신호가 고점에서 발화한다(6/10 gold 추격 3종 전패 -461K: SK오션플랜트 시가갭 +22.8% 등.
@@ -1433,6 +1436,20 @@ def _force_close_skip(symbol: str, strategy: str | None, cb_skip: set[str]) -> b
 # ⚠️ shadow 실측(scripts/ai_swing_daemon.py) 으로 교집합 종목수·진입신호수가 0 이 아님을
 #   확인하기 전에는 ②③ 을 켜지 말 것 — docs/operations/ai-swing-runbook.md §2.
 _AI_SWING_SID = "ai_swing"
+
+# [2026-10-21] ai_swing 2분할 매수(50/50 동일금액). 사용자 지시.
+#   default-OFF(§2 S3) — 켜면 진입 주문이 T1(절반)만 나가고 T2 는 발동가에서 DCA 로 체결된다.
+#   ★전량 주문 + 분할 장부는 6/10 이중매수 사고(장부 23 vs 실보유 32)의 재현이므로,
+#    반드시 place_buy 수량도 T1 으로 줄인다 — 아래 _ai_swing_t1_qty 참조.
+_AI_SWING_DCA_ENABLED = _env_truthy("BARRO_AI_SWING_DCA_ENABLED", "0")
+_AI_SWING_DCA_DROP_PCT = float(os.environ.get("BARRO_AI_SWING_DCA_DROP_PCT", "-3.0"))
+
+
+def _ai_swing_t1_qty(total_qty: int) -> int:
+    """2분할 시 1차 주문 수량(50%). 1주 미만이면 분할하지 않고 전량."""
+    if not _AI_SWING_DCA_ENABLED or total_qty < 2:
+        return total_qty
+    return max(1, round(total_qty * 0.5))
 
 
 def _ai_swing_entry_enabled() -> bool:
@@ -2601,11 +2618,18 @@ async def _scan_and_buy(
                     sl_pct=sl,
                     flu_rate=float(leader.flu_rate) if leader else 0.0,
                     score=float(leader.score) if leader else 0.0,
-                    single_tranche=True,
+                    single_tranche=not _AI_SWING_DCA_ENABLED,
+                    split=(0.5, 0.5) if _AI_SWING_DCA_ENABLED else None,
+                    trigger_drop_pct=_AI_SWING_DCA_DROP_PCT if _AI_SWING_DCA_ENABLED else None,
+                    equal_amount=_AI_SWING_DCA_ENABLED,
                 )
 
+            # ai_swing 2분할: 장부는 전량(order_qty) 권고로 두되 실제 주문은 T1(50%) 만
+            #   낸다. 전량 주문 + 분할 장부는 broker 실보유가 권고를 초과하는
+            #   6/10 sync-loss 사고의 재현이다.
+            buy_qty = _ai_swing_t1_qty(order_qty) if is_ai_swing else order_qty
             # Phase D2.6: strategy_id 전파 (order_audit.csv 신규 컬럼)
-            result = await gate.place_buy(symbol=r.symbol, qty=order_qty,
+            result = await gate.place_buy(symbol=r.symbol, qty=buy_qty,
                                           daily_pnl_pct=daily_pnl_pct,
                                           strategy_id=strategy)
             accepted = True
@@ -2614,8 +2638,9 @@ async def _scan_and_buy(
             tag = "DRY_RUN" if result.dry_run else "ORDERED"
             ts = _now_kst().strftime("%H:%M:%S")
             print(
-                f"  [{ts}][{tag}] {r.symbol} {r.name:<14} qty={order_qty}"
-                f"(전체 {r.recommended_qty}) strategy={strategy} order_no={result.order_no}"
+                f"  [{ts}][{tag}] {r.symbol} {r.name:<14} qty={buy_qty}"
+                + (f"/{order_qty}(1차 50%)" if buy_qty != order_qty else "")
+                + f"(전체 {r.recommended_qty}) strategy={strategy} order_no={result.order_no}"
             )
 
             # 주문 접수 직후 먼저 세션·예산을 예약한다. 이후 장부 저장이 실패해도
@@ -2629,7 +2654,7 @@ async def _scan_and_buy(
             if notifier:
                 try:
                     await notifier.send(format_buy_alert(
-                        r.symbol, r.name, order_qty,
+                        r.symbol, r.name, buy_qty,
                         result.order_no, result.dry_run,
                     ))
                 except Exception:

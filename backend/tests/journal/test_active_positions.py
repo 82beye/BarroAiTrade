@@ -153,3 +153,14 @@ def test_default_still_splits_dca_tranches(tmp_path):
     assert pos.tranches[0].qty == 178 and pos.tranches[0].status == "filled"   # round(296*0.6)
     assert pos.tranches[1].qty == 118 and pos.tranches[1].status == "pending"
     assert pos.filled_qty() == 178
+
+
+def test_build_tranches_default_unchanged():
+    """기존 존전략 경로(60/40 at -1.5%)는 그대로여야 한다 — 회귀 방지."""
+    from backend.core.journal.active_positions import _build_tranches
+
+    tr = _build_tranches(100, 10000.0, "O1", "2026-10-21T00:00:00+00:00")
+    assert [(t.tranche, t.ratio, t.qty, t.trigger_drop_pct, t.status) for t in tr] == [
+        (1, 0.6, 60, 0.0, "filled"),
+        (2, 0.4, 40, -1.5, "pending"),
+    ]
