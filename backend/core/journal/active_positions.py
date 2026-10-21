@@ -385,8 +385,15 @@ class ActivePositionStore:
         #   진입 자체를 막아선 안 된다.
         targets: dict = {}
         try:
-            from backend.core.strategy.position_targets import build_targets
-            t = build_targets(symbol, strategy, entry_price, entry_time=now)
+            from backend.core.strategy.position_targets import (
+                DEFAULT_DCA_DROPS, build_targets,
+            )
+            # single_tranche 포지션은 pending 트랜치가 없어 DCA 루프가 돌지 않는다
+            # (ai_swing·supertrend). 실행되지 않는 추매가를 표시하면 오정보다(§8).
+            t = build_targets(
+                symbol, strategy, entry_price, entry_time=now,
+                dca_drops=() if single_tranche else DEFAULT_DCA_DROPS,
+            )
             if t is not None:
                 targets = t.to_dict()
         except Exception:
