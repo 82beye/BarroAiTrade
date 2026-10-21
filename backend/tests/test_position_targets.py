@@ -143,3 +143,26 @@ def test_targets_failure_does_not_block_entry(tmp_path, monkeypatch):
         single_tranche=True)
     assert pos is not None and pos.entry_price == 5_000.0
     assert pos.targets == {}
+
+
+def test_single_tranche_position_has_no_dca_targets(tmp_path):
+    """single_tranche 진입(ai_swing·supertrend)은 pending 트랜치가 없어 DCA 가 돌지 않는다.
+    실행되지 않는 추매가를 목표가에 넣으면 오정보다(§8)."""
+    from backend.core.journal.active_positions import ActivePositionStore
+
+    store = ActivePositionStore(path=str(tmp_path / "ap.json"))
+    single = store.create_from_order(
+        symbol="300080", name="플리토", strategy="ai_swing",
+        entry_price=11480.0, total_recommended_qty=217,
+        order_no="PENDING:300080", single_tranche=True,
+    )
+    assert len(single.tranches) == 1
+    assert single.targets.get("dca_prices") == []
+    assert single.targets.get("stop_loss", 0) > 0  # 나머지 목표가는 그대로 산출
+
+    multi = store.create_from_order(
+        symbol="101360", name="에코앤드림", strategy="f_zone",
+        entry_price=11480.0, total_recommended_qty=217,
+        order_no="PENDING:101360", single_tranche=False,
+    )
+    assert [d["tranche"] for d in multi.targets["dca_prices"]] == [2, 3]

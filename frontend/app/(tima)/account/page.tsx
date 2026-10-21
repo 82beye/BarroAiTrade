@@ -52,9 +52,9 @@ function TargetCell({ h }: { h: AccountHolding }) {
           <span className="ml-1 text-[9px] text-tima-sub">({toTp.toFixed(1)}%)</span>
         )}
       </div>
-      {dca && (
-        <div className="font-mono text-[9px] text-tima-sub">추매 {dca}</div>
-      )}
+      <div className="font-mono text-[9px] text-tima-sub">
+        {dca ? `추매 ${dca}` : '추매 없음 (단일 진입)'}
+      </div>
       {t.max_hold_until && (
         <div className="text-[9px] text-tima-sub">~{t.max_hold_until.slice(5)}</div>
       )}
