@@ -103,6 +103,33 @@ async def get_balance() -> dict:
                     )
                 except Exception:
                     row["targets_progress"] = {}
+            # 분할매수 현황 — 모달에서 T1/T2 체결 상태를 보여준다(표시 전용).
+            try:
+                row["tranches"] = [
+                    {
+                        "tranche": int(t.tranche),
+                        "qty": int(t.qty),
+                        "ratio": float(t.ratio),
+                        "trigger_drop_pct": float(t.trigger_drop_pct),
+                        "status": str(t.status or ""),
+                        "filled_price": float(t.filled_price or 0),
+                        "filled_at": str(t.filled_at or ""),
+                    }
+                    for t in (getattr(pos, "tranches", None) or [])
+                ]
+            except Exception:
+                row["tranches"] = []
+            # ★평단 기준 실효 손절가★ — targets.stop_loss 는 '진입 시점' 값이라
+            #   DCA 로 평단이 내려가면 어긋난다(10/23 휴니드 실증: 표시 4,646 /
+            #   실제 4,599). 청산 판정은 avg_filled_price 기준이므로 그쪽을 따른다.
+            try:
+                sl_pct = float((tgt or {}).get("stop_loss_pct") or 0)
+                avg = float(h.avg_buy_price or 0)
+                row["effective_stop_loss"] = (
+                    float(int(avg * (1 + sl_pct / 100.0))) if (sl_pct and avg > 0) else 0.0
+                )
+            except Exception:
+                row["effective_stop_loss"] = 0.0
             holdings.append(row)
 
         from datetime import datetime, timezone, timedelta

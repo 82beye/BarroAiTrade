@@ -25,6 +25,190 @@ import {
 // ── 티마 계좌 화면 (라이트 셸 · 보유종목/실현손익/총괄) ──
 // 키움 키 미연동 개발 환경에선 API 가 빈/에러 → 모든 뷰가 "미연동" 빈 상태로 강등.
 
+// ── 보유종목 상세 모달 — 전략·진입·분할매수·목표가를 한 화면에 ──
+//   표시 전용. 주문·설정 변경 기능은 없다.
+function HoldingDetailModal({
+  h,
+  onClose,
+}: {
+  h: AccountHolding;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  const t = h.targets;
+  const prog = h.targets_progress ?? {};
+  const tranches = h.tranches ?? [];
+  // 진입 시점 손절가와 평단 기준 실효 손절가가 다르면(DCA 로 평단 하락) 둘 다 보여준다.
+  const effSl = h.effective_stop_loss ?? 0;
+  const slDrifted = Boolean(t && effSl > 0 && Math.abs(effSl - t.stop_loss) >= 1);
+
+  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div className="flex items-baseline justify-between gap-3 py-1">
+      <span className="text-[11px] text-tima-sub">{label}</span>
+      <span className="font-mono text-xs text-tima-text">{children}</span>
+    </div>
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${h.name ?? h.symbol} 상세`}
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-tima-line bg-tima-card p-4 shadow-xl sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <div className="text-base font-bold text-tima-text">{h.name ?? h.symbol}</div>
+            <div className="font-mono text-[11px] text-tima-sub">{h.symbol}</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="닫기"
+            className="rounded px-2 py-1 text-sm text-tima-sub hover:bg-tima-bg hover:text-tima-text focus:outline-none focus:ring-2 focus:ring-tima-teal"
+          >
+            닫기
+          </button>
+        </div>
+
+        <section className="mb-3 rounded-lg border border-tima-line bg-tima-bg/40 p-3">
+          <div className="mb-1 text-[11px] font-semibold text-tima-sub">전략</div>
+          <div className="flex items-center justify-between">
+            <span className="rounded bg-tima-teal/15 px-2 py-0.5 text-xs font-bold text-tima-teal">
+              {h.strategy || '전략 미기록'}
+            </span>
+            <span className="font-mono text-[11px] text-tima-sub">
+              {h.entry_time ? `진입 ${h.entry_time.slice(0, 10)}` : '진입일 미기록'}
+            </span>
+          </div>
+        </section>
+
+        <section className="mb-3">
+          <div className="mb-1 text-[11px] font-semibold text-tima-sub">보유</div>
+          <Row label="수량">{fmtNum(h.qty)}주</Row>
+          <Row label="평균 매입가">{fmtNum(h.avg_buy_price)}원</Row>
+          <Row label="현재가">{fmtNum(h.cur_price)}원</Row>
+          <Row label="평가손익">
+            <SignedPct v={h.pnl_rate} /> · <SignedKRW v={h.pnl} />
+          </Row>
+        </section>
+
+        <section className="mb-3">
+          <div className="mb-1 text-[11px] font-semibold text-tima-sub">분할매수</div>
+          {tranches.length === 0 ? (
+            <div className="text-[11px] text-tima-sub">트랜치 정보 없음</div>
+          ) : tranches.length === 1 ? (
+            <div className="text-[11px] text-tima-sub">
+              단일 진입 — 추가매수 없음 ({fmtNum(tranches[0].qty)}주)
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {tranches.map((tr) => {
+                const done = tr.status === 'filled';
+                return (
+                  <div
+                    key={tr.tranche}
+                    className="flex items-center justify-between rounded border border-tima-line px-2 py-1"
+                  >
+                    <span className="font-mono text-[11px] text-tima-text">
+                      T{tr.tranche} {fmtNum(tr.qty)}주
+                      {tr.trigger_drop_pct !== 0 && (
+                        <span className="ml-1 text-tima-sub">({tr.trigger_drop_pct}%)</span>
+                      )}
+                    </span>
+                    <span
+                      className={`font-mono text-[10px] ${done ? 'text-tima-teal' : 'text-tima-sub'}`}
+                    >
+                      {done
+                        ? `체결 ${fmtNum(tr.filled_price)}원`
+                        : `대기 · 발동 ${fmtNum(
+                            Math.round(h.avg_buy_price * (1 + tr.trigger_drop_pct / 100)),
+                          )}원`}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <div className="mb-1 text-[11px] font-semibold text-tima-sub">목표가</div>
+          {!t ? (
+            <div className="text-[11px] text-tima-sub">목표가 미설정</div>
+          ) : (
+            <>
+              <Row label={`손절 (${t.stop_loss_pct}%)`}>
+                <span className="text-tima-down">{fmtNum(slDrifted ? effSl : t.stop_loss)}원</span>
+                {typeof prog.to_stop_loss_pct === 'number' && (
+                  <span className="ml-1 text-[10px] text-tima-sub">
+                    ({prog.to_stop_loss_pct.toFixed(1)}%)
+                  </span>
+                )}
+              </Row>
+              {slDrifted && (
+                <div className="pb-1 text-right text-[10px] text-tima-sub">
+                  진입 시점 {fmtNum(t.stop_loss)}원 → 추가매수로 평단이 바뀌어 재산출
+                </div>
+              )}
+              {t.partial_tp > 0 && (
+                <Row label={`1차 익절 (+${t.partial_tp_pct}% × ${t.partial_tp_ratio})`}>
+                  <span className="text-tima-up">{fmtNum(t.partial_tp)}원</span>
+                  {typeof prog.to_partial_tp_pct === 'number' && (
+                    <span className="ml-1 text-[10px] text-tima-sub">
+                      ({prog.to_partial_tp_pct.toFixed(1)}%)
+                    </span>
+                  )}
+                </Row>
+              )}
+              {t.take_profit > 0 && (
+                <Row label={`최종 익절 (+${t.take_profit_pct}%)`}>
+                  <span className="text-tima-up">{fmtNum(t.take_profit)}원</span>
+                </Row>
+              )}
+              {t.trailing_start > 0 && (
+                <Row label={`트레일링 시작 (+${t.trailing_start_pct}%)`}>
+                  {fmtNum(t.trailing_start)}원 · 이탈 {t.trailing_offset_pct}%
+                </Row>
+              )}
+              {t.breakeven_trigger > 0 && (
+                <Row label={`본전 보호 (+${t.breakeven_trigger_pct}%)`}>
+                  {fmtNum(t.breakeven_trigger)}원
+                </Row>
+              )}
+              {(t.min_hold_until || t.max_hold_until) && (
+                <Row label="보유 기한">
+                  {t.min_hold_until?.slice(5) || '-'} ~ {t.max_hold_until?.slice(5) || '-'}
+                </Row>
+              )}
+            </>
+          )}
+        </section>
+
+        <p className="mt-3 border-t border-tima-line pt-2 text-[10px] text-tima-sub">
+          표시 전용 · 주문·설정 변경 기능 없음. 청산 판정은 백엔드가 평단 기준으로 수행한다.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── 목표가 셀 — 진입 시 확정된 손절·익절·추가매수가를 보여준다 ──
 //   원천은 백엔드 position_targets(라이브 실효 STRATEGY_EXIT_PROFILES 기반).
 //   표시 전용이며 청산 판정에는 쓰이지 않는다. 목표가가 없는 포지션(백필 전·
@@ -144,6 +328,7 @@ function EmptyState({ text }: { text: string }) {
 
 export default function AccountPage() {
   const [balance, setBalance] = useState<AccountBalance | null>(null);
+  const [detail, setDetail] = useState<AccountHolding | null>(null);
   const [history, setHistory] = useState<BalanceHistoryPoint[]>([]);
   const [pnl, setPnl] = useState<RealizedPnlResponse | null>(null);
   const [days, setDays] = useState(30);
@@ -375,11 +560,22 @@ export default function AccountPage() {
                     {holdings.map((h, i) => (
                       <tr
                         key={`${h.symbol}-${i}`}
-                        className="border-b border-tima-line last:border-0 hover:bg-tima-bg/50"
+                        className="cursor-pointer border-b border-tima-line last:border-0 hover:bg-tima-bg/50"
+                        onClick={() => setDetail(h)}
+                        tabIndex={0}
+                        role="button"
+                        aria-label={`${h.name ?? h.symbol} 상세 보기`}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setDetail(h);
+                          }
+                        }}
                       >
                         <td className="p-2.5">
                           <Link
                             href={`/stocks/${h.symbol}`}
+                            onClick={(e) => e.stopPropagation()}
                             className="font-bold text-tima-text hover:text-tima-teal hover:underline"
                           >
                             {h.name ?? h.symbol}
@@ -548,6 +744,7 @@ export default function AccountPage() {
           : '30초 자동 갱신'}
       </div>
 
+      {detail && <HoldingDetailModal h={detail} onClose={() => setDetail(null)} />}
       <Disclaimer />
     </div>
   );
