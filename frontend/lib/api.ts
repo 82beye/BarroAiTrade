@@ -515,6 +515,8 @@ export interface PositionTargets {
   trailing_start: number;
   trailing_start_pct: number;
   trailing_offset_pct: number;
+  breakeven_trigger: number;
+  breakeven_trigger_pct: number;
   dca_prices: { tranche: number; drop_pct: number; price: number }[];
   min_hold_days: number;
   max_hold_days: number;
@@ -537,6 +539,20 @@ export interface AccountHolding {
   targets?: PositionTargets | null;
   /** 현재가 대비 각 목표까지 거리(%). 표시 전용. */
   targets_progress?: Record<string, number> | null;
+  /** 분할매수 트랜치 현황(T1 즉시 / T2 발동가 대기). */
+  tranches?: HoldingTranche[] | null;
+  /** 평단 기준 실효 손절가. DCA 로 평단이 바뀌면 targets.stop_loss 와 달라진다. */
+  effective_stop_loss?: number | null;
+}
+
+export interface HoldingTranche {
+  tranche: number;
+  qty: number;
+  ratio: number;
+  trigger_drop_pct: number;
+  status: string;
+  filled_price: number;
+  filled_at: string;
 }
 
 export interface AccountBalance {
