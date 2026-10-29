@@ -41,6 +41,7 @@ from scripts.intraday_buy_daemon import (
     _ai_swing_cap_filter,
     _ai_swing_caps,
     _ai_swing_current_signal,
+    _ai_swing_dca_before_stop,
     _ai_swing_entry_enabled,
     _ai_swing_extra_candidates,
     _ai_swing_order_qty,
@@ -54,8 +55,42 @@ from scripts.intraday_buy_daemon import (
     _hard_sl_bypasses_cooldown,
     _recent_unresolved_ai_sell_symbols,
     _scan_and_buy,
+    _sell_targets_after_dca,
 )
 from backend.core.risk.holding_evaluator import SellSignal
+
+
+def test_ai_swing_gap_stop_orders_t2_before_rechecking_stop(monkeypatch):
+    """-8.5% 갭이 -3% T2와 -8% SL을 동시에 넘으면 T2를 먼저 시도한다."""
+    monkeypatch.setattr(daemon_module, "_AI_SWING_DCA_BEFORE_STOP", True)
+    monkeypatch.setattr(daemon_module, "_AI_SWING_DCA_ENABLED", True)
+    pos = SimpleNamespace(strategy="ai_swing")
+    stop = SimpleNamespace(symbol="005930", signal=SellSignal.STOP_LOSS)
+    trail = SimpleNamespace(symbol="000660", signal=SellSignal.TRAILING_STOP)
+
+    assert _ai_swing_dca_before_stop(pos, stop)
+    assert not _ai_swing_dca_before_stop(pos, trail)
+    assert not _ai_swing_dca_before_stop(SimpleNamespace(strategy="swing_38"), stop)
+    monkeypatch.setattr(daemon_module, "_AI_SWING_DCA_ENABLED", False)
+    assert not _ai_swing_dca_before_stop(pos, stop)
+
+    # T2 주문 접수 후 구 평단의 손절은 폐기하고, 다른 종목의 매도는 유지한다.
+    assert _sell_targets_after_dca([stop, trail], {"005930"}, lambda _d: True) == [trail]
+    # T2 매수가 차단/실패하면 손절을 그대로 진행한다.
+    assert _sell_targets_after_dca([stop, trail], set(), lambda _d: True) == [stop, trail]
+
+
+
+def test_dca_before_stop_is_off_by_default(monkeypatch):
+    """§2 S3 — 플래그 OFF(기본)면 손절 종목은 종전대로 DCA 를 건너뛴다(거동 불변)."""
+    monkeypatch.setattr(daemon_module, "_AI_SWING_DCA_ENABLED", True)
+    monkeypatch.setattr(daemon_module, "_AI_SWING_DCA_BEFORE_STOP", False)
+    pos = SimpleNamespace(strategy="ai_swing")
+    stop = SimpleNamespace(symbol="005930", signal=SellSignal.STOP_LOSS)
+    assert not _ai_swing_dca_before_stop(pos, stop)
+    # 매도 폐기 로직도 DCA 주문이 없으면 아무것도 거르지 않는다.
+    assert _sell_targets_after_dca([stop], set(), lambda _d: True) == [stop]
+
 
 _AI_ENV = (
     "BARRO_AI_SWING_ENABLED",

@@ -1016,6 +1016,7 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
         SellSignal.SHORT_TERM_HIGH, SellSignal.DISTRIBUTION,
     }
     sl_symbols = {d.symbol for d in decisions if d.signal in _SELL_SIGNALS}
+    decisions_by_symbol = {d.symbol: d for d in decisions}
 
     executor = KiwoomNativeOrderExecutor(oauth=oauth, dry_run=args.dry_run)
     # BAR-166: DCA는 방어적 매수 — 기본은 일일 손실 한도 미적용(-100 exempt).
@@ -1039,14 +1040,17 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
     #       매수가는 현재가(cur_price). 발동 후 status=filled 로 1회만 실행.
     # 5/18 069500 L -6.4% 도달했어도 T2(-2%) pending 영구 → fix 후 발동 가능.
     active_positions = pos_store.load_all()
+    dca_ordered_symbols: set[str] = set()
     for h in balance.holdings:
-        if h.symbol in sl_symbols:
-            continue
         pos = active_positions.get(h.symbol)
         if not pos:
             continue
         pending = pos.pending_tranches()
         if not pending:
+            continue
+        if h.symbol in sl_symbols and not _ai_swing_dca_before_stop(
+            pos, decisions_by_symbol.get(h.symbol)
+        ):
             continue
         # BAR-OPS-33: swing_38 등 자체 분할진입 전략은 데몬 DCA 무조건 스킵(이중분할 방지).
         if pos.strategy in _NO_DCA_STRATEGIES:
@@ -1081,6 +1085,9 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
                 tag = "DRY_RUN" if r.dry_run else "DCA"
                 ts = _now_kst().strftime("%H:%M:%S")
                 print(f"  [{ts}][{tag}] {h.symbol} {h.name} T{tranche.tranche} qty={tranche.qty}")
+                # 실주문과 dry-run 모두 이번 주기의 오래된 손절 판단을 폐기한다.
+                # dry-run은 주문을 보내지 않으며 장부도 갱신하지 않는다.
+                dca_ordered_symbols.add(h.symbol)
                 if not r.dry_run:
                     tranche.status = "filled"
                     tranche.order_no = r.order_no
@@ -1135,10 +1142,7 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
             d.signal, d.pnl_rate, getattr(pos, "strategy", "") if pos else "",
         )
 
-    sell_targets = [
-        d for d in decisions
-        if d.signal != SellSignal.HOLD and _allow_sell(d)
-    ]
+    sell_targets = _sell_targets_after_dca(decisions, dca_ordered_symbols, _allow_sell)
     if not sell_targets:
         return 0
 
@@ -1443,6 +1447,40 @@ _AI_SWING_SID = "ai_swing"
 #    반드시 place_buy 수량도 T1 으로 줄인다 — 아래 _ai_swing_t1_qty 참조.
 _AI_SWING_DCA_ENABLED = _env_truthy("BARRO_AI_SWING_DCA_ENABLED", "0")
 _AI_SWING_DCA_DROP_PCT = float(os.environ.get("BARRO_AI_SWING_DCA_DROP_PCT", "-3.0"))
+
+# [2026-10-29] 손절 주기에도 T2 를 먼저 시도할지 (§2 S3 default-OFF).
+#   갭하락이 -3%(T2)와 -8%(SL)를 한 번에 넘으면 기존 동작은 DCA 를 건너뛰고 손절한다.
+#   ON 이면 T2 를 먼저 접수하고, 그 사이클의 매도는 1회 보류한다 — 낡은 평단으로
+#   내린 판정이기 때문. ★매도를 최대 1사이클(60s) 지연시키므로 하락 중에는
+#   청산가가 더 나빠질 수 있다★. 켜는 것은 사용자 판단.
+_AI_SWING_DCA_BEFORE_STOP = _env_truthy("BARRO_AI_SWING_DCA_BEFORE_STOP", "0")
+
+
+def _ai_swing_dca_before_stop(pos, decision) -> bool:
+    """T2가 남은 ai_swing에 한해 손절 주기에도 DCA 평가를 먼저 허용한다.
+
+    `BARRO_AI_SWING_DCA_BEFORE_STOP` 가 꺼져 있으면(기본) 항상 False —
+    손절 종목은 종전처럼 DCA 를 건너뛴다(거동 불변).
+    실제 발동가·수량·매수 게이트는 기존 DCA 루프가 판단한다. 다른 전략과
+    트레일링/기간 청산에는 이 예외를 적용하지 않는다.
+    """
+    return (
+        _AI_SWING_DCA_BEFORE_STOP
+        and _AI_SWING_DCA_ENABLED
+        and str(pos.strategy).replace("_v1", "").replace("_v2", "") == _AI_SWING_SID
+        and decision is not None
+        and decision.signal == SellSignal.STOP_LOSS
+    )
+
+
+def _sell_targets_after_dca(decisions, dca_ordered_symbols, allow_sell):
+    """DCA 주문 접수 주기에는 오래된 평단으로 평가한 매도 결정을 폐기한다."""
+    return [
+        d for d in decisions
+        if d.signal != SellSignal.HOLD
+        and d.symbol not in dca_ordered_symbols
+        and allow_sell(d)
+    ]
 
 
 def _ai_swing_t1_qty(total_qty: int) -> int:
