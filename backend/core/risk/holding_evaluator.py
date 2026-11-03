@@ -225,6 +225,24 @@ STRATEGY_EXIT_PROFILES: dict[str, dict] = {
 }
 
 
+def _ai_swing_hard_sl_enabled() -> bool:
+    """ai_swing 하드 손절 사용 여부. env `BARRO_AI_SWING_HARD_SL_ENABLED`.
+
+    기본 "1"(기존 거동). "0" 이면 ai_swing 포지션에서 가격 기반 손절
+    (STOP_LOSS · TIME_TIGHTENED_SL)을 건너뛴다 — 청산은 익절·트레일링·
+    max_hold_days(기간) 로만 이뤄진다.
+
+    ★주의★ 끄면 하방이 무제한이 된다. 2026-11-03 실측: 손절된 8건 중 평단을
+    회복한 것은 2건(25%)뿐이고 6건은 손절가보다 더 내려갔다(알멕 63,259→44,500).
+    외부 입력이라 예외를 전량 흡수한다(§2 S3) — 오타·빈값은 기존 거동으로 폴백.
+    """
+    try:
+        raw = os.environ.get("BARRO_AI_SWING_HARD_SL_ENABLED", "1")
+        return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+    except Exception:
+        return True
+
+
 def resolve_policy(base: ExitPolicy, strategy: str) -> ExitPolicy:
     """전략명으로 ExitPolicy override. 매칭 안 되면 base 그대로 반환."""
     # strategy_id 에서 버전 제거 (gold_zone_v1 → gold_zone)
@@ -364,7 +382,9 @@ def evaluate_holding(
             reason=f"swing 최대 보유 {days}일 ≥ max {policy.max_hold_days}일 → 강제 매도",
         )
     strategy_key = (ctx.strategy or "").replace("_v1", "").replace("_v2", "")
-    if strategy_key == "ai_swing" and rate <= base_sl:
+    # ai_swing 하드 손절 OFF 시 가격 손절 경로를 전부 건너뛴다(기간·익절은 유지).
+    skip_price_sl = strategy_key == "ai_swing" and not _ai_swing_hard_sl_enabled()
+    if strategy_key == "ai_swing" and not skip_price_sl and rate <= base_sl:
         return HoldingDecision(
             symbol=h.symbol, name=h.name, qty=qty, sell_qty=qty,
             avg_buy_price=h.avg_buy_price, cur_price=h.cur_price,
@@ -509,7 +529,7 @@ def evaluate_holding(
             )
 
     # ── 6. 손절 (SL) ─────────────────────────────────────────────
-    if rate <= effective_sl:
+    if not skip_price_sl and rate <= effective_sl:
         signal = SellSignal.TIME_TIGHTENED_SL if days >= policy.hold_days_tighten else SellSignal.STOP_LOSS
         return HoldingDecision(
             symbol=h.symbol, name=h.name, qty=qty, sell_qty=qty,
