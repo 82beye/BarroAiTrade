@@ -125,29 +125,62 @@ def _dec_env(name: str, default: str) -> Decimal:
 _AI_SWING_PARAMS = AiSwingParams()
 _AI_SWING_SL_PCT = _sl_fraction_from_env(_AI_SWING_PARAMS.sl_pct) * Decimal("100")
 
+# ── 존3 다일보유(C안) — 2026-11-03 사용자 지시 ───────────────────────────────
+#   당일 강제청산을 끄고 손절을 넓혀 되돌림 회복을 기다리는 모드.
+#   실측 근거: 손절(-4%) 체결 12건 중 10건(83%)이 5거래일 내 평단을 회복했다.
+#   ★단, 당일청산을 유지한 채 손절만 넓히면 오히려 평균 -1.50%p 악화한다
+#    (종가가 손절가보다 낮음) — 그래서 두 변경은 반드시 함께 간다.★
+#   ★새 위험★ 오버나이트 갭. ai_swing 실측에서 갭하락 청산이 -8.5~-10.9% 로
+#    장중 손절보다 깊었다. max_hold 로 보유기간을 묶고 carry-limit 은 유지한다.
+_ZONE_SL_PCT = _dec_env("BARRO_ZONE_SL_PCT", "-4.0")
+def _zone_tightened(z: str, default: str) -> Decimal:
+    """존3 tightened SL — 공통 env 가 있으면 그것을, 없으면 전략별 기존값."""
+    common = os.environ.get("BARRO_ZONE_TIGHTENED_SL_PCT", "").strip()
+    return _dec_env(f"BARRO_{z.upper()}_TIGHTENED_SL_PCT", common or default)
+
+
+def _zone_hold_days(name: str, default: str) -> Optional[int]:
+    """존3 보유기간. "0"/빈값 = 미설정(None, 기존 당일매매 계약)."""
+    try:
+        raw = (os.environ.get(name, default) or "").strip()
+        v = int(raw)
+        return v if v > 0 else None
+    except Exception:
+        return None
+
+
+_ZONE_MIN_HOLD = _zone_hold_days("BARRO_ZONE_MIN_HOLD_DAYS", "0")
+_ZONE_MAX_HOLD = _zone_hold_days("BARRO_ZONE_MAX_HOLD_DAYS", "0")
+
 STRATEGY_EXIT_PROFILES: dict[str, dict] = {
     "f_zone": {
-        "stop_loss_pct": Decimal("-4.0"),
+        "stop_loss_pct": _ZONE_SL_PCT,
+        "min_hold_days": _ZONE_MIN_HOLD,
+        "max_hold_days": _ZONE_MAX_HOLD,
         "take_profit_pct": Decimal("5.0"),
         "partial_tp_pct": Decimal("3.0"),
         "partial_tp_ratio": Decimal("0.5"),
         "trailing_start_pct": Decimal("3.5"),
         "trailing_offset_pct": Decimal("1.0"),
         "breakeven_trigger_pct": Decimal("2.5"),
-        "tightened_sl_pct": Decimal("-2.5"),
+        "tightened_sl_pct": _zone_tightened("f_zone", "-2.5"),
     },
     "sf_zone": {
-        "stop_loss_pct": Decimal("-4.0"),
+        "stop_loss_pct": _ZONE_SL_PCT,
+        "min_hold_days": _ZONE_MIN_HOLD,
+        "max_hold_days": _ZONE_MAX_HOLD,
         "take_profit_pct": Decimal("7.0"),
         "partial_tp_pct": Decimal("3.0"),
         "partial_tp_ratio": Decimal("0.33"),
         "trailing_start_pct": Decimal("3.0"),
         "trailing_offset_pct": Decimal("1.5"),
         "breakeven_trigger_pct": Decimal("2.0"),
-        "tightened_sl_pct": Decimal("-2.5"),
+        "tightened_sl_pct": _zone_tightened("sf_zone", "-2.5"),
     },
     "gold_zone": {
-        "stop_loss_pct": Decimal("-4.0"),
+        "stop_loss_pct": _ZONE_SL_PCT,
+        "min_hold_days": _ZONE_MIN_HOLD,
+        "max_hold_days": _ZONE_MAX_HOLD,
         "take_profit_pct": Decimal("4.0"),
         # [2026-10-06] 부분익절 env tunable — default 는 기존 값(2.0 / 0.5) 유지라
         #   머지만으로는 라이브 거동이 바뀌지 않는다(§2 S3). `.env.local` 로 조정·즉시 롤백.
@@ -161,7 +194,7 @@ STRATEGY_EXIT_PROFILES: dict[str, dict] = {
         "trailing_start_pct": Decimal("3.0"),
         "trailing_offset_pct": Decimal("1.0"),
         "breakeven_trigger_pct": Decimal("2.5"),
-        "tightened_sl_pct": Decimal("-3.0"),
+        "tightened_sl_pct": _zone_tightened("gold_zone", "-3.0"),
     },
     "swing_38": {
         # BAR-OPS-09 Phase D2 (2026-05-28): 그리드 서치(S6 2D + S7 필터) 결합 최적.
