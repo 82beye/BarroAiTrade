@@ -22,6 +22,14 @@ RETRY_WAIT="${EOD_CLOSE_RETRY_WAIT:-90}"
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
+# [2026-11-03] 존3 다일보유(C안) — BARRO_ZONE_MULTIDAY_ENABLED=1 이면 존3도 제외.
+#   데몬의 _FORCE_CLOSE_EXEMPT_STRATEGIES 와 같은 env 를 보므로 두 경로가 함께 움직인다.
+EXCLUDE="supertrend,limit_up_chase,swing_38,ai_swing"
+case "${BARRO_ZONE_MULTIDAY_ENABLED:-0}" in
+  1|true|TRUE|yes|on) EXCLUDE="$EXCLUDE,f_zone,sf_zone,gold_zone" ;;
+esac
+echo "[$(ts)] exclude-strategy=$EXCLUDE" 
+
 # [2026-09-28] --exclude-strategy 에 swing_38,ai_swing 추가 — 다일보유 전략 보호.
 #   왜: evaluate_holdings.py 는 force_mode(--tp/--sl 지정)에서 PositionContext 를
 #   만들지 않아(L229 `if not force_mode:`) ctx=None → _evaluate_basic() 가 돌고
@@ -32,7 +40,7 @@ ts() { date '+%Y-%m-%d %H:%M:%S'; }
 for try in $(seq 1 "$MAX_TRY"); do
   echo "==== [$(ts)] EOD 강제청산 시도 $try/$MAX_TRY ===="
   "$PY" "$REPO/scripts/evaluate_holdings.py" \
-      --exclude-strategy supertrend,limit_up_chase,swing_38,ai_swing \
+      --exclude-strategy "$EXCLUDE" \
       --tp -100 --sl 100 --auto-sell --no-dry-run --telegram \
       --audit-log "$REPO/data/order_audit.csv" \
       --pos-log "$REPO/data/active_positions.json"

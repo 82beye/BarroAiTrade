@@ -1403,6 +1403,14 @@ _CUTOFF_EXEMPT_STRATEGIES = {"swing_38", "ai_swing"}
 #   ※ 이 면제는 'EOD 강제 트림' 한정이다. 보유 유지의 실체는 exit 프로파일
 #     (SL/트레일링/min·max_hold)이며, 장중 자동매도는 면제되지 않는다.
 _FORCE_CLOSE_EXEMPT_STRATEGIES = {"swing_38", "ai_swing"}
+# [2026-11-03] 존3 다일보유(C안) — default-OFF(§2 S3). ON 이면 존3도 EOD 강제 트림
+#   대상에서 빠져 익일로 이월된다. 손절 완화(BARRO_ZONE_SL_PCT)와 반드시 함께 쓴다 —
+#   당일청산을 유지한 채 손절만 넓히면 실측 -1.50%p 악화한다.
+_ZONE_MULTIDAY = _env_truthy("BARRO_ZONE_MULTIDAY_ENABLED", "0")
+if _ZONE_MULTIDAY:
+    _FORCE_CLOSE_EXEMPT_STRATEGIES = _FORCE_CLOSE_EXEMPT_STRATEGIES | {
+        "f_zone", "sf_zone", "gold_zone",
+    }
 
 
 def _force_close_skip(symbol: str, strategy: str | None, cb_skip: set[str]) -> bool:

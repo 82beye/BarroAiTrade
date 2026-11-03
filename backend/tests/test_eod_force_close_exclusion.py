@@ -13,13 +13,29 @@ _REPO = Path(__file__).resolve().parents[2]
 MULTIDAY = ("ai_swing", "swing_38")
 
 
-def _wrapper_exclusions() -> set[str]:
-    s = (_REPO / "scripts" / "eod_force_close.sh").read_text(encoding="utf-8")
-    # 주석(#로 시작하는 줄)은 제외하고 실제 플래그만 본다
-    body = "\n".join(l for l in s.splitlines() if not l.lstrip().startswith("#"))
-    m = re.search(r"--exclude-strategy\s+([A-Za-z0-9_,]+)", body)
-    assert m, "래퍼에서 --exclude-strategy 플래그를 찾지 못했다"
-    return {x for x in m.group(1).split(",") if x}
+def _wrapper_exclusions(multiday: str = "0") -> set[str]:
+    """래퍼가 실제로 넘기는 --exclude-strategy 값.
+
+    [2026-11-03] 목록이 리터럴에서 `$EXCLUDE` 변수로 바뀌어 정규식 파싱이 불가능해졌다.
+    스크립트의 EXCLUDE 산출 블록을 bash 로 실제 실행해 결과를 읽는다 — 리터럴을 읽는
+    것보다 실동작에 가깝다.
+    """
+    import subprocess
+
+    src = (_REPO / "scripts" / "eod_force_close.sh").read_text(encoding="utf-8")
+    assert '--exclude-strategy "$EXCLUDE"' in src, "래퍼가 $EXCLUDE 를 넘기지 않는다"
+    lines = [
+        l for l in src.splitlines()
+        if l.startswith("EXCLUDE=") or l.startswith("case ") or "EXCLUDE=\"$EXCLUDE" in l
+        or l.strip() == "esac"
+    ]
+    assert lines, "EXCLUDE 산출 블록을 찾지 못했다"
+    script = "\n".join(lines) + '\nprintf %s "$EXCLUDE"'
+    out = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True,
+        env={"PATH": "/usr/bin:/bin", "BARRO_ZONE_MULTIDAY_ENABLED": multiday},
+    ).stdout
+    return {x for x in out.split(",") if x}
 
 
 def _argparse_default() -> set[str]:
@@ -51,6 +67,13 @@ def test_signal_only_strategies_still_excluded():
 
 def test_wrapper_and_default_agree():
     assert _wrapper_exclusions() == _argparse_default()
+
+
+def test_wrapper_includes_zones_when_multiday_on():
+    """[2026-11-03] 존3 다일보유 ON 이면 래퍼도 존3를 제외한다."""
+    excl = _wrapper_exclusions("1")
+    for z in ("f_zone", "sf_zone", "gold_zone"):
+        assert z in excl, z
 
 
 def test_daemon_exempt_set_matches_multiday():
