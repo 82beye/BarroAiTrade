@@ -12,6 +12,7 @@ OPS-17 LiveOrderGate 와 결합 시 자동 매도 가능.
 from __future__ import annotations
 
 import os
+import warnings
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -67,6 +68,9 @@ class ExitPolicy:
     partial_tp_ratio: Decimal = Decimal("0.5")
     hold_days_tighten: int = 5
     tightened_sl_pct: Decimal = Decimal("-2.0")
+    # 단기 고점 캔들 매도(SHORT_TERM_HIGH)를 평가하기 시작하는 수익률(%).
+    # None 이면 partial_tp_pct 를 쓴다(기존 거동). 전략별로 분리하기 위한 필드.
+    short_term_high_min_pct: Optional[Decimal] = None
     # 2026-05-19 P5-a — 시간별 단계 SL (인프라만 도입, default OFF).
     # tuple[(sec, sl_pct), ...] ASC 정렬. None(default) 이면 stop_loss_pct 사용.
     # 5/18 100790 실제 분봉 검증 결과: close 가 -4% 미달이라 효과 0 (실제 문제는
@@ -104,6 +108,19 @@ class ExitPolicy:
 #
 #   swing_38 (Phase D2 multi-day) 는 ExitEngine SL=-15% 와 본 profile SL=-15%
 #   가 동일 — 의도된 격차는 intraday 단타 전략에만 적용.
+def _opt_dec_env(name: str) -> Optional[Decimal]:
+    """env 가 비어 있으면 None(= 기존 거동 유지). 오타도 None 으로 폴백한다(§2 S3)."""
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return None
+    try:
+        v = Decimal(raw)
+        return v if v.is_finite() else None
+    except Exception:
+        warnings.warn(f"env {name}={raw!r} 파싱 실패 — 미설정으로 처리", stacklevel=2)
+        return None
+
+
 def _dec_env(name: str, default: str) -> Decimal:
     """env → Decimal. 오타·빈값·비수치는 default 로 폴백한다.
 
@@ -252,6 +269,9 @@ STRATEGY_EXIT_PROFILES: dict[str, dict] = {
         "trailing_offset_pct": _AI_SWING_PARAMS.trail_offset_pct * Decimal("100"),
         "breakeven_trigger_pct": _AI_SWING_PARAMS.be_pct * Decimal("100"),
         "tightened_sl_pct": _AI_SWING_SL_PCT,
+        # [2026-11-06] 단기 고점 매도 발동선. 미설정이면 None → partial_tp_pct(+20%)
+        #   = 종전 거동. 실측 권고값 3.0~4.0 (존3와 동일 수준).
+        "short_term_high_min_pct": _opt_dec_env("BARRO_AI_SWING_STH_MIN_PCT"),
         "min_hold_days": _AI_SWING_PARAMS.min_hold_days,
         "max_hold_days": _AI_SWING_PARAMS.max_hold_days,
     },
@@ -295,6 +315,9 @@ def resolve_policy(base: ExitPolicy, strategy: str) -> ExitPolicy:
         partial_tp_ratio=overrides.get("partial_tp_ratio", base.partial_tp_ratio),
         hold_days_tighten=base.hold_days_tighten,
         tightened_sl_pct=overrides.get("tightened_sl_pct", base.tightened_sl_pct),
+        short_term_high_min_pct=overrides.get(
+            "short_term_high_min_pct", base.short_term_high_min_pct
+        ),
         # BAR-OPS-09 Phase C (2026-05-27) — 보유 기간 게이트 (swing_38 만 정의)
         min_hold_days=overrides.get("min_hold_days", base.min_hold_days),
         max_hold_days=overrides.get("max_hold_days", base.max_hold_days),
@@ -451,10 +474,19 @@ def evaluate_holding(
     # 1분봉 시퀀스가 있고 일정 익절 구간(≥ partial_tp_pct)에 진입 후 단기 고점 형성 시
     # 차트 패턴 (도지·위꼬리·연속 음봉) 인식 → 매도. 운영 1분봉 fetch 필수.
     # 우선순위: trailing 보다 먼저 — 단기 고점 인식이 더 정밀.
+    # [2026-11-06] 발동선을 partial_tp_pct 에서 분리. ai_swing 은 partial_tp 가 +20% 라
+    #   이 장치가 한 번도 평가되지 않았다 — 실측 13건 중 +20% 도달 0건.
+    #   보유 전기간 최고수익률은 12/13 건이 +4% 이상이었는데 11건이 -8% 로 끝났다.
+    #   default(None)는 종전과 동일하게 partial_tp_pct 를 쓴다(거동 불변, §2 S3).
+    _sth_gate = (
+        policy.short_term_high_min_pct
+        if policy.short_term_high_min_pct is not None
+        else policy.partial_tp_pct
+    )
     if (
         ctx.minute_candles
         and len(ctx.minute_candles) >= 2
-        and rate >= policy.partial_tp_pct  # 최소 익절 구간 도달 시만 평가
+        and rate >= _sth_gate  # 최소 익절 구간 도달 시만 평가
     ):
         from backend.core.strategy.short_term_high_exit import (
             detect_short_term_high_exit,
