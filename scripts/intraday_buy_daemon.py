@@ -957,10 +957,17 @@ async def _evaluate_and_sell(args, oauth, notifier) -> int:
             if dirty and not args.dry_run:
                 pos_store.upsert(pos)
 
-            # SHORT_TERM_HIGH 평가용 1분봉 — 전략별 partial_tp_pct 도달 시만 fetch
+            # SHORT_TERM_HIGH 평가용 1분봉 — 발동선 도달 시만 fetch.
+            # [2026-11-06] 기준을 partial_tp_pct → short_term_high_min_pct 로 맞춘다.
+            #   evaluator 쪽 발동선만 낮추고 여기를 두면 분봉이 없어 평가가 스킵된다
+            #   (ai_swing partial_tp=+20% → 도달 0건 → 장치 영구 미작동이었던 원인).
+            #   미설정(None) 이면 종전대로 partial_tp_pct — 거동 불변.
             _strat_key = (pos.strategy or "").replace("_v1", "").replace("_v2", "")
+            _prof = STRATEGY_EXIT_PROFILES.get(_strat_key, {})
+            _sth_min = _prof.get("short_term_high_min_pct")
             _strat_partial_tp = float(
-                STRATEGY_EXIT_PROFILES.get(_strat_key, {}).get("partial_tp_pct", policy.partial_tp_pct)
+                _sth_min if _sth_min is not None
+                else _prof.get("partial_tp_pct", policy.partial_tp_pct)
             )
             minute_candles = None
             if cur_rate >= _strat_partial_tp:
