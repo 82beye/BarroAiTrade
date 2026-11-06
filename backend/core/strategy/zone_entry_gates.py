@@ -53,6 +53,7 @@ ENV_REENTRY_ENABLED = "BARRO_ZONE_REENTRY_GUARD_ENABLED"
 ENV_REENTRY_LOOKBACK = "BARRO_ZONE_REENTRY_LOOKBACK_DAYS"
 ENV_SHADOW = "BARRO_ZONE_GATE_SHADOW"
 ENV_MOM_MAX = "BARRO_ZONE_MAX_MOM20_PCT"      # ③ 20일 모멘텀 상한(%). 0 또는 미설정 = OFF
+ENV_MOM_SHADOW = "BARRO_ZONE_MOM_GATE_SHADOW"  # ③만 측정 전용 (전역 SHADOW 와 독립)
 
 _TRUTHY = {"1", "true", "yes", "on", "y"}
 
@@ -90,6 +91,10 @@ class ZoneGateConfig:
     #   실측(존3 38건): 상한 30% 기준 통과 23건 PF 0.72 / 탈락 15건 PF 0.28.
     #   gold_zone 단독은 통과 18건 PF 1.00 / 탈락 11건 PF 0.13 으로 분리가 가장 뚜렷하다.
     max_mom20_pct: float = 0.0
+    # ③ 전용 shadow. 전역 `shadow` 는 ①②③ 전부를 미차단으로 만들기 때문에,
+    #   신규 게이트만 측정하려고 전역을 켜면 ★이미 차단 중이던 ①정배열까지 해제된다★
+    #   (2026-11-06 Codex QA 에서 실측 발견 — 라이브 영향 있었음).
+    mom_shadow: bool = False
 
     def any_enabled(self) -> bool:
         return self.trend_enabled or self.reentry_enabled or self.max_mom20_pct > 0
@@ -104,6 +109,7 @@ def config_from_env(env: Optional[dict] = None) -> ZoneGateConfig:
         reentry_lookback_days=max(0, int(_float(e, ENV_REENTRY_LOOKBACK, 60.0))),
         shadow=_truthy(e, ENV_SHADOW),
         max_mom20_pct=max(0.0, _float(e, ENV_MOM_MAX, 0.0)),
+        mom_shadow=_truthy(e, ENV_MOM_SHADOW),
     )
 
 
@@ -198,10 +204,14 @@ def evaluate_momentum_gate(
     """
     if cfg.max_mom20_pct <= 0:
         return False, ""
-    if len(candles) < 21:
+    # ★입력 규약★ 데몬은 당일 미완성 봉을 포함해 넘긴다(trend 게이트와 동일 입력).
+    #   그러나 측정은 '진입 전일까지의 종가'로 했다. 같은 기준을 쓰지 않으면 시뮬↔라이브가
+    #   어긋나므로(갭상승일에 당일 봉이 모멘텀을 부풀림) **직전 봉**을 기준으로 삼는다.
+    #   2026-11-06 Codex QA 지적 반영.
+    if len(candles) < 22:
         return False, ""
-    now = _close(candles[-1])
-    past = _close(candles[-21])
+    now = _close(candles[-2])
+    past = _close(candles[-22])
     if now is None or past is None or past <= 0:
         return False, ""
     mom = (now / past - 1.0) * 100.0
@@ -226,17 +236,25 @@ def evaluate_zone_gates(
     """
     if not cfg.any_enabled() or not is_zone_strategy(strategy_id):
         return False, ""
-    reasons = []
-    for blocked, reason in (
-        evaluate_trend_gate(candles, cfg),
-        evaluate_reentry_gate(symbol, prior_symbols, cfg),
-        evaluate_momentum_gate(candles, cfg),
+    reasons: list[str] = []
+    enforcing = False          # 하나라도 '실차단' 게이트가 걸리면 True
+    # (게이트 결과, 이 게이트만의 shadow 여부)
+    for (blocked, reason), gate_shadow in (
+        (evaluate_trend_gate(candles, cfg), False),
+        (evaluate_reentry_gate(symbol, prior_symbols, cfg), False),
+        (evaluate_momentum_gate(candles, cfg), cfg.mom_shadow),
     ):
-        if blocked:
-            reasons.append(reason)
+        if not blocked:
+            continue
+        reasons.append(f"{reason} [측정]" if gate_shadow else reason)
+        if not gate_shadow:
+            enforcing = True
     if not reasons:
         return False, ""
-    return (not cfg.shadow), " + ".join(reasons)
+    # 전역 shadow 는 종전대로 전부 미차단(하위호환). 게이트별 shadow 는 그 게이트만 뺀다.
+    if cfg.shadow:
+        return False, " + ".join(reasons)
+    return enforcing, " + ".join(reasons)
 
 
 __all__ = [
