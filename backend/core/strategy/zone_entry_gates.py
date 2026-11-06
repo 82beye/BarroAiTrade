@@ -52,6 +52,7 @@ ENV_TREND_MARGIN = "BARRO_ZONE_TREND_GATE_MARGIN"
 ENV_REENTRY_ENABLED = "BARRO_ZONE_REENTRY_GUARD_ENABLED"
 ENV_REENTRY_LOOKBACK = "BARRO_ZONE_REENTRY_LOOKBACK_DAYS"
 ENV_SHADOW = "BARRO_ZONE_GATE_SHADOW"
+ENV_MOM_MAX = "BARRO_ZONE_MAX_MOM20_PCT"      # ③ 20일 모멘텀 상한(%). 0 또는 미설정 = OFF
 
 _TRUTHY = {"1", "true", "yes", "on", "y"}
 
@@ -85,9 +86,13 @@ class ZoneGateConfig:
     # 22건을 전부 포착하면서 윈도우가 유계다(당일 차단 67 → 23종목).
     reentry_lookback_days: int = 60
     shadow: bool = False
+    # ③ 과확장 게이트 — 진입 직전 20일 모멘텀 상한(%). 0 = OFF.
+    #   실측(존3 38건): 상한 30% 기준 통과 23건 PF 0.72 / 탈락 15건 PF 0.28.
+    #   gold_zone 단독은 통과 18건 PF 1.00 / 탈락 11건 PF 0.13 으로 분리가 가장 뚜렷하다.
+    max_mom20_pct: float = 0.0
 
     def any_enabled(self) -> bool:
-        return self.trend_enabled or self.reentry_enabled
+        return self.trend_enabled or self.reentry_enabled or self.max_mom20_pct > 0
 
 
 def config_from_env(env: Optional[dict] = None) -> ZoneGateConfig:
@@ -98,6 +103,7 @@ def config_from_env(env: Optional[dict] = None) -> ZoneGateConfig:
         reentry_enabled=_truthy(e, ENV_REENTRY_ENABLED),
         reentry_lookback_days=max(0, int(_float(e, ENV_REENTRY_LOOKBACK, 60.0))),
         shadow=_truthy(e, ENV_SHADOW),
+        max_mom20_pct=max(0.0, _float(e, ENV_MOM_MAX, 0.0)),
     )
 
 
@@ -158,6 +164,53 @@ def evaluate_reentry_gate(
     return False, ""
 
 
+
+def evaluate_momentum_gate(
+    candles: Sequence[Any], cfg: ZoneGateConfig,
+) -> tuple[bool, str]:
+    """과확장 게이트 — 진입 직전 20일 모멘텀이 상한을 넘으면 차단.
+
+    근거(2026-11-06 실측, 존3 라운드트립 38건 · 진입 **전일까지**의 종가만 사용):
+
+        상한 10%  통과 11건 PF 0.73 / 탈락 27건 PF 0.43
+        상한 20%  통과 16건 PF 0.71 / 탈락 22건 PF 0.39
+        상한 30%  통과 23건 PF 0.72 / 탈락 15건 PF 0.28
+        상한 40%  통과 27건 PF 0.64 / 탈락 11건 PF 0.26
+
+    네 임계 모두 통과>탈락이고 방향이 단조라 단일 최적점 과적합 위험이 낮다.
+    탈락 15건 중 10건이 손실이며 상위 손실이 고르게 분포한다(한두 건 쏠림 아님).
+
+    교차검증: OHLCV 1,200종목의 MA20 지지반등 패턴 41,377건에서도 20일 모멘텀이
+    높을수록 기대값이 단조 악화했다(<10% -1.04% / 30~50% -2.35% / 50%+ -2.66%).
+    서로 독립인 두 데이터가 같은 방향을 가리킨다.
+
+    ★한계★
+    - 존3 표본 38건. 전후반 분할 시 통과군 PF 1.06 → 0.53 으로 약화한다
+      (탈락군은 0.27 → 0.29 로 안정이라 분리 자체는 유지).
+    - **f_zone(n=7)은 역전**한다(통과 PF 0.42 / 탈락 1.06). 표본이 작아 판단 보류이며
+      f_zone 에 적용하려면 별도 검증이 필요하다. 기여는 gold_zone 이 대부분이다.
+    - 네이버 카페 매매일지 45,547건 본문에서 타점 패턴별 익절/손절 동반비는
+      1.05~1.21 로 유의한 차이가 없었다 — 일지는 이 게이트의 근거가 **아니다**.
+      다만 '이평지지'(1.05)·'돌파'(1.08)가 최하위인 점은 위 측정과 방향이 같다.
+
+    데이터 부족(21봉 미만)은 **차단하지 않는다**(fail-open) — 조회 실패가 매매를
+    통째로 멈추는 사고를 막는다. 추세 게이트와 같은 규약이다.
+    """
+    if cfg.max_mom20_pct <= 0:
+        return False, ""
+    if len(candles) < 21:
+        return False, ""
+    now = _close(candles[-1])
+    past = _close(candles[-21])
+    if now is None or past is None or past <= 0:
+        return False, ""
+    mom = (now / past - 1.0) * 100.0
+    # 경계값은 통과시킨다 — 부동소수점 오차로 상한과 같은 값이 차단되지 않게 1e-9 여유.
+    if mom > cfg.max_mom20_pct + 1e-9:
+        return True, f"overext:20일 모멘텀 {mom:+.2f}% > 상한 +{cfg.max_mom20_pct:.2f}%"
+    return False, ""
+
+
 def evaluate_zone_gates(
     strategy_id: str,
     symbol: str,
@@ -177,6 +230,7 @@ def evaluate_zone_gates(
     for blocked, reason in (
         evaluate_trend_gate(candles, cfg),
         evaluate_reentry_gate(symbol, prior_symbols, cfg),
+        evaluate_momentum_gate(candles, cfg),
     ):
         if blocked:
             reasons.append(reason)
@@ -187,5 +241,6 @@ def evaluate_zone_gates(
 
 __all__ = [
     "ZONE_STRATEGIES", "ZoneGateConfig", "config_from_env", "is_zone_strategy",
-    "evaluate_trend_gate", "evaluate_reentry_gate", "evaluate_zone_gates",
+    "evaluate_trend_gate", "evaluate_reentry_gate", "evaluate_momentum_gate",
+    "evaluate_zone_gates",
 ]
