@@ -72,6 +72,10 @@ from backend.core.strategy.ai_swing_factor_gate import (  # noqa: E402
     FactorGateConfig,
     evaluate_factor_gate,
 )
+from backend.core.strategy.dante_entry import (
+    config_from_env as _dante_config_from_env,
+    evaluate_breakout as _dante_evaluate_breakout,
+)
 from backend.core.strategy.zone_entry_gates import (
     config_from_env as _zone_gate_config_from_env,
     evaluate_zone_gates as _evaluate_zone_gates,
@@ -1794,6 +1798,8 @@ _DAEMON_TRAP = TrapGuardConfig(
 #   활성화: BARRO_ZONE_TREND_GATE_ENABLED / _REENTRY_GUARD_ENABLED (+ _SHADOW=1 권장)
 #   설계·근거: backend/core/strategy/zone_entry_gates.py docstring
 _ZONE_GATES = _zone_gate_config_from_env()
+# 역매공파 파란점선 — default-OFF. 미설정 시 enabled=False 로 관측조차 하지 않는다.
+_DANTE_CFG = _dante_config_from_env()
 _AI_SWING_FACTOR_GATE = FactorGateConfig.from_env()
 _AI_SWING_OPEN_ENTRY = OpenEntryConfig.from_env()
 
@@ -2345,6 +2351,22 @@ async def _scan_and_buy(
             # [2026-09-22] 존 진입 게이트(정배열·재진입) — ★default-OFF★.
             #   플래그 전부 미설정 → any_enabled()=False → 평가 자체를 건너뛴다(동작 동일).
             #   평가 실패는 통과로 처리한다(fail-open) — 게이트가 매수를 멈추면 안 된다.
+            # [2026-11-18] 역매공파 파란점선 SHADOW 관측 — ★주문 없음★.
+            #   BARRO_DANTE_ENABLED 미설정이면 evaluate_breakout 이 즉시
+            #   '비활성' 을 돌려주므로 로그조차 남지 않는다(라이브 무영향, §2 S3).
+            #   ★한계★ 후보 유니버스는 존3 전략 기준 상위 N 종목이다. 여기서 보이는
+            #   신호는 전수가 아니라 그 교집합이므로, 시뮬(전종목 하루 평균 14건)과
+            #   빈도를 직접 비교하면 안 된다. 진입 배선은 Phase 2 이후 사용자 지시로만.
+            try:
+                _dsig = _dante_evaluate_breakout(candles, _DANTE_CFG)
+                if _dsig.signal:
+                    ts_d = _now_kst().strftime("%H:%M:%S")
+                    print(
+                        f"  [{ts_d}][SHADOW-DANTE] {c.symbol} {c.name:<14}"
+                        f" — {_dsig.reason} [관측·미진입]"
+                    )
+            except Exception as exc:  # noqa: BLE001 — 관측 실패가 매수를 막으면 안 된다
+                print(f"  [SHADOW-DANTE] {c.symbol} 평가 실패({type(exc).__name__}) — 무시")
             if _ZONE_GATES.any_enabled():
                 try:
                     _zb, _zr = _evaluate_zone_gates(
