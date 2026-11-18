@@ -275,6 +275,32 @@ STRATEGY_EXIT_PROFILES: dict[str, dict] = {
         "min_hold_days": _AI_SWING_PARAMS.min_hold_days,
         "max_hold_days": _AI_SWING_PARAMS.max_hold_days,
     },
+    # 역매공파 파란점선(dante) — 큰 익절·긴 보유가 전략의 본질이다.
+    # dante 포지션(strategy_id=dante_v1)이 생겨야 매칭되고, 진입 자체가
+    # BARRO_DANTE_ENABLED default-OFF 라 머지만으로는 inert 다(§2 S3).
+    #
+    # ★부분익절·트레일링·본전잠금을 모두 끈 것은 의도다★
+    #   2026-11-16 실측(신호 6,290건, 왕복비용 0.891%p 차감): TP +35/SL -7/20일
+    #   기대값 +0.91% · PF 1.38. 익절을 +10% 로 줄이면 **-0.58%** 로 뒤집힌다.
+    #   청산 분포가 SL 67% / TP 16% 라 수익 전체가 소수의 +35% 건에서 나오므로,
+    #   중간 청산 장치를 붙이면 그 꼬리를 잘라 엣지가 사라진다. 임계를 999 로 둔
+    #   이유는 미지정 시 resolve_policy() 가 base ExitPolicy 값(부분익절 등)을
+    #   그대로 물려주기 때문이다 — 끄려면 명시적으로 도달 불가 값을 줘야 한다.
+    #   tightened_sl 을 SL 과 같게 둔 것도 같은 이유(기간 경과 강화 미발동).
+    # 근거: backend/core/strategy/dante_entry.py docstring
+    "dante": {
+        "stop_loss_pct": _dec_env("BARRO_DANTE_SL_PCT", "-7.0"),
+        "take_profit_pct": _dec_env("BARRO_DANTE_TP_PCT", "35.0"),
+        "partial_tp_pct": Decimal("999"),
+        "partial_tp_ratio": Decimal("0"),
+        "trailing_start_pct": Decimal("999"),
+        "trailing_offset_pct": Decimal("999"),
+        "breakeven_trigger_pct": Decimal("999"),
+        "tightened_sl_pct": _dec_env("BARRO_DANTE_SL_PCT", "-7.0"),
+        "short_term_high_min_pct": Decimal("999"),
+        "min_hold_days": 1,
+        "max_hold_days": int(os.environ.get("BARRO_DANTE_MAX_HOLD_DAYS", "20") or 20),
+    },
 }
 
 
